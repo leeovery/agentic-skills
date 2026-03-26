@@ -48,6 +48,15 @@ npx agntc@latest update
 
 See [agntc](https://github.com/leeovery/agntc) for more details.
 
+### Vercel Skills CLI
+
+Also compatible with the [Vercel skills](https://github.com/vercel-labs/skills) CLI:
+
+```bash
+npx skills add leeovery/agentic-skills/laravel
+npx skills add leeovery/agentic-skills/nuxt
+```
+
 ## Contributing
 
 Contributions are welcome! Whether it's:
