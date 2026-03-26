@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# =============================================================================
+# Configuration - adjust these for your project
+# =============================================================================
+
+# Version strategy: "file", "embedded", or "none"
+#   file     - version stored in plain text file (just the version number)
+#   embedded - version embedded in source file as RELEASE_VERSION="x.y.z"
+#   none     - tag-only, no version file to update
+VERSION_STRATEGY="none"
+
+# Path to version file (used by "file" and "embedded" strategies)
+VERSION_FILE=""
+
+# =============================================================================
+
+# Get the script directory
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" > /dev/null 2>&1 && pwd)"
+readonly script_dir
+
+# Get the Git repository root directory
+dir="$(git rev-parse --show-toplevel 2> /dev/null || echo "$script_dir")"
+readonly dir
+
+cd "$dir" || exit
+
+usage() {
+    cat << EOF
+Usage: $(basename "$0") [-M|--major|-m|--minor|-p|--patch] [-d|--dry-run] [--no-ai] [-h|--help]
+
+Options:
+  -M, --major      Increment major version
+  -m, --minor      Increment minor version
+  -p, --patch      Increment patch version (default if no option specified)
+  -d, --dry-run    Dry run (don't make any changes, shows AI-generated message)
+  --no-ai          Skip AI commit message generation
+  -h, --help       Display this help message
+
+Examples:
+  $(basename "$0")       Create a patch release (default)
+  $(basename "$0") -m    Create a minor release
+  $(basename "$0") -d    Preview release without making changes
+
+Requires Claude CLI for AI-powered release notes (falls back to simple message).
+EOF
+}
+
+semver_increment() {
+    local -a parts
+    IFS='.' read -ra parts <<< "$1"
+
+    if [ ${#parts[@]} -ne 3 ]; then
+        echo "Semantic versions should have 3 components (for example: 1.2.3)" >&2
+        return 1
+    fi
+
+    case $2 in
+        major)
+            ((parts[0]++))
+            parts[1]=0
+            parts[2]=0
+            ;;
+        minor)
+            ((parts[1]++))
+            parts[2]=0
+            ;;
+        patch) ((parts[2]++)) ;;
+        *)
+            echo "Invalid increment type. Use major, minor, or patch." >&2
+            return 1
+            ;;
+    esac
+
+    echo "${parts[0]}.${parts[1]}.${parts[2]}"
+}
+
+get_current_version() {
+    local version=""
+
+    case "$VERSION_STRATEGY" in
+        file)
+            # Read version from plain text file
+            if [[ -f "$VERSION_FILE" ]]; then
+                version=$(tr -d '[:space:]' < "$VERSION_FILE")
+            fi
+            ;;
+        embedded)
+            # Extract version from RELEASE_VERSION="x.y.z" in source file
+            if [[ -f "$VERSION_FILE" ]]; then
+                version=$(grep -oE '^RELEASE_VERSION="[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_FILE" 2>/dev/null | sed 's/RELEASE_VERSION="//;s/"$//' || echo "")
+            fi
+            ;;
+        none)
+            # Tag-only: use git tags
+            version=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "")
+            ;;
+    esac
+
+    # Validate version format, fallback to 0.0.0
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        version="0.0.0"
+    fi
+
+    echo "$version"
+}
+
+update_version_file() {
+    local new_version=$1
+
+    case "$VERSION_STRATEGY" in
+        file)
+            echo "$new_version" > "$VERSION_FILE"
+            echo "Updated $VERSION_FILE to $new_version"
+            ;;
+        embedded)
+            sed -i.bak 's/^RELEASE_VERSION=".*"$/RELEASE_VERSION="'"$new_version"'"/' "$VERSION_FILE"
+            rm -f "${VERSION_FILE}.bak"
+            echo "Updated RELEASE_VERSION in $VERSION_FILE to $new_version"
+            ;;
+        none)
+            echo "No version file to update (tag-only strategy)"
+            ;;
+        *)
+            echo "Error: Unknown VERSION_STRATEGY '$VERSION_STRATEGY'" >&2
+            exit 1
+            ;;
+    esac
+}
+
+# Generate release notes using Claude AI
+# Args: version, base_ref, target_ref (defaults to HEAD)
+# Returns: generated message or empty string on failure
+generate_release_notes() {
+    local version="$1"
+    local base_ref="$2"
+    local target_ref="${3:-HEAD}"
+
+    # Check if Claude CLI is available
+    if ! command -v claude &> /dev/null; then
+        return 1
+    fi
+
+    # Get actual code changes for AI analysis
+    local files_changed changes_summary code_diff
+    files_changed=$(git diff "$base_ref..$target_ref" --name-status 2>/dev/null || echo "")
+    changes_summary=$(git diff "$base_ref..$target_ref" --stat 2>/dev/null || echo "")
+
+    # Check if diff is too large (limit to 25000 lines)
+    local max_diff_lines=25000
+    local diff_line_count
+    diff_line_count=$(git diff "$base_ref..$target_ref" 2>/dev/null | wc -l)
+
+    if [[ "$diff_line_count" -gt "$max_diff_lines" ]]; then
+        echo "⚠️  Diff too large for AI analysis ($diff_line_count lines)" >&2
+        return 1
+    fi
+
+    code_diff=$(git diff "$base_ref..$target_ref" 2>/dev/null || echo "")
+
+    # Build prompt for Claude
+    local prompt="Generate a release commit message for version v${version}.
+
+## Files Changed:
+${files_changed}
+
+## Change Statistics:
+${changes_summary}
+
+## Actual Code Diff:
+${code_diff}
+
+## Commit Format
+
+First line: \`🔖 Release v${version}\`
+Then blank line, then brief technical summary as bullet points.
+
+**Rules:**
+
+- Summarize the meaningful technical changes (not every file/function)
+- This is for the developer to remember what this release contains
+- Number of bullet points should match release scope - be terse
+- Be technically accurate but concise
+- Base on ACTUAL CODE CHANGES, ignore 'wip' commit messages
+
+## Example:
+
+🔖 Release v1.2.3
+
+- Add AI-powered release notes generation
+- Fix config validation edge case
+- Refactor deploy workflow error handling
+
+## Notes
+
+- NO Claude signature
+- Return ONLY the commit message
+- No explanations
+
+Output:"
+
+    # Write prompt to temp file to avoid shell escaping issues
+    local prompt_file
+    prompt_file=$(mktemp)
+    echo "$prompt" > "$prompt_file"
+
+    # Call Claude with timeout (pipe content, don't pass as argument - avoids CLI hangs)
+    local claude_output
+    if claude_output=$(timeout 60 bash -c "cat '$prompt_file' | claude -p" 2>/dev/null); then
+        rm -f "$prompt_file"
+        echo "$claude_output"
+    else
+        rm -f "$prompt_file"
+        return 1
+    fi
+}
+
+# Wrapper for new releases - gets base ref and handles fallback
+generate_release_commit_message() {
+    local new_version="$1"
+    local last_tag="$2"
+    local last_tag_no_v="${last_tag#v}"  # Strip v prefix if present
+
+    # Find the matching tag (try both with and without v prefix)
+    local base_ref=""
+    if [[ -n "$last_tag" ]] && git rev-parse "v${last_tag_no_v}" &>/dev/null; then
+        base_ref="v${last_tag_no_v}"
+    elif [[ -n "$last_tag_no_v" ]] && git rev-parse "$last_tag_no_v" &>/dev/null; then
+        base_ref="$last_tag_no_v"
+    fi
+
+    # If no matching tag found, skip AI (can't reliably diff with parallel version lines)
+    if [[ -z "$base_ref" ]]; then
+        echo "⚠️  No tag found for v${last_tag_no_v}, skipping AI generation" >&2
+        echo "🔖 Release v${new_version}"
+        return
+    fi
+
+    local message
+    if message=$(generate_release_notes "$new_version" "$base_ref" "HEAD"); then
+        echo "$message"
+    else
+        echo "🔖 Release v${new_version}"
+    fi
+}
+
+perform_release() {
+    local new_version=$1
+    local current_version=$2
+    local skip_ai=${3:-false}
+
+    if [ "$(git status --porcelain)" ]; then
+        echo "Error: The git working directory is dirty (has uncommitted changes)."
+        echo "Please commit or stash your changes and run the script again to release."
+        exit 1
+    fi
+
+    # Generate commit message
+    local commit_message
+    if $skip_ai; then
+        commit_message="🔖 Release v${new_version}"
+    else
+        echo "Generating release notes..."
+        commit_message=$(generate_release_commit_message "$new_version" "v${current_version}")
+    fi
+
+    # Update version file and commit
+    update_version_file "$new_version"
+
+    if [[ "$VERSION_STRATEGY" != "none" ]]; then
+        git add "$VERSION_FILE"
+        git commit -m "$commit_message"
+    fi
+
+    # Create annotated tag with the same message
+    git tag -a "v${new_version}" -m "$commit_message"
+
+    # Push commit and tag atomically
+    git push --atomic origin HEAD "v${new_version}"
+
+    echo -e "\n"
+    echo "✅ Released v${new_version}"
+}
+
+main() {
+    local semver_type="patch"
+    local dry_run=false
+    local skip_ai=false
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -M | --major) semver_type="major" ;;
+            -m | --minor) semver_type="minor" ;;
+            -p | --patch) semver_type="patch" ;;
+            -d | --dry-run) dry_run=true ;;
+            --no-ai) skip_ai=true ;;
+            -h | --help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1" >&2
+                usage
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    local current_version
+    current_version=$(get_current_version)
+
+    local new_version
+    new_version=$(semver_increment "${current_version}" "${semver_type}")
+
+    echo -e "\nRelease"
+    echo " - this will be a ${semver_type} increment"
+    echo " - the current version is v${current_version}"
+    echo " - the new version will be v${new_version}"
+
+    if $dry_run; then
+        echo -e "\nDRY RUN: No changes will be made."
+        if ! $skip_ai; then
+            echo -e "\nGenerating commit message preview..."
+            local preview_message
+            preview_message=$(generate_release_commit_message "$new_version" "v${current_version}")
+            echo -e "\n--- Commit Message Preview ---"
+            echo "$preview_message"
+            echo "--- End Preview ---"
+        fi
+    else
+        echo -e "\nThis will:"
+        if [[ "$VERSION_STRATEGY" != "none" ]]; then
+            echo " 1. Update version in $VERSION_FILE"
+            echo " 2. Create a new commit"
+            echo " 3. Create git tag v${new_version}"
+            echo -e " 4. Push changes\n"
+        else
+            echo " 1. Create git tag v${new_version}"
+            echo -e " 2. Push tag\n"
+        fi
+
+        echo -n "Proceed? [Y/n] "
+        read -r perform_update
+        if [[ $perform_update =~ ^[Nn]$ ]]; then
+            echo -e "\nABORTED"
+        else
+            perform_release "$new_version" "$current_version" "$skip_ai"
+        fi
+    fi
+}
+
+main "$@"
