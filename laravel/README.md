@@ -6,6 +6,18 @@ Opinionated Laravel development patterns and practices refined over **20 years i
 
 **This is a work in progress.** As I use these skills in real projects, I'm continuously refining them. Expect updates as patterns evolve and edge cases reveal themselves.
 
+## Installation
+
+**agntc** (recommended):
+```bash
+npx agntc@latest add leeovery/agentic-skills/laravel
+```
+
+**Vercel Skills CLI:**
+```bash
+npx skills add leeovery/agentic-skills/laravel
+```
+
 ## Skills
 
 ### Foundation
