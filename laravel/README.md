@@ -11,6 +11,7 @@ Opinionated Laravel development patterns and practices refined over **20 years i
 **agntc** (recommended):
 ```bash
 npx agntc@latest add leeovery/agentic-skills/laravel
+npx agntc@latest remove leeovery/agentic-skills/laravel
 ```
 
 **Vercel Skills CLI:**

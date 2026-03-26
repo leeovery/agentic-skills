@@ -11,6 +11,7 @@ Opinionated Nuxt 4 + Vue 3 development patterns refined across multiple producti
 **agntc** (recommended):
 ```bash
 npx agntc@latest add leeovery/agentic-skills/nuxt
+npx agntc@latest remove leeovery/agentic-skills/nuxt
 ```
 
 **Vercel Skills CLI:**

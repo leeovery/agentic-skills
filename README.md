@@ -46,6 +46,12 @@ Update anytime:
 npx agntc@latest update
 ```
 
+Remove:
+
+```bash
+npx agntc@latest remove leeovery/agentic-skills/laravel
+```
+
 See [agntc](https://github.com/leeovery/agntc) for more details.
 
 ### Vercel Skills CLI
