@@ -1,6 +1,6 @@
 ---
 name: laravel-packages
-description: Package development and extraction of reusable code. Use when working with package development, code reusability, or when user mentions packages, composer packages, extract package, reusable code, package development.
+description: Package development and extraction of reusable code. Use when creating, extracting, or modifying composer packages.
 ---
 
 # Laravel Packages

@@ -1,6 +1,6 @@
 ---
 name: laravel-architecture
-description: High-level architecture decisions, patterns, and project structure. Use when user asks about architecture decisions, project structure, pattern selection, or mentions how to organize, which pattern to use, best practices, architecture.
+description: High-level architecture decisions, patterns, and project structure. Use when deciding which pattern to use, organizing code, or making structural decisions.
 ---
 
 # Laravel Architecture

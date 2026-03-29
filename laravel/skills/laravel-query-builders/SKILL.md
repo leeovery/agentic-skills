@@ -1,6 +1,6 @@
 ---
 name: laravel-query-builders
-description: Custom query builders for type-safe, composable database queries. Use when working with database queries, query scoping, or when user mentions query builders, custom query builder, query objects, query scopes, database queries.
+description: Custom query builders for type-safe, composable database queries. Use when creating or modifying query builders, query scopes, or complex database queries.
 ---
 
 # Laravel Query Builders
@@ -163,7 +163,7 @@ class OrderBuilder extends Builder
 
 ## Register Builder in Model
 
-### Preferred: PHP Attribute (Laravel 11+)
+### Preferred: PHP Attribute (Laravel 12+)
 
 ```php
 use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
@@ -175,21 +175,9 @@ class Order extends Model
 }
 ```
 
-### Alternative: Static Property
+### Fallback: Method Override (pre-Laravel 12)
 
 ```php
-class Order extends Model
-{
-    protected static string $eloquentBuilder = OrderBuilder::class;
-
-    // ...
-}
-```
-
-### Deprecated: Method Override
-
-```php
-// ❌ Don't use this approach anymore
 public function newEloquentBuilder($query): OrderBuilder
 {
     return new OrderBuilder($query);
@@ -318,13 +306,3 @@ app/Builders/
     └── HasStatus.php
 ```
 
-## Summary
-
-**Custom query builders:**
-- Provide better IDE support than scopes
-- Enable type-safe nested queries
-- Keep query logic organized
-- Are easier to test
-- Support method chaining
-
-**Never use local scopes** - always use custom builders.

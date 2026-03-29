@@ -435,7 +435,7 @@ Calendar::factory()->accepted()->create();
 6. **Every action must be transactional**
 7. **Every test uses factories, not hardcoded data**
 8. **80%+ test coverage on critical paths**
-9. **PHPStan level 8 with zero errors**
+9. **PHPStan level 5+ with zero errors** (increase per-project as practical, up to 8)
 10. **Zero Laravel Pint violations**
 
 ### Architecture Tests Enforce Standards

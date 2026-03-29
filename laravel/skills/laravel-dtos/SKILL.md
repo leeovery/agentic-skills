@@ -1,6 +1,6 @@
 ---
 name: laravel-dtos
-description: Data Transfer Objects using Spatie Laravel Data. Use when handling data transfer, API requests/responses, or when user mentions DTOs, data objects, Spatie Data, formatters, transformers, or structured data handling.
+description: Data Transfer Objects using Spatie Laravel Data. Use when creating or modifying DTOs, data objects, formatters, transformers, or structured data handling.
 ---
 
 # Laravel DTOs

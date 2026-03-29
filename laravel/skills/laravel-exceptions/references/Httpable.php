@@ -8,7 +8,7 @@ trait Httpable
 {
     public function getStatusCode(): int
     {
-        return $this->getCode();
+        return $this->code ?? 500;
     }
 
     public function getHeaders(): array

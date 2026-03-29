@@ -1,6 +1,6 @@
 ---
 name: laravel-controllers
-description: Thin HTTP layer controllers. Controllers contain zero domain logic, only HTTP concerns. Use when working with controllers, HTTP layer, web vs API patterns, or when user mentions controllers, routes, HTTP responses.
+description: Thin HTTP-layer controllers with zero domain logic. Use when creating or modifying controllers, handling HTTP concerns, or structuring web vs API layers.
 ---
 
 # Laravel Controllers
@@ -274,44 +274,6 @@ Route::post('/orders', [OrdersController::class, 'store'])
     ->can('create', Order::class);
 ```
 
-## Response Types
-
-### JSON Resource
-
-```php
-public function show(Order $order): OrderResource
-{
-    return OrderResource::make($order);
-}
-```
-
-### Collection Resource
-
-```php
-public function index(OrderIndexQuery $query): AnonymousResourceCollection
-{
-    return OrderResource::collection($query->jsonPaginate());
-}
-```
-
-### 201 Created
-
-```php
-return OrderResource::make($order)->response()->setStatusCode(201);
-```
-
-### 204 No Content
-
-```php
-return response()->noContent();
-```
-
-### Redirect
-
-```php
-return redirect()->route('orders.show', $order);
-```
-
 ## Route Model Binding
 
 **Use route model binding** for cleaner controllers:
@@ -415,12 +377,3 @@ public function index(OrderIndexQuery $query): AnonymousResourceCollection
 }
 ```
 
-## Summary
-
-**Controllers are HTTP adapters:**
-1. Receive HTTP request
-2. Validate via Form Request
-3. Call Action (with DTO if needed)
-4. Return HTTP response via Resource
-
-**Every line of domain logic belongs in an Action, not a Controller.**

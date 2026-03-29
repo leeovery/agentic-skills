@@ -1,6 +1,6 @@
 ---
 name: laravel-services
-description: Service layer for external API integration using manager pattern and Saloon. Use when working with external APIs, third-party services, or when user mentions services, external API, Saloon, API integration, manager pattern.
+description: Service layer for external API integration using manager pattern and Saloon. Use when integrating external APIs or third-party services.
 ---
 
 # Laravel Services
@@ -331,13 +331,3 @@ class NullDriver implements PaymentDriver
 }
 ```
 
-## Summary
-
-**Service layer provides:**
-- Manager pattern for multiple drivers
-- Saloon for HTTP requests
-- Null drivers for testing
-- Clean abstraction over external services
-- Swappable implementations
-
-**Use for external API integrations only.**

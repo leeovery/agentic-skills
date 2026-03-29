@@ -35,12 +35,11 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->bootRouteModelBindings();
         $this->bootMorphMaps();
         $this->bootModelConfig();
-        $this->bootRateLimiters();
+        $this->bootDebug();
         $this->bootDates();
-        $this->bootGateChecks();
+        $this->bootRateLimiters();
     }
 
     // Private methods below...
@@ -59,16 +58,18 @@ private function bootModelConfig(): void
     Model::preventLazyLoading($this->app->isLocal());
     Model::handleLazyLoadingViolationUsing(function ($model, $relation): void {
         $class = $model::class;
-        info("Lazy loaded [{$relation}] on [{$class}]");
+        ray("[LAZY LOAD] Loaded [{$relation}] on model [{$class}] with ID [{$model->id}].")
+            ->green();
+        ray()->backtrace()->hide()->green();
     });
 }
 ```
 
-**Why this configuration?**
+**Why this configuration:**
 - `Model::unguard()` - No need for `$fillable`/`$guarded` arrays
 - `automaticallyEagerLoadRelationships()` - Auto-eager load when accessed
 - `preventLazyLoading()` - Catch N+1 queries in development
-- `handleLazyLoadingViolationUsing()` - Log violations instead of throwing
+- `handleLazyLoadingViolationUsing()` - Surface violations in Ray instead of throwing
 
 ## Factory Resolver for Data Classes
 
@@ -113,67 +114,7 @@ database/
 
 **See [DTOs](../../laravel-dtos/SKILL.md) for complete factory examples.**
 
-## Route Model Bindings
-
-**Define custom route model bindings:**
-
-```php
-use Illuminate\Support\Facades\Route;
-
-private function bootRouteModelBindings(): void
-{
-    // Simple binding
-    Route::bind('order', fn (string $value) => Order::findOrFail($value));
-
-    // Using query objects for complex logic
-    Route::bind(
-        'order',
-        fn (string|int $value) => new OrderShowQuery($value)->firstOrFail()
-    );
-
-    // With additional constraints
-    Route::bind('activeOrder', function (string $value) {
-        return Order::query()
-            ->where('id', $value)
-            ->whereNotNull('completed_at')
-            ->firstOrFail();
-    });
-}
-```
-
-**Usage in routes:**
-
-```php
-Route::get('/orders/{order}', [OrderController::class, 'show']);
-```
-
-### Advanced: Conditional Route Binding
-
-For complex scenarios where different routes need different resolution strategies for the same parameter, use the **ConditionalRouteBinder** pattern.
-
-**Quick example:**
-
-```php
-use Fabric\Support\ConditionalRouteBinder;
-
-private function bootRouteModelBindings(): void
-{
-    ConditionalRouteBinder::registerMacro();
-
-    Route::bindUsing('order')
-        ->forRoute('orders.show', fn (string $value) => Order::findOrFail($value))
-        ->forRoute('orders.edit', fn (string $value) => Order::where('id', $value)->where('editable', true)->firstOrFail())
-        ->forRoute('admin.*', fn (string $value) => Order::withTrashed()->findOrFail($value))
-        ->otherwise(fn (string $value) => Order::findOrFail($value));
-}
-```
-
-**See [route-binding.md](../../laravel-routing/references/route-binding.md) for:**
-- Complete ConditionalRouteBinder class implementation
-- Multiple usage examples (admin routes, eager loading, multi-tenancy)
-- Query object integration
-- Testing strategies
-- When to use conditional vs simple binding
+See [route-binding.md](../../laravel-routing/references/route-binding.md) for route model binding configuration including the ConditionalRouteBinder pattern.
 
 ## Morph Maps (Required)
 
@@ -307,29 +248,6 @@ $tomorrow = $date->addDay(); // MODIFIES $date
 // $date is now tomorrow!
 ```
 
-## Gate Checks
-
-**Define global authorization logic:**
-
-```php
-use Illuminate\Support\Facades\Gate;
-
-private function bootGateChecks(): void
-{
-    Gate::before(function (User $user, string $ability) {
-        // Super admins bypass all gates
-        if ($user->isSuperAdmin()) {
-            return true;
-        }
-
-        // Suspended users can't do anything
-        if ($user->isSuspended()) {
-            return false;
-        }
-    });
-}
-```
-
 ## Debug Configuration (Development Only)
 
 **Configure debugging tools:**
@@ -337,15 +255,16 @@ private function bootGateChecks(): void
 ```php
 private function bootDebug(): void
 {
-    if (! $this->app->isLocal() || $this->app->runningInConsole()) {
-        return;
+    if ($this->app->isLocal() && ! $this->app->runningInConsole()) {
+        ray()->label('Slow query detected')->orange()->showSlowQueries(100);
+        ray()->label('Duplicate query detected')->orange()->showDuplicateQueries();
     }
-
-    // Ray debugging
-    ray()->showQueries()->orange();
-    ray()->label('Slow query')->red()->showSlowQueries(200);
-    ray()->label('Duplicate query')->red()->showDuplicateQueries();
 }
+```
+
+**Optional — show all queries:**
+```php
+ray()->showQueries()->orange();
 ```
 
 ## Complete Example
@@ -357,19 +276,17 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
-use App\Models\Customer;
 use App\Models\Order;
-use App\Models\Product;
+use App\Models\User;
 use Carbon\CarbonImmutable;
+use Database\Faker\CarbonImmutableProvider;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Fortify;
@@ -383,12 +300,11 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->bootRouteModelBindings();
         $this->bootMorphMaps();
         $this->bootModelConfig();
-        $this->bootRateLimiters();
+        $this->bootDebug();
         $this->bootDates();
-        $this->bootGateChecks();
+        $this->bootRateLimiters();
     }
 
     private function registerModelFactoryResolver(): void
@@ -402,35 +318,46 @@ class AppServiceProvider extends ServiceProvider
         });
     }
 
-    private function bootRouteModelBindings(): void
-    {
-        Route::bind('order', fn (string $value) => Order::findOrFail($value));
-    }
-
     private function bootMorphMaps(): void
     {
         Relation::enforceMorphMap([
-            'order' => Order::class,
-            'customer' => Customer::class,
-            'product' => Product::class,
+            'User' => User::class,
+            'Order' => Order::class,
         ]);
     }
 
     private function bootModelConfig(): void
     {
         Model::unguard();
-        Model::automaticallyEagerLoadRelationships();
         Model::preventLazyLoading($this->app->isLocal());
         Model::handleLazyLoadingViolationUsing(function ($model, $relation): void {
             $class = $model::class;
-            info("Lazy loaded [{$relation}] on [{$class}]");
+            ray("[LAZY LOAD] Loaded [{$relation}] on model [{$class}] with ID [{$model->id}].")
+                ->green();
+            ray()->backtrace()->hide()->green();
         });
+    }
+
+    private function bootDebug(): void
+    {
+        if ($this->app->isLocal() && ! $this->app->runningInConsole()) {
+            ray()->label('Slow query detected')->orange()->showSlowQueries(100);
+            ray()->label('Duplicate query detected')->orange()->showDuplicateQueries();
+        }
+    }
+
+    private function bootDates(): void
+    {
+        Date::use(CarbonImmutable::class);
+        if (function_exists('fake')) {
+            fake()->addProvider(new CarbonImmutableProvider(fake()));
+        }
     }
 
     private function bootRateLimiters(): void
     {
         RateLimiter::for('login', function (Request $request) {
-            if (app()->isLocal()) {
+            if (environment('local', 'dev')) {
                 return Limit::none();
             }
 
@@ -442,26 +369,12 @@ class AppServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('api', function (Request $request) {
-            if (app()->isLocal()) {
+            if (environment('local', 'dev')) {
                 return Limit::none();
             }
 
             return Limit::perMinute(120)
                 ->by($request->user()?->id ?: $request->ip());
-        });
-    }
-
-    private function bootDates(): void
-    {
-        Date::use(CarbonImmutable::class);
-    }
-
-    private function bootGateChecks(): void
-    {
-        Gate::before(function (User $user, string $ability) {
-            if ($user->isSuperAdmin()) {
-                return true;
-            }
         });
     }
 }
@@ -475,7 +388,7 @@ class AppServiceProvider extends ServiceProvider
 // ✅ Good - organized by concern
 private function bootModelConfig(): void { }
 private function bootMorphMaps(): void { }
-private function bootRouteModelBindings(): void { }
+private function bootDebug(): void { }
 
 // ❌ Bad - mixed concerns
 private function bootModels(): void
@@ -512,22 +425,3 @@ private function setup(): void { }
 private function configure(): void { }
 ```
 
-## Summary
-
-**Service Providers should:**
-- Use named methods for organization
-- Call `Model::unguard()` in boot method
-- Configure factory resolver for Data classes
-- Define morph maps for polymorphic relations
-- Keep boot() and register() methods trim
-- Group related configurations together
-
-**Service Providers should NOT:**
-- Have long boot() or register() methods
-- Mix unrelated configurations in one method
-- Contain business logic (use Actions)
-- Be overly complex (split into multiple providers if needed)
-
-**See also:**
-- [Models](../../laravel-models/SKILL.md) - Model unguard pattern
-- [DTOs](../../laravel-dtos/SKILL.md) - Data factory setup

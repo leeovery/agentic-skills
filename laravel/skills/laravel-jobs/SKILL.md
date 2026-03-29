@@ -1,6 +1,6 @@
 ---
 name: laravel-jobs
-description: Background jobs and event listeners for async processing. Use when working with queued jobs, background processing, events, or when user mentions jobs, queues, listeners, events, async processing.
+description: Background jobs and event listeners for async processing. Use when creating or modifying jobs, queues, listeners, or event-driven workflows.
 ---
 
 # Laravel Jobs

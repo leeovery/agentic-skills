@@ -1,6 +1,6 @@
 ---
 name: laravel-value-objects
-description: Immutable value objects for domain values. Use when working with domain values, immutable objects, or when user mentions value objects, immutable values, domain values, money objects, coordinate objects.
+description: Immutable value objects for domain values. Use when creating or modifying value objects like money, coordinates, or other domain primitives.
 ---
 
 # Laravel Value Objects

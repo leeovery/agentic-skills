@@ -1,6 +1,6 @@
 ---
 name: laravel-multi-tenancy
-description: Multi-tenant application architecture patterns. Use when working with multi-tenant systems, tenant isolation, or when user mentions multi-tenancy, tenants, tenant scoping, tenant isolation, multi-tenant.
+description: Multi-tenant application architecture patterns. Use when working with tenant isolation, tenant scoping, or multi-tenant systems.
 ---
 
 # Laravel Multi-Tenancy
@@ -428,16 +428,7 @@ Includes:
 - Pest configuration for multi-tenancy
 - Test directory structure
 
-## Summary
-
-**Multi-tenancy provides:**
-1. **Clear separation** - Central vs Tenanted namespaces
-2. **Database isolation** - Each tenant has dedicated database
-3. **Automatic scoping** - Queries automatically tenant-scoped
-4. **Context helpers** - Easy access to tenant context
-5. **Queue integration** - Jobs preserve tenant context
-
-**Best practices:**
+## Best Practices
 - Use directory structure to separate central and tenanted actions/DTOs
 - Keep models in `app/Models/` following Laravel convention
 - Always use TenantContext helper for tenant access

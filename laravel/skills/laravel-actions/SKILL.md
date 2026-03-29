@@ -1,6 +1,6 @@
 ---
 name: laravel-actions
-description: Action-oriented architecture for Laravel. Invokable classes that contain domain logic. Use when working with business logic, domain operations, or when user mentions actions, invokable classes, or needs to organize domain logic outside controllers.
+description: Action-oriented architecture for Laravel — invokable classes containing domain logic. Use when creating or modifying actions, business logic, or domain operations.
 ---
 
 # Laravel Actions

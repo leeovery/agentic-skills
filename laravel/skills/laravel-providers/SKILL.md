@@ -1,6 +1,6 @@
 ---
 name: laravel-providers
-description: Service providers, bootstrapping, and application configuration. Use when working with service providers, app configuration, bootstrapping, or when user mentions service providers, AppServiceProvider, bootstrap, booters, configuration, helpers.
+description: Service providers, bootstrapping, and application configuration. Use when modifying service providers, booters, bootstrap logic, or app-level configuration.
 ---
 
 # Laravel Providers

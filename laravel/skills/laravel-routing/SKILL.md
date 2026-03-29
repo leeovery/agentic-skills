@@ -1,6 +1,6 @@
 ---
 name: laravel-routing
-description: Route configuration, route model binding, and authorization. Use when working with routes, route binding, URL patterns, or when user mentions routing, route model binding, conditional binding, route-level authorization.
+description: Route configuration, route model binding, and authorization. Use when defining routes, configuring model binding, or setting up route-level authorization.
 ---
 
 # Laravel Routing

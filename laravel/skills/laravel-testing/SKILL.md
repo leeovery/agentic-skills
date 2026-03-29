@@ -1,6 +1,6 @@
 ---
 name: laravel-testing
-description: Comprehensive testing patterns with Pest. Use when working with tests, testing patterns, or when user mentions testing, tests, Pest, PHPUnit, mocking, factories, test patterns.
+description: Comprehensive testing patterns with Pest. Use when writing or modifying tests, mocking, factories, or test patterns.
 ---
 
 # Laravel Testing
@@ -324,7 +324,7 @@ it('handles payment failure gracefully', function () {
     Config::set('payment.default', 'failing');
 
     $order = Order::factory()->create();
-    $data = PaymentData::testFactory();
+    $data = PaymentData::testFactory()->make();
 
     expect(fn () => resolve(ProcessPaymentAction::class)($order, $data))
         ->toThrow(PaymentException::class, 'Card declined');
@@ -374,35 +374,22 @@ $calendar = Calendar::factory()->accepted()->create();
 
 ### DTO Test Factories
 
-DTOs should provide **test factories** for consistent test data:
+DTOs use the `HasTestFactory` trait with `DataTestFactory` base class — mirroring Laravel's model factory API for Data objects.
 
 ```php
-class CreateOrderData extends Data
-{
-    public function __construct(
-        public string $customerEmail,
-        public OrderStatus $status,
-        public array $items,
-    ) {}
+// Create DTO with defaults
+$data = CreateOrderData::testFactory()->make();
 
-    public static function testFactory(): self
-    {
-        return new self(
-            customerEmail: fake()->email(),
-            status: OrderStatus::Pending,
-            items: [
-                [
-                    'product_id' => Product::factory()->create()->id,
-                    'quantity' => fake()->numberBetween(1, 5),
-                ],
-            ],
-        );
-    }
-}
+// Create DTO with overrides
+$data = CreateOrderData::testFactory()->make([
+    'status' => OrderStatus::Pending,
+]);
 
-// Usage in tests
-$data = CreateOrderData::testFactory();
+// Create collection
+$items = OrderItemData::testFactory()->collect(count: 3);
 ```
+
+See [DTOs](../laravel-dtos/SKILL.md) for test factory setup and implementation.
 
 ## Testing Strategy
 
@@ -496,7 +483,7 @@ it('calculates order total', function () {
 it('sends welcome email when user registers', function () {
     Mail::fake();
 
-    $data = RegisterUserData::testFactory();
+    $data = RegisterUserData::testFactory()->make();
     $user = resolve(RegisterUserAction::class)($data);
 
     Mail::assertSent(WelcomeEmail::class, function ($mail) use ($user) {
@@ -520,7 +507,7 @@ it('sends welcome email when user registers', function () {
 ```php
 // ✅ Good - Use factories
 $user = User::factory()->create();
-$data = ProfileData::testFactory();
+$data = ProfileData::testFactory()->make();
 
 // ❌ Bad - Hardcoded data
 $data = new ProfileData(
@@ -605,65 +592,6 @@ it('rolls back transaction on failure', function () {
 });
 ```
 
-### Testing Email/Notifications
-
-```php
-use Illuminate\Support\Facades\Mail;
-
-it('sends welcome email to new user', function () {
-    Mail::fake();
-    $data = RegisterUserData::testFactory();
-
-    $user = resolve(RegisterUserAction::class)($data);
-
-    Mail::assertSent(WelcomeEmail::class, function ($mail) use ($user) {
-        return $mail->hasTo($user->email);
-    });
-});
-```
-
-### Testing Jobs
-
-```php
-use Illuminate\Support\Facades\Queue;
-
-it('dispatches job to process order', function () {
-    Queue::fake();
-    $order = Order::factory()->create();
-
-    resolve(ProcessOrderAction::class)($order);
-
-    Queue::assertPushed(ProcessOrderJob::class, function ($job) use ($order) {
-        return $job->order->id === $order->id;
-    });
-});
-```
-
-## Best Practices Summary
-
-### ✅ Do This
-
-- **Follow triple-A pattern** - Arrange, Act, Assert
-- **Use factories** for all test data
-- **Create declarative factory methods** - `Calendar::factory()->accepted()` not `['status' => 'accepted']`
-- **Test actions in isolation** - Unit test your domain logic
-- **Mock what you own** - Actions, services you control
-- **Create abstractions** when you need to mock external services
-- **Use null drivers** for external service testing
-- **Test behavior, not implementation**
-- **Keep tests simple** - One concept per test
-- **Use DTO test factories** for consistent data
-
-### ❌ Don't Do This
-
-- **Mock external libraries** - Create service layer instead
-- **Hardcode test data** - Use factories
-- **Leak database schema into tests** - Use declarative factory methods
-- **Test implementation details** - Test behavior
-- **Create brittle tests** - Too many mocks, too specific
-- **Skip factories** - Always use factories for models and DTOs
-- **Mix arrange and act** - Keep them separate
-- **Over-mock** - Use real instances when possible
 
 ## Quick Reference
 
@@ -673,7 +601,7 @@ it('dispatches job to process order', function () {
 it('does something', function () {
     // Arrange - Set up the world with declarative factories
     $model = Model::factory()->active()->create();
-    $data = Data::testFactory();
+    $data = Data::testFactory()->make();
 
     // Act - Perform the operation
     $result = resolve(Action::class)($model, $data);

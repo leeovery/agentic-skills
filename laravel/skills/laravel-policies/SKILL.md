@@ -1,6 +1,6 @@
 ---
 name: laravel-policies
-description: Authorization policies for resource access control. Use when working with authorization, permissions, access control, or when user mentions policies, authorization, permissions, can, ability checks.
+description: Authorization policies for resource access control. Use when creating or modifying policies, permissions, or ability checks.
 ---
 
 # Laravel Policies

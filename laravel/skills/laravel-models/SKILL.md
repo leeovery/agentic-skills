@@ -1,6 +1,6 @@
 ---
 name: laravel-models
-description: Eloquent model patterns and database layer. Use when working with models, database entities, Eloquent ORM, or when user mentions models, eloquent, relationships, casts, observers, database entities.
+description: Eloquent model patterns and database layer. Use when creating or modifying models, relationships, casts, or observers.
 ---
 
 # Laravel Models
@@ -20,6 +20,7 @@ Models should:
 - Define casts
 - Contain simple accessors/mutators
 - **NOT contain business logic** (that belongs in Actions)
+- **Prefer PHP attributes** over properties/methods where available (Laravel 12+ for `#[UseEloquentBuilder]`, Laravel 13+ for `#[Table]`, `#[ObservedBy]`, `#[UsePolicy]`, `#[UseFactory]`, etc.)
 
 ## Basic Model Structure
 
@@ -32,11 +33,13 @@ namespace App\Models;
 
 use App\Builders\OrderBuilder;
 use App\Enums\OrderStatus;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[UseEloquentBuilder(OrderBuilder::class)]
 class Order extends Model
 {
     use HasFactory;
@@ -47,12 +50,6 @@ class Order extends Model
             'status' => OrderStatus::class,
             'total' => 'integer',
         ];
-    }
-
-    // Custom Query Builder
-    public function newEloquentBuilder($query): OrderBuilder
-    {
-        return new OrderBuilder($query);
     }
 
     // Relationships
@@ -86,135 +83,6 @@ protected function casts(): array
 }
 ```
 
-**Available casts:**
-- `'integer'`, `'real'`, `'float'`, `'double'`
-- `'string'`, `'boolean'`
-- `'array'`, `'json'`, `'object'`, `'collection'`
-- `'date'`, `'datetime'`, `'immutable_date'`, `'immutable_datetime'`
-- `'timestamp'`
-- `'encrypted'`, `'encrypted:array'`, `'encrypted:collection'`, `'encrypted:json'`, `'encrypted:object'`
-- Custom cast classes
-- Enum classes
-- DTO classes
-
-## Relationships
-
-### BelongsTo
-
-```php
-public function user(): BelongsTo
-{
-    return $this->belongsTo(User::class);
-}
-
-public function customer(): BelongsTo
-{
-    return $this->belongsTo(Customer::class, 'customer_id', 'id');
-}
-```
-
-### HasMany
-
-```php
-public function orders(): HasMany
-{
-    return $this->hasMany(Order::class);
-}
-
-public function items(): HasMany
-{
-    return $this->hasMany(OrderItem::class);
-}
-```
-
-### HasOne
-
-```php
-public function profile(): HasOne
-{
-    return $this->hasOne(UserProfile::class);
-}
-```
-
-### BelongsToMany
-
-```php
-public function roles(): BelongsToMany
-{
-    return $this->belongsToMany(Role::class)
-        ->withTimestamps()
-        ->withPivot('assigned_at');
-}
-```
-
-### HasManyThrough
-
-```php
-public function deployments(): HasManyThrough
-{
-    return $this->hasManyThrough(Deployment::class, Environment::class);
-}
-```
-
-### MorphTo / MorphMany
-
-```php
-// MorphTo
-public function commentable(): MorphTo
-{
-    return $this->morphTo();
-}
-
-// MorphMany
-public function comments(): MorphMany
-{
-    return $this->morphMany(Comment::class, 'commentable');
-}
-```
-
-## Accessors & Mutators
-
-### Accessors (Get)
-
-```php
-use Illuminate\Database\Eloquent\Casts\Attribute;
-
-protected function fullName(): Attribute
-{
-    return Attribute::make(
-        get: fn () => "{$this->first_name} {$this->last_name}",
-    );
-}
-
-// Usage
-$user->full_name; // "John Doe"
-```
-
-### Mutators (Set)
-
-```php
-protected function password(): Attribute
-{
-    return Attribute::make(
-        set: fn (string $value) => bcrypt($value),
-    );
-}
-
-// Usage
-$user->password = 'secret'; // Automatically hashed
-```
-
-### Both Get and Set
-
-```php
-protected function email(): Attribute
-{
-    return Attribute::make(
-        get: fn (string $value) => strtolower($value),
-        set: fn (string $value) => strtolower(trim($value)),
-    );
-}
-```
 
 ## Model Methods
 
@@ -437,51 +305,6 @@ class Order extends Model
 
 **Important:** Always validate input in Form Requests before passing to Actions/Models.
 
-## Timestamps
-
-```php
-// Disable timestamps
-public $timestamps = false;
-
-// Custom timestamp columns
-const CREATED_AT = 'creation_date';
-const UPDATED_AT = 'updated_date';
-```
-
-## Soft Deletes
-
-```php
-use Illuminate\Database\Eloquent\SoftDeletes;
-
-class Order extends Model
-{
-    use SoftDeletes;
-}
-```
-
-**Usage:**
-
-```php
-$order->delete();      // Soft delete
-$order->forceDelete(); // Permanent delete
-$order->restore();     // Restore
-
-Order::withTrashed()->find($id);
-Order::onlyTrashed()->get();
-```
-
-## Collections
-
-**Query results return Collections:**
-
-```php
-$orders = Order::all(); // Illuminate\Database\Eloquent\Collection
-
-$orders->filter(fn($order) => $order->isPending());
-$orders->map(fn($order) => $order->total);
-$orders->sum('total');
-```
-
 ## Model Organization
 
 ```
@@ -524,17 +347,3 @@ it('has user relationship', function () {
 });
 ```
 
-## Summary
-
-**Models should:**
-- Be unguarded globally via `Model::unguard()` in AppServiceProvider
-- Define structure (casts, relationships)
-- Use custom query builders (not scopes)
-- Have simple helper methods
-- Use observers for lifecycle hooks
-
-**Models should NOT:**
-- Use `$fillable` or `$guarded` properties
-- Contain business logic (use Actions)
-- Have complex methods (use Actions)
-- Use local scopes (use custom builders)

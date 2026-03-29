@@ -1,6 +1,6 @@
 ---
 name: laravel-enums
-description: Backed enums with labels and business logic. Use when working with enums, status values, fixed sets of options, or when user mentions enums, backed enums, enum cases, status enums.
+description: Backed enums with labels and business logic. Use when defining or modifying enums, status values, or fixed option sets.
 ---
 
 # Laravel Enums
@@ -33,123 +33,53 @@ enum OrderStatus: string
 }
 ```
 
-## Enum with Traits
+## Extending Enums
 
-Add functionality with traits:
+Leverage methods and traits on enums to add functionality where required. Keep shared behavior in `app/Enums/Concerns/` traits.
 
 ```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Enums;
-
-use Henzeb\Enumhancer\Concerns\Comparison;
-use Henzeb\Enumhancer\Concerns\Dropdown;
-
+// Direct methods for one-off behavior
 enum OrderStatus: string
 {
-    use Comparison, Dropdown;
-
     case Pending = 'pending';
-    case Processing = 'processing';
     case Completed = 'completed';
-    case Cancelled = 'cancelled';
+
+    public function label(): string
+    {
+        return match ($this) {
+            self::Pending => 'Pending Review',
+            self::Completed => 'Completed',
+        };
+    }
+
+    public function color(): string
+    {
+        return match ($this) {
+            self::Pending => 'yellow',
+            self::Completed => 'green',
+        };
+    }
 }
 ```
 
-## Enum with Labels
-
 ```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Enums;
-
-use App\Enums\Attributes\Label;
-use App\Enums\Concerns\HasLabel;
-
-enum PaymentMethod: string
-{
-    use HasLabel;
-
-    #[Label('Credit Card')]
-    case CreditCard = 'credit-card';
-
-    #[Label('Bank Transfer')]
-    case BankTransfer = 'bank-transfer';
-
-    #[Label('PayPal')]
-    case PayPal = 'paypal';
-}
-```
-
-## Custom Enum Attributes
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Enums\Attributes;
-
-use Attribute;
-
-#[Attribute(Attribute::TARGET_CLASS_CONSTANT)]
-class Label
-{
-    public function __construct(public string $value) {}
-}
-
-#[Attribute(Attribute::TARGET_CLASS_CONSTANT)]
-class Color
-{
-    public function __construct(public string $value) {}
-}
-
-#[Attribute(Attribute::TARGET_CLASS_CONSTANT)]
-class Icon
-{
-    public function __construct(public string $value) {}
-}
-```
-
-## Enum Concerns
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Enums\Concerns;
-
-use App\Enums\Attributes\Label;
-use Henzeb\Enumhancer\Concerns\Attributes;
-use Henzeb\Enumhancer\Concerns\Dropdown;
-use Henzeb\Enumhancer\Concerns\Labels;
-
+// Reusable trait for shared behavior across enums
 trait HasLabel
 {
-    use Attributes, Dropdown, Labels;
+    abstract public function label(): string;
 
     public static function labels(): array
     {
-        return collect(self::cases())->mapWithKeys(fn ($enum) => [
-            $enum->name => $enum->getLabel(),
-        ])->toArray();
-    }
-
-    public function getLabel(): ?string
-    {
-        return $this->getAttribute(Label::class)?->value;
+        return collect(self::cases())->mapWithKeys(
+            fn ($enum) => [$enum->value => $enum->label()]
+        )->toArray();
     }
 }
 ```
 
 ## Business Logic in Enums
 
-Enums can contain behavior:
+Enums can contain behavior via match expressions:
 
 ```php
 enum PaymentProvider: string
@@ -213,27 +143,6 @@ use Illuminate\Validation\Rules\Enum;
 
 ## Common Patterns
 
-### Comparison
-
-```php
-if ($order->status->is(OrderStatus::Completed)) {
-    // ...
-}
-
-// With enumhancer Comparison trait
-if ($order->status->isCompleted()) {
-    // ...
-}
-```
-
-### UI Attributes
-
-```php
-$status->getLabel();  // 'Completed'
-PaymentMethod::dropdown();  // For select inputs
-OrderStatus::labels();  // All labels as array
-```
-
 ### Match Expressions
 
 ```php
@@ -278,13 +187,7 @@ public function __construct(public Order $order)
 app/Enums/
 ├── OrderStatus.php
 ├── PaymentMethod.php
-├── Queue.php
-├── Attributes/
-│   ├── Label.php
-│   ├── Color.php
-│   └── Icon.php
-└── Concerns/
-    └── HasLabel.php
+└── Queue.php
 ```
 
 ## When to Use Enums vs State Machines

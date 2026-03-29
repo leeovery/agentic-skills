@@ -1,6 +1,6 @@
 ---
 name: laravel-state-machines
-description: State machines using Spatie Model States for complex state transitions. Use when working with complex state management, state transitions, or when user mentions state machines, Spatie Model States, state transitions, transition validation.
+description: State machines using Spatie Model States for complex state transitions. Use when implementing or modifying state machines, transitions, or transition validation.
 ---
 
 # Laravel State Machines
