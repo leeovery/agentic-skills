@@ -126,17 +126,17 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 private function bootMorphMaps(): void
 {
     Relation::enforceMorphMap([
-        'order' => Order::class,
-        'customer' => Customer::class,
-        'product' => Product::class,
-        'invoice' => Invoice::class,
+        'User' => User::class,
+        'Order' => Order::class,
+        'Customer' => Customer::class,
+        'Product' => Product::class,
     ]);
 }
 ```
 
 **Why enforce morph maps?**
 - **Required for all projects** - Use `enforceMorphMap()` to ensure consistency
-- Database stores `'order'` instead of `'App\Models\Order'`
+- Database stores `'Order'` instead of `'App\Models\Order'`
 - Cleaner database records
 - Easier to refactor namespaces
 - Smaller database footprint

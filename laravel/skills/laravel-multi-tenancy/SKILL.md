@@ -61,8 +61,11 @@ app/
 │   ├── Tenant.php        # Central model
 │   ├── Order.php         # Tenanted model
 │   └── Customer.php
-└── Support/
-    └── TenantContext.php
+└── Services/
+    └── Tenancy/
+        ├── Landlord.php
+        └── Facades/
+            └── Landlord.php
 ```
 
 ## Central Actions
@@ -160,43 +163,60 @@ class CreateOrderAction
 }
 ```
 
-## Tenant Context Helper
+## Landlord Helper
+
+Wrap Stancl Tenancy in a `Landlord` service class for a cleaner API:
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace App\Support;
+namespace App\Services\Tenancy;
 
 use App\Models\Tenant;
-use Stancl\Tenancy\Facades\Tenancy;
 
-class TenantContext
+class Landlord
 {
-    public static function current(): ?Tenant
+    public static function tenant(): ?Tenant
     {
-        return Tenancy::tenant();
+        return tenant();
     }
 
-    public static function id(): ?string
+    public static function initialize(Tenant|int|string $tenant): void
     {
-        return Tenancy::tenant()?->getTenantKey();
+        tenancy()->initialize($tenant);
     }
 
-    public static function isActive(): bool
+    public static function end(): void
     {
-        return Tenancy::tenant() !== null;
+        tenancy()->end();
     }
 
-    public static function run(Tenant $tenant, callable $callback): mixed
+    public static function runAsCentral(callable $callback): mixed
     {
-        return tenancy()->runForMultiple([$tenant], $callback);
+        return tenancy()->central($callback);
     }
 
-    public static function runCentral(callable $callback): mixed
+    public function tenantId(): ?string
     {
-        return tenancy()->runForMultiple([], $callback);
+        return tenant()?->getTenantKey();
+    }
+
+    public function eachTenant(callable $callback): void
+    {
+        Tenant::each(function (Tenant $tenant) use ($callback): void {
+            $this->runAs($tenant, $callback);
+        });
+    }
+
+    public function runAs(Tenant|int|string $tenant, callable $callback): mixed
+    {
+        if (! $tenant instanceof Tenant) {
+            $tenant = tenancy()->find($tenant);
+        }
+
+        return tenancy()->run($tenant, $callback);
     }
 }
 ```
@@ -204,20 +224,20 @@ class TenantContext
 **Usage:**
 
 ```php
-use App\Support\TenantContext;
+use App\Services\Tenancy\Landlord;
 
-$tenant = TenantContext::current();
-$tenantId = TenantContext::id();
+$tenant = Landlord::tenant();
+$tenantId = Landlord::tenantId();
 
-if (TenantContext::isActive()) {
+if (Landlord::tenant() !== null) {
     // Tenant-specific logic
 }
 
-TenantContext::run($tenant, function () {
+Landlord::runAs($tenant, function () {
     Order::create([...]);
 });
 
-TenantContext::runCentral(function () {
+Landlord::runAsCentral(function () {
     Tenant::create([...]);
 });
 ```
@@ -382,7 +402,7 @@ class ProcessOrderJob implements ShouldQueue
 **Dispatching:**
 
 ```php
-ProcessOrderJob::dispatch(TenantContext::current(), $orderData);
+ProcessOrderJob::dispatch(Landlord::tenant(), $orderData);
 ```
 
 ## Common Patterns
@@ -390,10 +410,15 @@ ProcessOrderJob::dispatch(TenantContext::current(), $orderData);
 ### Running Code in Multiple Tenants
 
 ```php
-$tenants = Tenant::all();
+// Using Landlord's eachTenant helper
+resolve(Landlord::class)->eachTenant(function () {
+    Order::where('status', 'pending')->update(['processed' => true]);
+});
 
+// Or manually for specific tenants
+$tenants = Tenant::all();
 foreach ($tenants as $tenant) {
-    TenantContext::run($tenant, function () use ($tenant) {
+    resolve(Landlord::class)->runAs($tenant, function () {
         Order::where('status', 'pending')->update(['processed' => true]);
     });
 }
@@ -402,7 +427,7 @@ foreach ($tenants as $tenant) {
 ### Accessing Central Data from Tenant Context
 
 ```php
-TenantContext::runCentral(function () {
+Landlord::runAsCentral(function () {
     $allTenants = Tenant::all();
 });
 ```
@@ -410,7 +435,7 @@ TenantContext::runCentral(function () {
 ### Conditional Logic Based on Tenant
 
 ```php
-if (TenantContext::isActive()) {
+if (Landlord::tenant() !== null) {
     $orders = Order::all(); // Scoped to tenant
 } else {
     $tenants = Tenant::all(); // Central
@@ -431,6 +456,6 @@ Includes:
 ## Best Practices
 - Use directory structure to separate central and tenanted actions/DTOs
 - Keep models in `app/Models/` following Laravel convention
-- Always use TenantContext helper for tenant access
+- Always use Landlord helper for tenant access
 - Test both central and tenant contexts separately
 - Preserve tenant context in queued jobs

@@ -93,85 +93,88 @@ if ($result->isFail()) {
 }
 ```
 
-### Money
+### Money (Brick\Money wrapper)
 
 ```php
 // Creating money values
-$price = Money::fromDollars(29.99);
-$tax = Money::fromDollars(2.40);
-$shipping = Money::fromCents(500);  // $5.00
+$price = Money::of(29.99);                    // From major units (£29.99)
+$shipping = Money::ofMinor(500);              // From minor units (£5.00)
+$usdPrice = Money::of(19.99, 'USD');          // Explicit currency
 
-// Operations
-$subtotal = $price->add($tax);
-$total = $subtotal->add($shipping);
-
-// Multiplication
-$bulkPrice = $price->multiply(10);
-
-// Display
-echo $total->formatted();  // "37.39"
+// Arithmetic (returns new instances)
+$total = $price->plus($shipping);
+$discounted = $total->minus(Money::of(5));
+$refund = $total->negated();
 
 // Comparison
-if ($total->equals($expectedTotal)) {
-    // Amounts match
-}
+$total->isZero();
+$total->isGreaterThan($price);
+$total->isEqualTo($other);
+
+// Display
+echo $total->format();                        // "£34.99"
+echo $refund->format(showNegativeInParentheses: true);  // "(£34.99)"
+
+// Storage (minor units as int)
+$total->getMinorAmount();                     // 3499
+$total->getCurrencyCode();                    // "GBP"
 ```
+
+**[→ Full implementation: Money.php](references/Money.php)**
 
 ## Key Patterns
 
 ### 1. Immutability
 
-Use `readonly` properties:
+Use `final readonly class` — all properties immutable, class cannot be extended:
 
 ```php
-public readonly int $amount;
-public readonly string $currency;
+final readonly class Money implements JsonSerializable, Stringable
+{
+    private function __construct(private BrickMoney $money) {}
+}
 ```
 
-### 2. Static Factory Methods
+### 2. Private Constructor + Static Factories
 
-Named constructors for common scenarios:
-
-```php
-public static function fromDollars(float $dollars): self
-public static function success(?string $message = null): self
-```
-
-### 3. Private Constructor
-
-Force use of factory methods:
+Force controlled instantiation:
 
 ```php
 private function __construct(/* ... */) {}
+
+public static function of(BigNumber|int|float|string $amount, string $currency = 'GBP'): self
+public static function ofMinor(BigNumber|int|float|string $minorAmount, string $currency = 'GBP'): self
+public static function success(?string $message = null): self
 ```
 
-### 4. Domain Logic
+### 3. Library Wrapping
 
-Encapsulate domain rules:
+Wrap third-party libraries behind your own API using `__call()` delegation:
 
 ```php
-public function add(Money $other): self
+public function __call(string $name, array $arguments): mixed
 {
-    $this->assertSameCurrency($other);
-    return new self($this->amount + $other->amount, $this->currency);
+    // Delegate to wrapped library, wrapping results as needed
 }
 ```
 
-### 5. Return New Instances
+### 4. Return New Instances
 
-Operations return new instances (immutability):
+Operations always return new instances (immutability):
 
 ```php
-public function add(Money $other): self
-{
-    return new self($this->amount + $other->amount, $this->currency);
-}
+$discounted = $price->minus(Money::of(5));  // $price unchanged
+$refund = $price->negated();                // $price unchanged
 ```
+
+### 5. Implement Serialization Interfaces
+
+Value objects typically implement `JsonSerializable`, `Stringable`, and `Wireable` (Livewire) for integration with framework features and storage.
 
 ## Directory Structure
 
 ```
-app/Values/
+app/ValueObjects/
 ├── Money.php
 ├── ProcessResult.php
 ├── Coordinate.php

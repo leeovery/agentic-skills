@@ -35,12 +35,12 @@ it('creates a tenant with database', function () {
 
 ```php
 use App\Actions\Tenanted\Order\CreateOrderAction;
-use App\Support\TenantContext;
+use App\Services\Tenancy\Landlord;
 
 it('creates order in tenant context', function () {
     $tenant = Tenant::factory()->create();
 
-    TenantContext::run($tenant, function () {
+    resolve(Landlord::class)->runAs($tenant, function () {
         $user = User::factory()->create();
         $data = CreateOrderData::factory()->make();
 
