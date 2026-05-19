@@ -51,6 +51,9 @@ the work.
 - **[view-transitions.md](references/view-transitions.md)** — theme-toggle
   radial wipe via View Transitions API, fallback handling, `ClientOnly`
   wrapper pattern
+- **[fonts.md](references/fonts.md)** — `@nuxt/fonts` self-hosting, weight
+  subsetting, fallback metrics to avoid FOUT, preload strategy, variable
+  fonts, `font-display` choice per role
 
 ## Quick decision table
 
