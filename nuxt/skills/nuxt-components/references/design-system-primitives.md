@@ -1,26 +1,42 @@
 # Design System Primitives
 
-A small set of *semantic layout/typography primitives* — not domain components, not UI library wrappers — covers 90 % of the page composition surface on a marketing site. Each primitive uses `tailwind-variants` (`tv()`) for a typed variant API.
+Build a small layer of *visual primitives* — components that know nothing about your domain, only about typography and layout. Templates compose primitives; primitives never compose pages.
 
-## The primitives
+## Rules
 
-| Component | Role |
-| --- | --- |
-| `<Display>` | Fluid display heading (h1/h2-style) with size variants |
-| `<MonoLabel>` | Uppercase mono caps label (meta info, eyebrows) with tone variants |
-| `<SectionMarker>` | Numbered section header with optional accent dot + caption |
-| `<PageShell>` | Max-width container (sets the site's editorial measure) |
-| `<PageSection>` | Section wrapper with `tone` and `spacing` variants, wraps `PageShell` |
+1. **One concern per primitive.** A `Heading` primitive owns sizing, weight, and tracking. It doesn't know about hero sections, page titles, or marketing copy.
+2. **`as` prop > new component.** Need different markup for the same visual? `<Heading as="h1">` not `<HeadingH1>`.
+3. **One prop axis per concern.** `size` and `tone` are two axes, not one merged `variant` prop.
+4. **Semantic classes only inside primitives.** Raw palette classes (`text-stone-900`) leak the colour system into the abstraction. Use `text-default`, `bg-elevated`, etc.
+5. **Primitives compose primitives.** A section-header primitive built on a label primitive inherits changes when the label changes. Don't reach past primitives into raw utility classes.
+6. **No business logic in primitives.** Tone, size, spacing — visual attributes only. `<NewsletterHero>` is a page component, not a primitive.
 
-These are auto-imported via Nuxt's component scan. Reach for them
-before reaching for raw heading tags or div wrappers.
+## The `tv()` factory pattern
 
----
+`tailwind-variants` (`tv()`) gives components a typed, declarative variant API:
 
-## `<Display>` — fluid display heading
+```typescript
+import { tv } from 'tailwind-variants'
+
+const heading = tv({
+  base: 'font-display',
+  variants: {
+    size: {
+      xl: 'text-5xl tracking-tight',
+      l:  'text-4xl tracking-tight',
+      m:  'text-2xl',
+      s:  'text-xl'
+    }
+  },
+  defaultVariants: { size: 'm' }
+})
+
+heading({ size: 'xl' })   // → class string
+```
+
+Minimal Vue component using it:
 
 ```vue
-<!-- Display.vue -->
 <script setup lang="ts">
 import { tv } from 'tailwind-variants'
 
@@ -28,276 +44,69 @@ type Size = 'xl' | 'l' | 'm' | 's'
 
 const props = withDefaults(defineProps<{
   size?: Size
-  as?: string
-}>(), {
-  size: 'xl',
-  as: 'h2'
-})
+  as?:   string
+}>(), { size: 'm', as: 'h2' })
 
-const display = tv({
+const heading = tv({
   base: 'font-display',
-  variants: {
-    size: {
-      xl: 'text-display-xl',
-      l:  'text-display-l',
-      m:  'text-display-m',
-      s:  'text-display-s'
-    }
-  }
+  variants: { size: { xl: 'text-5xl', l: 'text-4xl', m: 'text-2xl', s: 'text-xl' } }
 })
 </script>
 
 <template>
-  <component :is="as" :class="display({ size: props.size })">
+  <component :is="as" :class="heading({ size: props.size })">
     <slot />
   </component>
 </template>
 ```
 
-Key points:
+### When to use `tv()`
 
-- `as` prop lets the caller choose the underlying tag (`h1` for hero,
-  `h2` for section heads, `h3` for sub-blocks) without changing the
-  visual size. **Semantic markup and visual hierarchy are independent
-  knobs.**
-- Sizes map to `text-display-*` tokens registered in `main.css` — those
-  tokens carry the paired line-height, tracking, weight (see
-  `nuxt-design-tokens`).
-- `tv()` (tailwind-variants) returns a function that takes the variant
-  selection and returns the class string. The `base` is always applied.
-
-## `<MonoLabel>` — uppercase mono caps
-
-```vue
-<script setup lang="ts">
-import { tv } from 'tailwind-variants'
-
-type Tone = 'muted' | 'strong' | 'accent'
-
-const props = withDefaults(defineProps<{
-  tone?: Tone
-  as?: string
-}>(), {
-  tone: 'muted',
-  as: 'span'
-})
-
-const mono = tv({
-  base: 'font-mono text-xs leading-none uppercase tracking-widest',
-  variants: {
-    tone: {
-      muted:  'text-muted',
-      strong: 'text-highlighted',
-      accent: 'text-primary'
-    }
-  }
-})
-</script>
-
-<template>
-  <component :is="as" :class="mono({ tone: props.tone })">
-    <slot />
-  </component>
-</template>
-```
-
-Use cases: eyebrows above headings, meta info (`STEP 2 OF 4`), table
-labels, microcopy that needs to feel like an editorial caption rather
-than running text.
-
-## `<SectionMarker>` — numbered section header
-
-```vue
-<script setup lang="ts">
-withDefaults(defineProps<{
-  label: string
-  caption?: string
-  accent?: boolean
-}>(), {
-  accent: false
-})
-</script>
-
-<template>
-  <div class="mb-12 flex items-center justify-between border-b border-default pb-3">
-    <MonoLabel tone="strong" class="inline-flex items-center gap-2">
-      <span
-        class="inline-block size-2"
-        :class="accent ? 'bg-primary' : 'bg-current'"
-      />
-      {{ label }}
-    </MonoLabel>
-    <MonoLabel v-if="caption">
-      {{ caption }}
-    </MonoLabel>
-  </div>
-</template>
-```
-
-Notice the composition: `SectionMarker` is built from `MonoLabel`s,
-not from raw Tailwind classes. Primitives compose primitives. When
-you change `MonoLabel`'s tracking, `SectionMarker` follows.
-
-## `<PageSection>` — section wrapper with tone
-
-```vue
-<script setup lang="ts">
-import { tv } from 'tailwind-variants'
-
-type Tone = 'default' | 'dark'
-type Spacing = 'default' | 'tight'
-
-const props = withDefaults(defineProps<{
-  tone?: Tone
-  spacing?: Spacing
-  as?: string
-  id?: string
-}>(), {
-  tone: 'default',
-  spacing: 'default',
-  as: 'section'
-})
-
-const section = tv({
-  base: 'relative',
-  variants: {
-    tone: {
-      default: 'bg-default',
-      dark:    'section-dark dark bg-default text-default'
-    },
-    spacing: {
-      default: 'py-24 md:py-28',
-      tight:   'py-16 md:py-20'
-    }
-  }
-})
-</script>
-
-<template>
-  <component :is="as" :id="id" :class="section({ tone: props.tone, spacing: props.spacing })">
-    <PageShell>
-      <slot />
-    </PageShell>
-  </component>
-</template>
-```
-
-`tone="dark"` adds three classes:
-- `section-dark` — the contextual override hook (see
-  `nuxt-design-tokens/references/contextual-overrides.md`)
-- `dark` — Tailwind class that flips child semantic classes to dark
-  mode regardless of page mode
-- `bg-default text-default` — semantic classes that now resolve to the
-  dark palette
-
-The result: a dark slab on a light page, *and* a still-distinct slab
-on a dark page (via the contextual override). One prop, both modes
-correct.
-
-## The `tv()` factory pattern
-
-```typescript
-const variant = tv({
-  base: 'always-on-classes',
-  variants: {
-    propName: {
-      value1: 'classes for value1',
-      value2: 'classes for value2'
-    },
-    otherProp: {
-      a: '...',
-      b: '...'
-    }
-  },
-  defaultVariants: {
-    propName: 'value1'
-  },
-  compoundVariants: [
-    { propName: 'value1', otherProp: 'a', class: 'extra-classes-for-this-combo' }
-  ]
-})
-
-variant({ propName: 'value1', otherProp: 'b' })  // → class string
-```
-
-When to use it:
-
-- Component has 2+ variant axes (size × tone, variant × color)
-- You'd otherwise write a long ternary chain or computed
+- Component has 2+ variant axes (`size × tone`, `variant × color`)
+- You'd otherwise write a ternary chain or computed in the template
 - You want a single source of truth for the variant API
 
-When NOT to use it:
+### When NOT to use `tv()`
 
-- Single boolean prop that toggles one class → just a `:class` binding
-- No variants, just a wrapper → inline classes are fine
-- You're tempted to put domain logic in `compoundVariants` — that
-  belongs in the component, not the variant factory
-
-## Composition rules
-
-1. **Primitives compose primitives.** `SectionMarker` is built from
-   `MonoLabel`. `PageSection` is built from `PageShell`. Don't reach
-   past the primitive into raw Tailwind classes when a primitive
-   exists.
-2. **`as` prop > new component.** Need an `h1` instead of an `h2`?
-   `<Display as="h1">`, not a `<DisplayLarge>` component.
-3. **One prop axis per concern.** `tone` is one axis (default/dark);
-   `spacing` is another (default/tight). Don't merge them into a
-   single `variant` prop.
-4. **Semantic classes only inside primitives.** The whole point of
-   primitives is to wrap the implementation so consumers don't think
-   about palette. Internal raw classes (`text-stone-900`) leak the
-   palette into the primitive and defeat the abstraction.
-5. **No business logic in primitives.** A primitive doesn't know
-   about pages, sections of the site, or content. It knows tone, size,
-   spacing — visual attributes only.
-
-## When to add a new primitive
-
-Sign that you need a new primitive:
-
-- Three+ files repeat the same block of Tailwind classes
-- The block has variants (different sizes, tones, states) that you'd
-  otherwise express via inline class ternaries
-- The visual concept has a name you'd put in copy ("the eyebrow", "the
-  display heading")
-
-Sign you DON'T need a primitive:
-
-- Used once; a section-specific component is fine
-- The "variant axis" is just a prop someone might want — wait for the
-  second occurrence
-- It's actually a Nuxt UI component with a different name — use
-  `<UButton variant="ghost">` instead of `<GhostButton>`
+- Single boolean prop that toggles one class → `:class` binding is shorter
+- No variants, just a styled wrapper → inline classes
+- Tempted to encode domain rules in `compoundVariants` → put them in the consuming component
 
 ## Anti-patterns
 
 ```vue
-<!-- ❌ raw heading with inline display classes — bypasses Display primitive -->
-<h2 class="font-display text-display-xl">…</h2>
+<!-- ❌ inline display classes — bypasses the primitive -->
+<h2 class="font-display text-5xl tracking-tight">…</h2>
 
 <!-- ✔ -->
-<Display>…</Display>
+<Heading size="xl">…</Heading>
 
-<!-- ❌ section with inline padding + container; bypasses PageSection + PageShell -->
-<section class="py-24 md:py-28 bg-default">
-  <div class="mx-auto w-full max-w-[1320px] px-7 md:px-10">…</div>
-</section>
+<!-- ❌ a component per size -->
+<HeadingXl>…</HeadingXl>
 
 <!-- ✔ -->
-<PageSection>…</PageSection>
+<Heading size="xl">…</Heading>
 
-<!-- ❌ a "DisplayXl" / "DisplayLarge" / "DisplayMedium" component family -->
-<DisplayXl>…</DisplayXl>
+<!-- ❌ raw palette inside a primitive's template -->
+<div class="bg-stone-100 text-stone-900">…</div>
 
 <!-- ✔ -->
-<Display size="xl">…</Display>
+<div class="bg-elevated text-default">…</div>
 ```
+
+## When to add a primitive
+
+Add when **all** apply:
+- Three+ files repeat the same block of classes
+- The block has variants (sizes, tones, states)
+- The visual concept has a name a designer would use ("eyebrow", "display heading")
+
+Don't add when:
+- Used once — section-specific component is fine
+- The "variant" is one prop someone *might* want — wait for the second occurrence
+- A Nuxt UI component covers it under a different name — use `<UButton variant="ghost">` not `<GhostButton>`
 
 ## Related
 
-- **[nuxt-design-tokens](../../nuxt-design-tokens/SKILL.md)** — the
-  `text-display-*` tokens and semantic class system that these
-  primitives consume
-- **[components.md](./components.md)** — script-setup order convention
-  and other component-shape rules
+- **[nuxt-design-tokens](../../nuxt-design-tokens/SKILL.md)** — semantic classes, custom token registration (the layer primitives consume)
+- **[components.md](./components.md)** — script-setup order and other component-shape rules

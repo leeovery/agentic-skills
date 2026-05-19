@@ -1,8 +1,6 @@
 # Layouts
 
-Layouts are flat in Nuxt 4. One layout per file in `app/layouts/`, picked per-page via `definePageMeta({ layout: '<name>' })`. The default layout name is `default`.
-
-This file covers when to add a layout, how to switch between them, and the slot-based composition pattern.
+Layouts are flat in Nuxt 4. One layout per file in `app/layouts/`, picked per-page via `definePageMeta({ layout: '<name>' })`. The default is `default`.
 
 ## Anatomy
 
@@ -11,9 +9,7 @@ This file covers when to add a layout, how to switch between them, and the slot-
 <template>
   <div class="flex min-h-screen flex-col">
     <AppHeader />
-    <main class="flex-1">
-      <slot />
-    </main>
+    <main class="flex-1"><slot /></main>
     <AppFooter />
   </div>
 </template>
@@ -21,7 +17,7 @@ This file covers when to add a layout, how to switch between them, and the slot-
 
 Every layout has a single root `<slot />` — that's where `<NuxtPage />` content lands. No more, no less.
 
-The page content is wrapped in `<NuxtLayout>` once at the root:
+The page content is wrapped once at the root:
 
 ```vue
 <!-- app.vue -->
@@ -34,110 +30,73 @@ The page content is wrapped in `<NuxtLayout>` once at the root:
 </template>
 ```
 
-`<NuxtLayout>` reads each page's `definePageMeta({ layout: ... })` and resolves to the matching file in `app/layouts/`.
+`<NuxtLayout>` reads each page's `definePageMeta({ layout: ... })` and resolves to the matching file.
 
 ## Picking the layout per page
 
 ```vue
-<!-- pages/wizard/preferences.vue -->
 <script setup lang="ts">
-definePageMeta({ layout: 'wizard' })
+definePageMeta({ layout: 'app' })   // pages/app/*.vue all use 'app' layout
 </script>
 ```
 
 ```vue
-<!-- pages/about.vue -->
 <script setup lang="ts">
-// no definePageMeta needed — falls back to 'default'
+// no definePageMeta → falls back to 'default'
 </script>
 ```
 
-The layout name is the filename without the extension, kebab-cased:
-
-```
-app/layouts/
-├── default.vue       → layout: 'default'  (used when no override)
-├── wizard.vue        → layout: 'wizard'
-└── checkout-step.vue → layout: 'checkout-step'
-```
+The layout name is the filename without extension, kebab-cased (`auth.vue` → `'auth'`, `checkout-step.vue` → `'checkout-step'`).
 
 ## When to add a layout
 
-Add a layout when **two or more pages share chrome** that differs from the default. Examples:
+Add when two or more pages share chrome that differs from the default:
 
-| Chrome shape | Layout name | Where it applies |
-| --- | --- | --- |
-| Site header + footer | `default` | Marketing / blog / docs pages |
-| Minimal nav + form-centric main | `wizard` | Multi-step form flow |
-| Sidebar + topbar | `dashboard` | Admin / authenticated app |
-| Centred card on neutral bg | `auth` | Login / signup / reset password |
-| No chrome | `blank` | OG image generation, embeds, fullscreen errors |
+| Chrome shape | Typical layout name |
+| --- | --- |
+| Site header + footer | `default` |
+| Sidebar + topbar | `app` / `dashboard` |
+| Centred card on neutral bg | `auth` |
+| Minimal nav + narrow main | `flow` (multi-step forms, focused tasks) |
+| No chrome | `blank` (OG image generation, embeds, fullscreen errors) |
 
-Don't add a layout for a single page — just put the chrome in the page itself. Layouts are for shared chrome, not "I want to organise this page's wrapper somewhere else".
-
-## Multi-area sites
-
-A site with both marketing and an app surface usually has 2 layouts:
-
-```
-app/layouts/
-├── default.vue   ← marketing chrome (AppHeader, AppFooter)
-└── wizard.vue    ← form-flow chrome (WizardNav, WizardFooter, narrow main)
-```
-
-```vue
-<!-- pages/index.vue -->                  — uses default (no override)
-<!-- pages/about.vue -->                  — uses default
-<!-- pages/wizard/profile.vue --><script>definePageMeta({ layout: 'wizard' })</script>
-<!-- pages/wizard/done.vue --> <script>definePageMeta({ layout: 'wizard' })</script>
-```
-
-Wizard pages share the `WizardNav` (with progress indicator) and a centred, narrower main column. Marketing pages get the full-width chrome.
+Don't add a layout for a single page — chrome in the page itself is fine. Layouts are for *shared* chrome.
 
 ## Layouts can use composables
 
-Layouts are full Vue components — they can run `<script setup>` and call composables:
+Layouts are full Vue components — `<script setup>` works.
 
 ```vue
-<!-- app/layouts/wizard.vue -->
+<!-- app/layouts/app.vue -->
 <script setup lang="ts">
-const { stepMeta } = useWizardForm()
+const { user } = useUser()
 </script>
 
 <template>
-  <div class="flex min-h-screen flex-col">
-    <WizardNav :step="stepMeta.step" :total-steps="3" :label="stepMeta.label" />
-    <main class="flex flex-1 items-start justify-center px-7 py-20 md:px-10 md:py-28">
-      <div class="w-full max-w-[640px]"><slot /></div>
-    </main>
-    <WizardFooter />
+  <div class="flex min-h-screen">
+    <AppSidebar :user="user" />
+    <main class="flex-1"><slot /></main>
   </div>
 </template>
 ```
 
-This is how the layout knows which step is active without prop drilling — it reads from the same `useState`-backed composable the pages use. Don't pass step state via slot props; use a shared composable.
+This is how the layout reads shared state without prop-drilling — same composable the page uses. Don't pass page-derived state into the layout via slot props; use a composable.
 
-## Named slots in layouts
+## `<NuxtPage>` persistence
 
-`<slot />` (the default) is where `<NuxtPage />` lands. You can add **named** slots, but pages can't fill them directly (since `<NuxtPage />` is the only thing between the layout and your page).
-
-If you need a named slot, the pattern is:
+`<NuxtPage>` mounts/unmounts on every route change (including query-param changes by default). Keep state that should survive route changes in the **layout**, not the page:
 
 ```vue
-<!-- pages/about.vue -->
-<script setup lang="ts">
-definePageMeta({ layout: 'with-sidebar' })
-</script>
-
+<!-- app/layouts/app.vue -->
 <template>
-  <div>
-    <PageContent />
-    <Teleport to="#sidebar-slot">
-      <PageSidebar />
-    </Teleport>
-  </div>
+  <AppSidebar />  <!-- mounted once; survives navigation -->
+  <slot />        <!-- this re-renders per route -->
 </template>
 ```
+
+## Named slots in layouts (rare, last resort)
+
+Pages can't fill named slots directly — `<NuxtPage>` sits between them and the layout. Workaround via `<Teleport>`:
 
 ```vue
 <!-- app/layouts/with-sidebar.vue -->
@@ -149,46 +108,29 @@ definePageMeta({ layout: 'with-sidebar' })
 </template>
 ```
 
-Honestly, this is rare and clunky. If your two pages need different chrome, write two layouts. Teleport is a last-resort tool.
-
-## Programmatic layout switching
-
-`setPageLayout` lets you change layout from runtime code. Avoid it; static `definePageMeta` is clearer. If you must:
-
-```typescript
-// in middleware or a watch
-setPageLayout(isAuthed.value ? 'dashboard' : 'auth')
-```
-
-Use case: a page that flips chrome based on auth state. Better solution: put the page under `/dashboard/` (uses dashboard layout) or `/login` (uses auth layout) and let routing decide.
-
-## `<NuxtPage>` and persistence
-
-`<NuxtPage>` mounts/unmounts as the route changes — including when only a query param changes, by default. To keep a layout-mounted component alive across navigations, place it in the layout (not the page).
-
 ```vue
-<!-- app/layouts/wizard.vue -->
+<!-- pages/some-page.vue -->
 <template>
-  <div>
-    <WizardNav /> <!-- stays mounted across /wizard/profile → /wizard/preferences -->
-    <slot /> <!-- this re-renders -->
-  </div>
+  <PageContent />
+  <Teleport to="#sidebar-slot"><PageSidebar /></Teleport>
 </template>
 ```
 
-This is why a wizard's progress nav stays smoothly visible during step transitions — it's in the layout, not the page.
+Clunky. Prefer separate layouts when pages need different chrome.
+
+## Programmatic switching (avoid)
+
+`setPageLayout('auth')` works but a static `definePageMeta({ layout: 'auth' })` is clearer. If you find yourself flipping layouts at runtime, the routing is probably wrong — put the page under a path that maps to the right layout statically.
 
 ## Anti-patterns
 
-- ❌ A `WithHeader.vue` layout and a `WithoutHeader.vue` layout differing only by header — make it a prop on the layout or move the conditional logic into a header component that knows when to render
-- ❌ Multiple `<slot />` elements in one layout — Vue picks the last one; the others are ignored silently
-- ❌ Putting `<UApp>` inside a layout — it goes in `app.vue` once; otherwise toasts/modals break on layout switches
-- ❌ Calling `setPageLayout` to "fix" a stuck layout — that's a routing problem, fix the routing
+- ❌ `WithHeader.vue` and `WithoutHeader.vue` differing only by header — use a prop or a conditional header component
+- ❌ Multiple `<slot />` in one layout — Vue uses the last one, others ignored silently
+- ❌ `<UApp>` inside a layout — goes in `app.vue` once; layout switches will tear down toasts/modals otherwise
 - ❌ Importing `NuxtPage` into a layout — `<slot />` is the integration point
-- ❌ Layout filename mismatched with the `layout:` value — kebab-case the filename to match
+- ❌ Filename mismatch — kebab-case the filename to match the `layout:` value
 
 ## Related
 
 - **[pages.md](./pages.md)** — `definePageMeta` and file-based routing
-- **[rendering-strategies.md](./rendering-strategies.md)** — layouts in prerender vs SSR vs SPA modes
-- **[nuxt-architecture/marketing-site-shape.md](../../nuxt-architecture/references/marketing-site-shape.md)** — two-layout pattern for marketing + app
+- **[rendering-strategies.md](./rendering-strategies.md)** — layouts under prerender / SSR / SPA modes

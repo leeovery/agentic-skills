@@ -112,14 +112,11 @@ For a marketing site with ~5 pages, hand-designed PNGs are easier.
 ```typescript
 // nuxt.config.ts
 sitemap: {
-  exclude: [
-    '/wizard/**',         // private flow, don't index
-    '/wizard/done'
-  ]
+  exclude: ['/account/**', '/checkout/**', '/thanks']
 }
 ```
 
-A multi-step wizard / private flow shouldn't be in the sitemap — no SEO value, and `/done`-style success pages would be confusing if crawled. Exclude explicitly.
+Private flows (auth, checkout, post-submit confirmations) shouldn't be in the sitemap — no SEO value, and success pages would be confusing if crawled. Exclude explicitly.
 
 ### Dynamic sitemap entries
 
@@ -147,7 +144,7 @@ The handler runs at sitemap-generation time (during build for prerendered output
 ```typescript
 // nuxt.config.ts
 robots: {
-  disallow: ['/wizard'],
+  disallow: ['/account', '/checkout'],
   sitemap: 'https://example.com/sitemap.xml'
 }
 ```
@@ -156,7 +153,7 @@ For production: allow all by default, deny the private flow paths. For staging: 
 
 ```typescript
 robots: {
-  disallow: process.env.NUXT_PUBLIC_SITE_URL?.includes('staging') ? ['/'] : ['/wizard'],
+  disallow: process.env.NUXT_PUBLIC_SITE_URL?.includes('staging') ? ['/'] : ['/account'],
   sitemap: `${process.env.NUXT_PUBLIC_SITE_URL}/sitemap.xml`
 }
 ```

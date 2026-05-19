@@ -25,43 +25,43 @@ What does NOT go in `shared/`:
 ## Pattern: Zod schema as the single source of truth
 
 ```typescript
-// shared/utils/wizard-schema.ts
+// shared/utils/contact-schema.ts
 import { z } from 'zod'
 
-export const wizardFormSchema = z.object({
+export const contactFormSchema = z.object({
   name:        z.string().trim().min(1).max(200),
   email:       z.string().trim().toLowerCase().email(),
   company:     z.string().trim().min(1).max(200),
   preferences: z.array(z.string().max(100)).min(1).max(10)
 })
 
-export const wizardPayloadSchema = wizardFormSchema.extend({
+export const contactPayloadSchema = contactFormSchema.extend({
   turnstileToken: z.string().min(1),
   website:        z.string().max(200).optional().default('')   // honeypot
 })
 
-export type WizardForm    = z.infer<typeof wizardFormSchema>
-export type WizardPayload = z.infer<typeof wizardPayloadSchema>
+export type ContactForm    = z.infer<typeof contactFormSchema>
+export type ContactPayload = z.infer<typeof contactPayloadSchema>
 ```
 
-Used on the **client** (via `app/composables/useWizardForm.ts`):
+Used on the **client** (via `app/composables/useContactForm.ts`):
 
 ```typescript
-import { wizardPayloadSchema, type WizardForm } from '~~/shared/utils/wizard-schema'
+import { contactPayloadSchema, type ContactForm } from '~~/shared/utils/contact-schema'
 
-const form = useState<WizardForm>('wizard-form', emptyForm)
+const form = useState<ContactForm>('contact-form', emptyForm)
 
-const parsed = wizardPayloadSchema.safeParse({ ...form.value, turnstileToken: token })
+const parsed = contactPayloadSchema.safeParse({ ...form.value, turnstileToken: token })
 if (!parsed.success) { /* surface error */ }
 ```
 
-Used on the **server** (`server/api/wizard.post.ts`):
+Used on the **server** (`server/api/contact.post.ts`):
 
 ```typescript
-import { wizardPayloadSchema } from '~~/shared/utils/wizard-schema'
+import { contactPayloadSchema } from '~~/shared/utils/contact-schema'
 
 export default defineEventHandler(async (event) => {
-  const data = await readValidatedBody(event, wizardPayloadSchema.parse)
+  const data = await readValidatedBody(event, contactPayloadSchema.parse)
   // ↑ readValidatedBody is a Nitro helper that throws 400 on invalid input
 })
 ```
@@ -145,7 +145,7 @@ Use `~~/shared/utils/...` to import from shared code, not `~/`. The `~/shared/..
 
 `shared/utils/` and `shared/types/` are auto-imported into both contexts. After adding a new file there, run `nuxt prepare` (it's also part of `postinstall`) to regenerate `.nuxt/types/` so TypeScript sees the imports without explicit `import` statements.
 
-If you keep seeing "cannot find name `wizardPayloadSchema`" in editor squigglies, that's usually the cause. Restart your TS server or re-run `npm run postinstall`.
+If you keep seeing "cannot find name `contactPayloadSchema`" in editor squigglies, that's usually the cause. Restart your TS server or re-run `npm run postinstall`.
 
 ## When to skip `shared/` and just duplicate
 

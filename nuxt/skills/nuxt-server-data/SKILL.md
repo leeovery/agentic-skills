@@ -28,9 +28,9 @@ The server-side persistence layer for a Nuxt + NuxtHub + Cloudflare app. Drizzle
 
 ```
 Vue component
-   │  $fetch('/api/wizard', ...)
+   │  $fetch('/api/contact', ...)
    ▼
-server/api/wizard.post.ts        ← Nitro event handler
+server/api/contact.post.ts        ← Nitro event handler
    │  validates via shared Zod schema
    ▼
 db.insert(submissions).values(...)
@@ -57,12 +57,12 @@ export const submissions = sqliteTable('submissions', {
 ```
 
 ```typescript
-// server/api/wizard.post.ts
+// server/api/contact.post.ts
 import { and, eq, gt, sql } from 'drizzle-orm'
 import { submissions } from '../db/schema'
 
 export default defineEventHandler(async (event) => {
-  const data = await readValidatedBody(event, wizardPayloadSchema.parse)
+  const data = await readValidatedBody(event, contactPayloadSchema.parse)
 
   await db.insert(submissions).values({
     id: crypto.randomUUID(),
@@ -101,6 +101,6 @@ Detail in [nuxt-hub.md](references/nuxt-hub.md). This is the single biggest foot
 ## Related
 
 - **[nuxt-config](../nuxt-config/references/cloudflare-deployment.md)** — Cloudflare Workers deployment, `wrangler.json` generation, secrets vs vars
-- **[nuxt-forms](../nuxt-forms/references/marketing-forms.md)** — the `wizard.post.ts` route that consumes the `submissions` table
+- **[nuxt-forms](../nuxt-forms/references/marketing-forms.md)** — the `contact.post.ts` route that consumes the `submissions` table
 - **[nuxt-testing](../nuxt-testing/references/test-seams.md)** — DB test isolation seam (`/api/_dev/db`)
 - **[nuxt-repositories](../nuxt-repositories/SKILL.md)** — client-side API access (the layer above this one)

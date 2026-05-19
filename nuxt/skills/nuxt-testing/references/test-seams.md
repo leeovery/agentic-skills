@@ -146,7 +146,7 @@ Reach for a mock only when the side effect is *external infrastructure* you can'
 ```
 server/
 ├── api/
-│   ├── wizard.post.ts             # real handler
+│   ├── contact.post.ts             # real handler
 │   └── _dev/                     # seam endpoints — env-guarded
 │       ├── emails.get.ts
 │       ├── jobs.get.ts
@@ -211,8 +211,8 @@ test.beforeEach(async ({ request }) => {
   await request.get('/api/_dev/db?clear=submissions')
 })
 
-test('POST /api/wizard persists a row', async ({ request }) => {
-  await request.post('/api/wizard', { data: validPayload })
+test('POST /api/contact persists a row', async ({ request }) => {
+  await request.post('/api/contact', { data: validPayload })
 
   const { counts } = await (await request.get('/api/_dev/db')).json()
   expect(counts.submissions).toBe(1)

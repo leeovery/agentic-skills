@@ -1,228 +1,173 @@
-# Multi-step Form State (SSR-safe, cross-route)
+# Shared State Across Routes
 
-A composable that holds form state across several route-level pages.
-Each page mounts/unmounts as the user navigates, but the state
-survives — because it lives in `useState`, not in the component.
+When form state, navigation context, or anything else needs to survive route transitions, put it in `useState`. This file covers the rules — composable hidden in `app/composables/`, consumed from any page or layout.
 
----
+## Rule 1: `useState` for SSR-safe shared state
 
-## Why `useState`, not `ref`
-
-`useState(key, init)` is Nuxt's SSR-safe shared-state primitive. Two key properties:
-
-1. **Keyed by string** — calling `useState('wizard-form')` from any component returns the same reactive ref. State follows the key, not the component instance.
-2. **SSR-safe** — request-scoped on the server, module-scoped on the client. No cross-request leakage; no hydration mismatch.
-
-A module-scope `ref` would also be shared on the client, but on the server it leaks across requests (one user's data surfacing in another's response). On an SPA-only route (`ssr: false`) you could get away with `ref`, but `useState` is the right default — don't optimise prematurely.
-
----
-
-## Shape
+`useState(key, init)` is Nuxt's keyed reactive primitive: same key, same ref across every caller. Server-side it's request-scoped (no cross-request leakage); client-side it's module-scoped (shared across components).
 
 ```typescript
-// composables/useWizardForm.ts
-
-interface WizardFormData {
-  name: string
+// composables/useFormFlow.ts
+interface FormFlow {
+  name:  string
   email: string
-  preferences: string[]
   // …
-  turnstileToken: string
 }
 
-interface SubmitState {
-  loading: boolean
-  error: string
+function empty(): FormFlow {
+  return { name: '', email: '' }
 }
 
-const STEP_META: Record<string, { step: number; label: string }> = {
-  'profile':     { step: 1, label: 'Step 1 of 3' },
-  'preferences': { step: 2, label: 'Step 2 of 3' },
-  'review':      { step: 3, label: 'Step 3 of 3' },
-  'done':        { step: 3, label: 'All done' }
+export function useFormFlow() {
+  const data = useState<FormFlow>('form-flow', empty)
+  function reset() { data.value = empty() }
+  return { data, reset }
 }
+```
 
-function emptyForm(): WizardFormData {
-  return { name: '', email: '', preferences: [], turnstileToken: '' /* … */ }
-}
+**Don't use a module-scope `ref`** as a "singleton":
 
-export function useWizardForm() {
-  const form        = useState<WizardFormData>('wizard-form', emptyForm)
-  const submitState = useState<SubmitState>('wizard-submit', () => ({ loading: false, error: '' }))
+```typescript
+// ❌ module-scope ref — leaks across requests on the server
+const data = ref<FormFlow>(empty())
+export function useFormFlow() { return { data } }
+```
 
-  // Derive current step from the route, not from a tracked index. A user
-  // landing on /wizard/preferences via URL gets the correct step state.
+On the server this leaks one user's state into another user's response. On the client it works fine, but you're then writing SPA-only code without realising it. `useState` is the right default; only fall back to module-scope if you've measured a real performance issue (you haven't).
+
+**`init` must be a function, not a value.** `useState('key', empty)` calls `empty()` lazily once per request. `useState('key', empty())` calls it at module load and shares the same object across requests — same leak as above.
+
+---
+
+## Rule 2: Derive flow state from the route, not an internal counter
+
+If a step / tab / phase is reflected in the URL, derive it from `route.path` (or `route.params`). Don't keep a parallel `currentStep` ref.
+
+```typescript
+const STEPS = ['profile', 'review', 'done'] as const
+
+export function useFlowStep() {
   const route = useRoute()
-  const stepMeta = computed(() => {
-    const slug = route.path.split('/').filter(Boolean).pop() ?? 'profile'
-    return STEP_META[slug] ?? STEP_META['profile']!
-  })
-
-  function reset() {
-    form.value        = emptyForm()
-    submitState.value = { loading: false, error: '' }
-  }
-
-  async function submit() { /* see below */ }
-
-  return { form, stepMeta, submit, submitState, reset }
+  const slug = computed(() => route.path.split('/').filter(Boolean).pop() ?? STEPS[0])
+  const index = computed(() => STEPS.indexOf(slug.value as typeof STEPS[number]))
+  return { slug, index, total: STEPS.length }
 }
 ```
 
----
+Why this matters:
 
-## Step detection from `route.path`
+- **Deep links work.** A user landing on `/checkout/review` directly sees step "review".
+- **Back/forward works.** Browser nav and step nav don't desync — they're the same thing.
+- **One source of truth.** Re-render is driven by route changes, no extra wiring.
 
-The composable derives the current step from `route.path`, not from
-an internal counter. Why this matters:
-
-- **Deep-linking works.** A user with a saved URL hits `/wizard/review`
-  and sees step 3, with the form state empty if they haven't filled
-  earlier steps.
-- **Back/forward browser nav works.** No internal state to keep in
-  sync with the URL.
-- **Single source of truth.** The URL is canonical.
-
-```typescript
-const route = useRoute()
-const stepMeta = computed(() => {
-  const slug = route.path.split('/').filter(Boolean).pop() ?? 'profile'
-  return STEP_META[slug] ?? STEP_META['profile']!
-})
-```
-
-`STEP_META` is a static record mapping route slugs to metadata
-(step number, display label). Add the meta to the map, not to each
-page component, so the navigation flow is defined once.
+`router.push('/checkout/review')` *is* the step transition. Don't fight it.
 
 ---
 
-## Submit with side effects
+## Rule 3: Submit composables don't own `loading` state
+
+When a composable exposes a `submit()` function, **don't** toggle `loading` inside it if the consuming UI also does so via `:disabled` on a button. They'll fight.
 
 ```typescript
+// composable
 async function submit() {
-  submitState.value.error = ''
-
-  const parsed = wizardPayloadSchema.safeParse(form.value)
-  if (!parsed.success) {
-    submitState.value.error = parsed.error.issues[0]?.message ?? 'Please check your answers.'
-    return
-  }
-
+  errorState.value = ''
   try {
-    await $fetch('/api/wizard', { method: 'POST', body: parsed.data })
-    reset()
-    await navigateTo('/wizard/done')
+    await $fetch('/api/...', { method: 'POST', body: data.value })
+    await navigateTo('/thanks')
   } catch (err) {
     const statusMessage = (err as { data?: { statusMessage?: string } })?.data?.statusMessage
-    submitState.value.error = statusMessage || (err instanceof Error ? err.message : 'Something went wrong.')
-    form.value.turnstileToken = ''   // force fresh token on retry
+    errorState.value = statusMessage ?? (err instanceof Error ? err.message : 'Something went wrong.')
   }
 }
 ```
 
-Notes:
+```vue
+<!-- consumer -->
+<UButton :loading :disabled="loading" @click="onClick">Submit</UButton>
 
-- **Caller owns `submitState.loading`.** The submit button's
-  `:disabled="submitState.loading"` already blocks re-entry; toggling
-  it inside `submit()` would fight the UI. The page's click handler
-  sets it.
-- **Reset → navigate after success.** Form is cleared before the
-  navigation; the done page loads with empty state.
-- **Capture `statusMessage` from server.** `$fetch` rejects with a
-  FetchError that carries the server's `statusMessage` on
-  `err.data.statusMessage`. Surface it to the user.
-- **Clear the Turnstile token on failure.** Tokens are single-use; the
-  next attempt needs a fresh one.
+<script setup lang="ts">
+const loading = ref(false)
+async function onClick() {
+  if (loading.value) return
+  loading.value = true
+  try { await submit() } finally { loading.value = false }
+}
+</script>
+```
+
+Caller owns `loading`. The composable just throws or completes.
+
+Side effects inside `submit()` (`navigateTo`, `reset()`, clearing a token) are fine — they're part of the submission, not the UI state.
 
 ---
 
-## Multi-key state for related-but-independent pieces
+## Rule 4: Capture `statusMessage` from `$fetch` errors
 
-Split state across `useState` keys when pieces have different
-lifetimes or reset behaviour:
+When `$fetch` rejects on a non-2xx response, it throws a `FetchError` carrying the server's `statusMessage` on `err.data.statusMessage`. Surface it; don't fall back to the generic `err.message` ("Bad Request").
 
-- `wizard-form` — the form data
-- `wizard-submit` — submit loading/error
-- `wizard-progress` — UI-only state (visited steps, optional
-  checkboxes that aren't part of the payload)
+```typescript
+catch (err) {
+  const statusMessage = (err as { data?: { statusMessage?: string } })?.data?.statusMessage
+  errorState.value = statusMessage ?? (err instanceof Error ? err.message : 'Something went wrong.')
+}
+```
 
-`reset()` clears all of them; an individual error message can update
-without touching the form data; UI-only state stays out of the
-submitted payload.
+The server controls what the user sees by throwing `createError({ statusMessage: '...' })`.
 
-Don't over-split — two or three keys is the natural shape, not five.
+---
+
+## Rule 5: Split state into multiple keys when lifetimes differ
+
+A single composable can hold several `useState` calls:
+
+```typescript
+const data        = useState<FormFlow>('form-flow', empty)
+const submitState = useState<{ loading: boolean; error: string }>('form-flow-submit', () => ({ loading: false, error: '' }))
+const uiState     = useState<{ visitedSteps: string[] }>('form-flow-ui', () => ({ visitedSteps: [] }))
+```
+
+Split when:
+- `reset()` should clear some but not all
+- One piece is UI-only and shouldn't be in the submitted payload
+- One piece has independent reset triggers (close-modal vs submit-success)
+
+Two or three keys is normal. Five+ is a sign the composable is doing too much.
 
 ---
 
 ## Reset pattern
 
-`reset()` returns each piece of state to its initial value:
-
 ```typescript
+function empty(): FormFlow { return { name: '', email: '' } }
+
+const data = useState<FormFlow>('form-flow', empty)
+
 function reset() {
-  form.value        = emptyForm()
-  submitState.value = { loading: false, error: '' }
+  data.value = empty()
 }
 ```
 
-`emptyForm()` is a function (not a constant) so each call returns a
-fresh object — guards against accidental shared-reference bugs if you
-later mutate a nested array.
+`empty()` is a function so each call returns a fresh object. Avoids accidental shared-reference bugs if you later mutate a nested array.
 
-Pass `emptyForm` (no parens) into `useState` as the init function.
-`useState` calls it lazily, only when the key isn't yet populated.
+Pass `empty` (no parens) to `useState` so it's called lazily.
 
 ---
 
-## When to use this pattern
+## When to use this pattern vs alternatives
 
-✓ Multi-step form spanning multiple routes
-✓ A wizard with shared progress across pages
-✓ Any cross-route state that should survive navigation
+✓ State that survives route transitions (multi-step flow, navigation context)
+✓ State shared between a page and its layout
+✓ Cross-component state without prop drilling
 
 When NOT to use:
 
-✗ Single-page form — `reactive({...})` in the component is fine
-✗ Genuinely global app state (current user, theme) — those have their
-  own composables (`useUser`, `useColorMode`)
-✗ Server-fetched data — use `useFetch` / `useAsyncData` instead
-
----
-
-## Anti-patterns
-
-```typescript
-// ❌ module-scoped ref — leaks across requests on the server
-const form = ref({ name: '', email: '' })
-export function useWizardForm() { return { form } }
-
-// ❌ internal step counter — drifts from the URL
-const currentStep = ref(1)
-function next() { currentStep.value++ ; router.push(...) }
-
-// ❌ submit fully owns loading; UI's :disabled does too — they fight
-async function submit() {
-  submitState.value.loading = true   // ← page already set this
-  // …
-  submitState.value.loading = false
-}
-
-// ❌ reset doesn't clear submitState — error persists across submissions
-function reset() {
-  form.value = emptyForm()
-}
-```
-
----
+✗ Single-page form — `reactive({...})` in the component is simpler
+✗ Server-fetched data — `useFetch` / `useAsyncData` already cache by key
+✗ Genuinely global state (user, theme) — those usually have their own composables (`useUser`, `useColorMode`) that wrap `useState`
 
 ## Related
 
-- **[nuxt-forms](../../nuxt-forms/references/marketing-forms.md)** —
-  the per-step `<UForm>` that consumes this composable, plus Turnstile
-  + honeypot + server route
-- **[nuxt-pages](../../nuxt-pages/references/rendering-strategies.md)** —
-  the `ssr: false` route rule that makes SPA navigation between steps
-  cheap
-- **[composables.md](./composables.md)** — composable patterns
-  (singleton vs factory, naming, exports)
+- **[composables.md](./composables.md)** — singleton vs factory patterns, naming
+- **[nuxt-pages/rendering-strategies.md](../../nuxt-pages/references/rendering-strategies.md)** — `ssr: false` route rules that pair with cross-route state
+- **[nuxt-forms/marketing-forms.md](../../nuxt-forms/references/marketing-forms.md)** — public-form patterns that consume a state composable
