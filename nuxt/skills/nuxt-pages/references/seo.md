@@ -1,6 +1,6 @@
 # SEO: Meta, OG, Sitemap, Structured Data
 
-SEO is page-level work, so this skill owns it. The default Nuxt stack for serious SEO is `@nuxtjs/seo` — a meta-module that pulls in `@nuxtjs/sitemap`, `@nuxtjs/robots`, `nuxt-og-image`, `nuxt-schema-org`, and `nuxt-seo-experiments` in one install.
+The default stack is `@nuxtjs/seo` — a meta-module that bundles `@nuxtjs/sitemap`, `@nuxtjs/robots`, `nuxt-og-image`, `nuxt-schema-org`, and `nuxt-seo-experiments` in one install.
 
 ## Setup
 
@@ -48,29 +48,7 @@ Rules:
 
 ### Root-level defaults in `app.vue`
 
-```vue
-<!-- app.vue -->
-<script setup lang="ts">
-const title = 'Site name — value prop'
-const description = 'One-sentence description of what the site does.'
-
-useSeoMeta({
-  title,
-  description,
-  ogTitle: title,
-  ogDescription: description,
-  twitterCard: 'summary_large_image'
-})
-</script>
-
-<template>
-  <UApp>
-    <NuxtLayout><NuxtPage /></NuxtLayout>
-  </UApp>
-</template>
-```
-
-Page-level `useSeoMeta` calls **override** the root-level ones. Set sensible defaults in `app.vue` and override only what differs per page.
+Put the same call in `app.vue` with site-wide defaults. Page-level `useSeoMeta` calls override the root-level ones, so set defaults once and override only what differs per page.
 
 ### Template-bound titles
 

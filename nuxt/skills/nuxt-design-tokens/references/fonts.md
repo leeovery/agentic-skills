@@ -99,9 +99,9 @@ When a custom font loads, the page re-flows because the fallback (`Helvetica`, `
 }
 ```
 
-These match the real font's metrics so the fallback occupies the same vertical space — re-flow is invisible. Cool feature, mostly automatic.
+The fallback occupies the same vertical space, so re-flow is invisible. Mostly automatic.
 
-If you see FOUT in production: check that NuxtFonts is in `modules: []`, that the font name in CSS matches `fonts.families`, and that you're not loading the font via raw `<link>` tags in `app.head`.
+If you see FOUT in production: confirm NuxtFonts is in `modules: []`, the font name in CSS matches `fonts.families`, and you're not double-loading via raw `<link>` tags in `app.head`.
 
 ## Local fonts
 

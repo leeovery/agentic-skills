@@ -185,33 +185,7 @@ exist server-side. Without `.client`, SSR throws.
 
 ## Layouts: marketing default + flow-specific
 
-Two layouts cover most marketing-site shapes:
-
-```vue
-<!-- layouts/default.vue -->
-<template>
-  <div class="flex min-h-screen flex-col bg-default text-default">
-    <AppHeader />
-    <main class="flex-1"><slot /></main>
-    <AppFooter />
-  </div>
-</template>
-```
-
-```vue
-<!-- layouts/wizard.vue -->
-<template>
-  <div class="flex min-h-screen flex-col bg-default text-default">
-    <WizardNav />
-    <main class="flex-1 py-12"><slot /></main>
-    <WizardFooter />
-  </div>
-</template>
-```
-
-Don't try to make one layout cover both via slots and conditionals —
-two layouts with clear roles are easier to reason about. See
-[nuxt-pages/layouts.md](../../nuxt-pages/references/layouts.md).
+Two layouts cover most marketing-site shapes: `default` (header + footer chrome) and a flow-specific one (e.g. `wizard` — minimal nav, narrow main). Don't try to make one layout cover both via slots and conditionals — two layouts with clear roles are easier to reason about. See [nuxt-pages/layouts.md](../../nuxt-pages/references/layouts.md).
 
 ---
 

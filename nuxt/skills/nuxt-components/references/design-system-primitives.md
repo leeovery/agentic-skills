@@ -1,12 +1,6 @@
 # Design System Primitives
 
-A small set of *semantic layout/typography primitives* — not domain
-components, not UI library wrappers — covers 90 % of the page composition
-surface on a marketing site.
-
-This file documents that pattern: what each primitive is for, how they
-compose, and the `tailwind-variants` factory idiom that powers their
-prop APIs.
+A small set of *semantic layout/typography primitives* — not domain components, not UI library wrappers — covers 90 % of the page composition surface on a marketing site. Each primitive uses `tailwind-variants` (`tv()`) for a typed variant API.
 
 ## The primitives
 

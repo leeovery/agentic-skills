@@ -120,7 +120,7 @@ Implications:
 
 For layer work:
 
-1. Clone the layer repo as a sibling: `/Users/you/Code/nuxt-layers/`
+1. Clone the layer repo as a sibling directory next to the consumer app
 2. Leave `LAYER_NUXT_UI` unset locally so the relative path resolves
 3. Edit layer + consumer in parallel; the Nuxt dev server picks up layer
    changes via the relative path

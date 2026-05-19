@@ -8,23 +8,12 @@ survives — because it lives in `useState`, not in the component.
 
 ## Why `useState`, not `ref`
 
-`useState(key, init)` is Nuxt's SSR-safe shared-state primitive. Two
-properties matter here:
+`useState(key, init)` is Nuxt's SSR-safe shared-state primitive. Two key properties:
 
-1. **Keyed by string** — calling `useState('wizard-form')` from any
-   component returns the same reactive ref. State follows the key,
-   not the component instance.
-2. **SSR-safe** — server and client read the same value. No hydration
-   mismatch when the page is prerendered or SSR'd.
+1. **Keyed by string** — calling `useState('wizard-form')` from any component returns the same reactive ref. State follows the key, not the component instance.
+2. **SSR-safe** — request-scoped on the server, module-scoped on the client. No cross-request leakage; no hydration mismatch.
 
-A plain `ref` in the composable's module scope would *also* be shared
-— but it would leak across requests on the server (one user's data
-could surface in another's response). `useState` is request-scoped on
-the server and module-scoped on the client.
-
-For an SPA-only route (`ssr: false` via `routeRules`) you could get
-away with `ref`, but `useState` is the right default. Don't optimise
-prematurely.
+A module-scope `ref` would also be shared on the client, but on the server it leaks across requests (one user's data surfacing in another's response). On an SPA-only route (`ssr: false`) you could get away with `ref`, but `useState` is the right default — don't optimise prematurely.
 
 ---
 

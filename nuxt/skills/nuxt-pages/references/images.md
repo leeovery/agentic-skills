@@ -10,16 +10,10 @@ npm i @nuxt/image
 
 ```typescript
 // nuxt.config.ts
-modules: ['@nuxt/image'],
-
-image: {
-  // default provider — picks the right one based on the host
-  // 'ipx' for self-hosted (default), 'cloudflare' for Cloudflare Images, etc.
-  provider: 'ipx'
-}
+modules: ['@nuxt/image']
 ```
 
-For Cloudflare Workers deploys, the IPX provider runs on the Worker — fine for small marketing sites but burns CPU time on each transform. For larger sites use Cloudflare Images or a CDN-backed provider.
+Provider defaults to IPX (self-hosted). See "Provider config" below for Cloudflare Images and CDN alternatives.
 
 ## `<NuxtImg>` vs `<NuxtPicture>`
 
@@ -116,26 +110,22 @@ If the image is fluid in CSS (`width: 100%`), still set `width` + `height` on th
 
 ## Provider config
 
-For self-hosted optimisation (default — IPX):
-
 ```typescript
+// Self-hosted (default — IPX)
 image: {
   provider: 'ipx',
-  dir: 'app/assets/images',       // optional — where unoptimised originals live
-  domains: ['images.unsplash.com']  // whitelist external sources
+  dir: 'app/assets/images',           // optional — where originals live
+  domains: ['images.unsplash.com']    // whitelist external sources
 }
-```
 
-For Cloudflare Images:
-
-```typescript
+// Cloudflare Images
 image: {
   provider: 'cloudflare',
   cloudflare: { baseURL: 'https://imagedelivery.net/<account-hash>' }
 }
 ```
 
-For a Cloudflare Workers deploy specifically, the IPX provider runs **on the Worker** — every image transform costs CPU time per request. Fine for low-volume marketing sites; not fine for high-traffic / many-image sites. If transforms get expensive, switch to Cloudflare Images or pre-generate variants at build time.
+Cloudflare Workers caveat: IPX runs **on the Worker**, costing CPU time per transform. Fine for low-volume sites; switch to Cloudflare Images for high-traffic / many-image sites.
 
 ## Modifiers
 
