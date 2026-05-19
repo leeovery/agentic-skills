@@ -60,3 +60,9 @@ npx skills add leeovery/agentic-skills/nuxt
 | [**nuxt-auth**](skills/nuxt-auth/) | Laravel Sanctum authentication and permission-based authorization |
 | [**nuxt-realtime**](skills/nuxt-realtime/) | Real-time features with Laravel Echo and WebSockets |
 | [**nuxt-errors**](skills/nuxt-errors/) | Error handling with typed error classes and interceptors |
+
+### Quality
+
+| Skill | Description |
+|-------|-------------|
+| [**nuxt-testing**](skills/nuxt-testing/) | Unit, component, composable, API integration, and E2E testing — with Nitro test seams |

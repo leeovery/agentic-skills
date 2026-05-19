@@ -1,0 +1,227 @@
+# E2E & API Integration
+
+One Playwright config, two tiers. `page` for UI journeys, `request` for server pipelines.
+
+## Setup
+
+```ts
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test'
+
+export default defineConfig({
+  testDir: './e2e',
+  fullyParallel: false,   // shared in-memory test seams
+  workers: 1,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  reporter: process.env.CI ? 'github' : 'list',
+  use: {
+    baseURL: 'http://localhost:3100',
+    trace: 'retain-on-failure'
+  },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  webServer: {
+    command: 'npm run dev -- --port 3100',
+    url: 'http://localhost:3100',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+    env: {
+      NUXT_EMAIL_DRIVER: 'memory',
+      NUXT_PUBLIC_TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+      NUXT_TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
+      NUXT_DEVTOOLS: 'false'
+    }
+  }
+})
+```
+
+**Why these choices:**
+
+- **`workers: 1` + `fullyParallel: false`** — required when test seams hold in-memory state (e.g. captured emails buffer). If you have none, parallelise.
+- **`reuseExistingServer: !CI`** — locally, attach to an already-running `npm run dev`. In CI, always spawn fresh.
+- **Env in `webServer.env`** — driver-swap and provider test keys; see [test-seams.md](./test-seams.md).
+- **`trace: 'retain-on-failure'`** — full trace.zip on failure, nothing on green. Cheap when it matters.
+
+```json
+// package.json
+"scripts": {
+  "test:e2e": "playwright test",
+  "test:e2e:ui": "playwright test --ui"
+}
+```
+
+## File Layout
+
+```
+e2e/
+├── apply.happy-path.spec.ts      ← API-level pipeline test
+├── apply.validation.spec.ts      ← UI-level form validation
+└── auth.login.spec.ts
+```
+
+Name by feature, then by the slice (`happy-path`, `validation`, `errors`). One spec file per slice keeps failure diagnosis localised.
+
+## API Integration — Playwright `request` Fixture
+
+Test the full Nitro request pipeline — body parsing, validation, provider verification (Turnstile), DB writes, side effects — **without rendering a browser**. Faster and more deterministic than the UI equivalent.
+
+```ts
+import { test, expect } from '@playwright/test'
+
+const validPayload = {
+  name: 'Ada Lovelace',
+  email: 'ada@example.com',
+  /* … */
+  turnstileToken: 'test-token',
+  website: '' // honeypot
+}
+
+test.beforeEach(async ({ request }) => {
+  await request.get('/api/_dev/emails?clear=1')
+})
+
+test('POST /api/apply → 200 + both emails captured', async ({ request }) => {
+  const res = await request.post('/api/apply', { data: validPayload })
+  expect(res.status()).toBe(200)
+
+  const body = await res.json() as { ok: boolean, id: string }
+  expect(body.ok).toBe(true)
+  expect(body.id).toMatch(/^[0-9a-f-]{36}$/)
+
+  const { count, emails } = await (await request.get('/api/_dev/emails')).json()
+  expect(count).toBe(2)
+
+  const confirmation = emails.find(e => String(e.to).includes('ada@example.com'))
+  expect(confirmation.subject).toContain('Application received')
+})
+
+test('POST /api/apply with honeypot filled → silent 200, no emails', async ({ request }) => {
+  const res = await request.post('/api/apply', {
+    data: { ...validPayload, website: 'spammer-bait' }
+  })
+  expect(res.status()).toBe(200)
+
+  const { count } = await (await request.get('/api/_dev/emails')).json()
+  expect(count).toBe(0)
+})
+
+test('POST /api/apply with missing required field → 400', async ({ request }) => {
+  const res = await request.post('/api/apply', { data: { ...validPayload, name: '' } })
+  expect(res.status()).toBe(400)
+})
+```
+
+**What this tier is for:**
+
+- Server validation (status + error shape)
+- Authn / authz boundaries
+- Side effects via test seams (emails captured, queue jobs recorded, webhooks fired)
+- Bot protection (honeypot, provider verification with test keys)
+- DB writes (via response, or a `/api/_dev/<resource>` introspection endpoint)
+
+**Header comment template** — pin the choice of tier so it survives future readers:
+
+```ts
+/**
+ * API-level happy-path test. Exercises the full submission pipeline via a
+ * direct POST to /api/apply — validates payload, checks Turnstile (CF test
+ * keys), inserts into D1, fires both emails through the memory driver, then
+ * asserts the captured email content.
+ *
+ * UI is covered separately in *.validation.spec.ts; this tier gives us the
+ * fastest, most deterministic signal that the server pipeline is healthy.
+ */
+```
+
+## UI E2E — Playwright `page` Fixture
+
+Test client-side behaviour that has no server equivalent: form validation, navigation guards, conditional rendering, multi-step flows.
+
+```ts
+import { test, expect } from '@playwright/test'
+
+test.beforeEach(async ({ request }) => {
+  await request.get('/api/_dev/emails?clear=1')
+})
+
+test('business step blocks advance when required fields are empty', async ({ page }) => {
+  await page.goto('/apply/business')
+  await page.getByRole('button', { name: /continue/i }).click()
+
+  await expect(page).toHaveURL(/\/apply\/business$/)
+
+  const errors = page.locator('[id$="-error"], p.text-error, [role="alert"]')
+  await expect(errors.first()).toBeVisible()
+})
+
+test('socials — selecting a platform without a URL blocks advance', async ({ page }) => {
+  await page.goto('/apply/business')
+  await page.getByLabel('Your name').fill('Test User')
+  await page.getByLabel('Email').fill('test@example.com')
+  await page.getByLabel('Business name').fill('Test Biz')
+  await page.getByText('Select a range').first().click()
+  await page.getByRole('option', { name: 'Under £100k' }).click()
+  await page.getByRole('button', { name: 'LinkedIn', exact: true }).click()
+  await page.getByRole('button', { name: /continue/i }).click()
+
+  await expect(page).toHaveURL(/\/apply\/business$/)
+})
+```
+
+## Selectors
+
+Same priority as Testing Library:
+
+1. `getByRole` — `page.getByRole('button', { name: /continue/i })`
+2. `getByLabel` — `page.getByLabel('Email')`
+3. `getByText` — non-interactive
+4. `getByTestId` — last resort
+
+Avoid CSS-only locators (`.btn-primary`) — they break when classes change without behaviour changing.
+
+## Auto-Waiting
+
+Playwright assertions auto-retry. Don't `waitForTimeout`; let `expect` poll.
+
+```ts
+// ✅
+await expect(page).toHaveURL(/\/apply\/business$/)
+await expect(page.getByRole('alert')).toBeVisible()
+
+// ❌
+await page.waitForTimeout(1000)
+expect(await page.url()).toMatch(/\/apply\/business$/)
+```
+
+## Bot Protection / Captcha
+
+Use provider test keys, not mocks:
+
+| Provider   | Site key                              | Secret key                                       |
+|------------|---------------------------------------|--------------------------------------------------|
+| Turnstile  | `1x00000000000000000000AA` (pass)     | `1x0000000000000000000000000000000AA` (pass)     |
+|            | `2x00000000000000000000AB` (fail)     | `2x0000000000000000000000000000000AA` (fail)     |
+| reCAPTCHA v3 | `6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI` | `6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe` |
+
+This hits the real verification code path; mocking the verifier hides bugs.
+
+## Auth
+
+Two options, ordered by preference:
+
+1. **API-level seed + cookie**: hit a `/api/_dev/login?as=admin` seam that issues a real session cookie, then drive the UI with that cookie set on the context.
+2. **UI login + `storageState`**: log in once in a setup project, save `storageState`, reuse across specs.
+
+`storageState` is simpler; the API seam is faster and skips UI fragility.
+
+## CI Notes
+
+- `retries: 2` on CI absorbs network flakes; locally `retries: 0` so flakes surface.
+- `trace: 'retain-on-failure'` + upload `playwright-report/` artefact on failure.
+- `reporter: 'github'` annotates PR diffs at failing lines.
+
+## What NOT to Test at This Tier
+
+- Pure logic (model hydration, enum behaviour, error transformers) — vitest
+- Component contracts (props/emits/v-model) — Testing Library
+- Visual regression — out of scope
