@@ -220,6 +220,102 @@ Two options, ordered by preference:
 - `trace: 'retain-on-failure'` + upload `playwright-report/` artefact on failure.
 - `reporter: 'github'` annotates PR diffs at failing lines.
 
+## Testing Prerendered Output
+
+`routeRules: { '/': { prerender: true } }` pages are baked to static HTML at build time. The dev server's runtime-rendered output is **not** identical to the prerendered HTML — meta tags injected late, modules that swap behaviour at build, and any `<ClientOnly>` content all differ.
+
+For true SEO / OG-tag / structured-data assertions, test against the production preview build:
+
+```ts
+// playwright.preview.config.ts — separate config, separate npm script
+import { defineConfig } from '@playwright/test'
+
+export default defineConfig({
+  testDir: './e2e-preview',
+  use: { baseURL: 'http://localhost:3200' },
+  webServer: {
+    command: 'npm run build && npm run preview -- --port 3200',
+    url: 'http://localhost:3200',
+    timeout: 240_000,                 // build is slow
+    reuseExistingServer: !process.env.CI
+  }
+})
+```
+
+```ts
+// e2e-preview/seo.spec.ts
+import { test, expect } from '@playwright/test'
+
+test('home page has correct OG tags in prerendered HTML', async ({ request }) => {
+  // Raw HTML, no JS evaluation — what crawlers see
+  const html = await (await request.get('/')).text()
+
+  expect(html).toContain('<meta property="og:title" content="Reach Systems"')
+  expect(html).toContain('<meta property="og:description"')
+  expect(html).toContain('<link rel="canonical" href="https://reachsystems.ai/"')
+})
+
+test('sitemap.xml lists all prerendered routes', async ({ request }) => {
+  const xml = await (await request.get('/sitemap.xml')).text()
+  expect(xml).toContain('<loc>https://reachsystems.ai/</loc>')
+  expect(xml).toContain('<loc>https://reachsystems.ai/about</loc>')
+  expect(xml).toContain('<loc>https://reachsystems.ai/founders-letter</loc>')
+})
+```
+
+Why not just use `page.goto()` + `page.locator('meta[property="og:title"]')`? Because Playwright's page navigation runs JS, so a `useSeoMeta` call that *only fires on the client* would still pass — masking the bug where the prerendered HTML has wrong tags. Asserting on the raw HTML response forces the test to see exactly what a crawler sees.
+
+```json
+// package.json
+"scripts": {
+  "test:e2e": "playwright test",
+  "test:e2e:preview": "playwright test --config=playwright.preview.config.ts"
+}
+```
+
+Run `test:e2e:preview` in CI on a separate job — the build step makes it slow (~3 min cold), so don't bundle it with the fast dev-server e2e run.
+
+## Test Fixtures and Builders
+
+`validPayload` inline at the top of a spec file works for one spec. For three+ specs sharing the same domain object, lift it into a builder. Keeps tests readable and avoids "what changed?" diffs when the schema grows.
+
+```ts
+// e2e/fixtures/apply.ts
+import type { ApplyPayload } from '~~/shared/utils/apply-schema'
+
+export const validApplyPayload = (overrides: Partial<ApplyPayload> = {}): ApplyPayload => ({
+  name: 'Ada Lovelace',
+  email: 'ada@example.com',
+  business: 'Lovelace & Babbage',
+  /* ...all required fields with sensible defaults... */
+  fitCount: 5,
+  turnstileToken: 'test-token',
+  website: '',
+  ...overrides
+})
+```
+
+```ts
+// e2e/apply.validation.spec.ts
+import { validApplyPayload } from './fixtures/apply'
+
+test('rejects empty name', async ({ request }) => {
+  const res = await request.post('/api/apply', { data: validApplyPayload({ name: '' }) })
+  expect(res.status()).toBe(400)
+})
+
+test('rejects malformed email', async ({ request }) => {
+  const res = await request.post('/api/apply', { data: validApplyPayload({ email: 'not-an-email' }) })
+  expect(res.status()).toBe(400)
+})
+```
+
+Rules:
+
+- **Builder, not constant.** A function that takes overrides composes; a constant doesn't.
+- **Type the overrides against the same schema type the production code uses.** Pulls in via `~~/shared/utils/...` keeps fixtures and production schema in sync.
+- **Don't add scenario-specific helpers to the base builder.** A `validApplyPayloadForRateLimit()` belongs in the spec that uses it.
+
 ## What NOT to Test at This Tier
 
 - Pure logic (model hydration, enum behaviour, error transformers) — vitest

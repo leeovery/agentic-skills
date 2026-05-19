@@ -150,7 +150,8 @@ server/
 │   └── _dev/                     # seam endpoints — env-guarded
 │       ├── emails.get.ts
 │       ├── jobs.get.ts
-│       └── audit.get.ts
+│       ├── audit.get.ts
+│       └── db.get.ts             # row-count / table-clear seam
 └── utils/
     ├── email.ts                  # driver + memory buffer
     ├── jobs.ts
@@ -158,6 +159,102 @@ server/
 ```
 
 One seam endpoint per side-effect domain. Each endpoint supports `?clear=1` for `beforeEach` reset.
+
+## DB Test Isolation (D1 / Drizzle)
+
+Module-scope buffers are easy. Real-DB writes are harder — D1's local SQLite file persists across test runs and accumulates rows. Two approaches; pick by speed cost.
+
+### Option A: env-guarded table-clear endpoint (recommended)
+
+Cheap, deterministic, mirrors the email-seam pattern.
+
+```ts
+// server/api/_dev/db.get.ts
+/**
+ * Test-mode-only DB seam. Returns row counts or clears tables. Guarded by
+ * NUXT_DB_TEST_MODE; never exposed in production. Whitelist tables explicitly
+ * so a misconfigured env can't wipe arbitrary tables.
+ */
+import { applications } from '../../db/schema'
+
+const CLEARABLE = { applications } as const
+type Clearable = keyof typeof CLEARABLE
+
+export default defineEventHandler(async (event) => {
+  const { dbTestMode } = useRuntimeConfig()
+  if (dbTestMode !== '1') {
+    throw createError({ statusCode: 404 })
+  }
+
+  const url = getRequestURL(event)
+  const clearParam = url.searchParams.get('clear')
+
+  if (clearParam) {
+    if (!(clearParam in CLEARABLE)) {
+      throw createError({ statusCode: 400, statusMessage: `Table '${clearParam}' is not clearable` })
+    }
+    await db.delete(CLEARABLE[clearParam as Clearable])
+    return { ok: true, cleared: clearParam }
+  }
+
+  const counts = await Promise.all(
+    (Object.keys(CLEARABLE) as Clearable[]).map(async (t) => [t, await db.$count(CLEARABLE[t])] as const)
+  )
+  return { ok: true, counts: Object.fromEntries(counts) }
+})
+```
+
+```ts
+// playwright spec
+test.beforeEach(async ({ request }) => {
+  await request.get('/api/_dev/emails?clear=1')
+  await request.get('/api/_dev/db?clear=applications')
+})
+
+test('POST /api/apply persists a row', async ({ request }) => {
+  await request.post('/api/apply', { data: validPayload })
+
+  const { counts } = await (await request.get('/api/_dev/db')).json()
+  expect(counts.applications).toBe(1)
+})
+```
+
+**Guard rules** (same as the email seam, with extras):
+
+- Returns `404` (not `403`) when `dbTestMode !== '1'`
+- Whitelist `CLEARABLE` — a typed record of `<name, drizzle table>` so the query param can never resolve to an arbitrary table name (SQL injection / wipe-the-whole-DB risk)
+- Use a dedicated env flag (`NUXT_DB_TEST_MODE`) — *not* `NODE_ENV` — so prod can never accidentally enable it via the Worker's default env
+- Test against the **local D1 dev binding**, never `--remote`
+
+Wire the env into runtimeConfig:
+
+```ts
+// nuxt.config.ts
+runtimeConfig: {
+  dbTestMode: '',   // NUXT_DB_TEST_MODE — '1' enables /api/_dev/db
+  emailDriver: '',
+  /* ... */
+}
+```
+
+```ts
+// playwright.config.ts → webServer.env
+env: {
+  NUXT_EMAIL_DRIVER: 'memory',
+  NUXT_DB_TEST_MODE: '1'
+}
+```
+
+### Option B: transaction rollback (slower, more isolated)
+
+Wrap each test's handler invocation in a transaction that rolls back at the end. SQLite/D1 supports nested savepoints. Avoid unless table-clear isn't enough — transactions add complexity and the Worker request lifecycle doesn't play nicely with long-lived transactions.
+
+### Don't
+
+- ❌ `vi.mock('~/server/db')` — same seam-vs-mock argument as email; mocks lie
+- ❌ Use the production D1 (`--remote`) for tests — slow, racy, irreversible
+- ❌ Drop and re-create tables between tests — migrations are tested separately; the test path should match production schema exactly
+- ❌ Rely on test ordering to leave a DB state for the next test — clear in `beforeEach`
 
 ## Multi-Worker Caution
 
