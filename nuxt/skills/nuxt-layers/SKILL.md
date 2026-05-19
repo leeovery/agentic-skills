@@ -11,6 +11,8 @@ Shared foundation layers providing composables, models, repositories, and UI com
 
 **[layers.md](references/layers.md)** - Complete layer architecture, what each provides, how to extend
 
+**[private-layers-ci.md](references/private-layers-ci.md)** - Consuming a private GitHub layer at build time: `LAYER_*` env-driven path resolution, `GIGET_AUTH` scope + build-vs-runtime placement, `{ install: true }` for remote layers, failure modes (`404 tarball`)
+
 ## Three-Layer Architecture
 
 ```

@@ -11,6 +11,8 @@ File-based routing with common page patterns and navigation.
 
 **[pages.md](references/pages.md)** - Page patterns, meta, layouts, navigation
 
+**[rendering-strategies.md](references/rendering-strategies.md)** - Per-route rendering via `routeRules`: prerender for marketing, `ssr: false` for SPA flows, redirects, layout switching, multi-step page flows that survive refresh + back/forward nav
+
 ## Directory Structure
 
 ```

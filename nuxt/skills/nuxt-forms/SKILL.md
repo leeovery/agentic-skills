@@ -9,7 +9,9 @@ Form handling with XForm component and validation error display.
 
 ## Core Concepts
 
-**[forms.md](references/forms.md)** - XForm, useFormBuilder, validation patterns
+**[forms.md](references/forms.md)** - XForm, useFormBuilder, validation patterns (admin / SaaS app)
+
+**[marketing-forms.md](references/marketing-forms.md)** - Public multi-step forms without XForm: Zod schemas shared between client + server (`shared/utils/`), Turnstile invisible-mode + token-await, honeypot + IP rate limiting, the UForm submit-button gotcha (template-ref trigger), chip-toggle component pattern
 
 ## XForm Component
 

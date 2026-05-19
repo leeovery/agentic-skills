@@ -11,6 +11,8 @@ Application configuration via nuxt.config.ts and app.config.ts.
 
 **[config.md](references/config.md)** - Complete configuration patterns
 
+**[cloudflare-deployment.md](references/cloudflare-deployment.md)** - Cloudflare Workers Builds + NuxtHub + D1: `routeRules` hybrid rendering, the wrangler.json binding reconciliation gotcha (vars wiped on deploy), secrets vs `nitro.cloudflare.wrangler.vars`, manual D1 migration flow, build-time vs runtime env vars, common build failures
+
 ## nuxt.config.ts
 
 ```typescript

@@ -13,7 +13,9 @@ Domain-driven, type-safe, composable-first architecture prioritizing separation 
 
 ## Project Structure
 
-**[structure.md](references/structure.md)** - Directory layout, naming conventions, file organization
+**[structure.md](references/structure.md)** - Directory layout, naming conventions, file organization (admin / SaaS app shape)
+
+**[marketing-site-shape.md](references/marketing-site-shape.md)** - Page-centric structure for marketing sites: what NOT to use (models, repos, features), `shared/utils/` for client + server validation, client-only plugins for DOM effects, when to stay flat
 
 ## Technology Stack
 
