@@ -26,7 +26,7 @@ heavier", that's the signal.
    In light mode the section's `.dark` class inverts the palette.
    In dark mode the `.dark` class is redundant, so the section would blend
    into the page. Rebinding --ui-bg within the section gives it a step up. */
-html.dark .reach-section-dark {
+html.dark .section-dark {
   --ui-bg: color-mix(in oklab, var(--color-stone-900), var(--color-stone-800) 50%);
 }
 ```
@@ -34,7 +34,7 @@ html.dark .reach-section-dark {
 ```vue
 <!-- consuming Vue component -->
 <template>
-  <section :class="tone === 'dark' ? 'reach-section-dark dark bg-default text-default' : 'bg-default'">
+  <section :class="tone === 'dark' ? 'section-dark dark bg-default text-default' : 'bg-default'">
     <slot />
   </section>
 </template>

@@ -1,8 +1,9 @@
 # Marketing Site Shape
 
-When you're building a marketing site (landing + about + apply flow,
-or similar), the admin-app structure documented in `structure.md`
-mostly doesn't apply. This file describes the shape that *does*.
+When you're building a marketing site (landing + content pages + maybe a
+wizard or contact form), the admin-app structure documented in
+`structure.md` mostly doesn't apply. This file describes the shape that
+*does*.
 
 The defining trait: **a marketing site is page-centric, not
 domain-centric.** Each page is a narrative composition, not a view
@@ -16,7 +17,7 @@ no CRUD.
 | Admin-app concept | Marketing-site replacement |
 | --- | --- |
 | Models (`Model`, hydrators) | Nothing — public site has no API entities |
-| Repositories | Nothing — or a single Resend client, a single DB driver |
+| Repositories | Nothing — or a single email client, a single DB driver |
 | Features (`features/leads/...`) | Nothing — pages compose primitives directly |
 | Enums with behaviour | Plain TS const arrays in `shared/utils/` |
 | Tables (XTable) | Nothing — marketing doesn't display tabular data |
@@ -42,21 +43,21 @@ app/
 │   ├── MonoLabel.vue              primitive: uppercase mono caps
 │   ├── SectionMarker.vue          primitive: numbered section header
 │   ├── PageShell.vue              primitive: max-width container
-│   ├── ReachSection.vue           primitive: section wrapper with tone
+│   ├── PageSection.vue            primitive: section wrapper with tone
 │   ├── ThemeToggle.vue            site chrome (with View Transitions)
 │   ├── About/                     page-specific composition pieces
-│   ├── Apply/                     page-specific (form chrome, primitives)
-│   └── Landing/                   page-specific (Hero, Problem, …)
+│   ├── Wizard/                    page-specific (form chrome, primitives)
+│   └── Landing/                   page-specific (Hero, Features, …)
 ├── composables/
-│   └── useApplyForm.ts            the one stateful flow
+│   └── useWizardForm.ts           the one stateful flow
 ├── layouts/
 │   ├── default.vue                marketing chrome
-│   └── apply.vue                  minimal chrome
+│   └── wizard.vue                 minimal chrome
 ├── pages/
 │   ├── index.vue                  landing
 │   ├── about.vue
-│   ├── founders-letter.vue
-│   └── apply/                     multi-step form pages
+│   ├── pricing.vue
+│   └── wizard/                    multi-step form pages
 ├── plugins/
 │   └── reveal.client.ts           v-reveal directive
 ├── assets/css/main.css            tokens + base styles
@@ -65,13 +66,13 @@ app/
 
 shared/
 └── utils/
-    └── apply-schema.ts            Zod schema (client + server use this)
+    └── wizard-schema.ts           Zod schema (client + server use this)
 
 server/
 ├── api/
-│   └── apply.post.ts              form submission handler
+│   └── wizard.post.ts             form submission handler
 ├── db/
-│   ├── schema.ts                  Drizzle schema (applications table)
+│   ├── schema.ts                  Drizzle schema (submissions table)
 │   └── migrations/sqlite/         D1 migrations
 └── utils/                         email helpers
 ```
@@ -79,15 +80,15 @@ server/
 Key observations:
 
 - **`components/` is page-centric.** Subdirs match top-level pages
-  (`Landing/`, `About/`, `Apply/`). Auto-imports prefix the name
-  (`<LandingHero />`, `<ApplyChipGroup />`).
+  (`Landing/`, `About/`, `Wizard/`). Auto-imports prefix the name
+  (`<LandingHero />`, `<WizardChipGroup />`).
 - **A few cross-cutting primitives at the top of `components/`.**
   These don't belong to any page; they're the design system.
 - **`composables/` is sparse.** Marketing sites have one or two
   stateful flows at most. If you have ten composables, something
   is wrong.
 - **`shared/utils/` for cross-cutting validation.** Same Zod schema
-  used by client (`useApplyForm` imports it) and server (Nitro
+  used by client (`useWizardForm` imports it) and server (Nitro
   imports it). One source of truth.
 
 ---
@@ -101,7 +102,7 @@ The directory structure encodes two layers:
 - Have no business knowledge
 - Take props for visual variants (size, tone, spacing)
 - Compose with other primitives
-- See nuxt-components/design-system-primitives.md
+- See [nuxt-components/design-system-primitives.md](../../nuxt-components/references/design-system-primitives.md)
 
 **Layer 2 — Page components** (subdirs):
 
@@ -139,7 +140,7 @@ If you find a "shared" function that imports `defineEventHandler` or
 
 ## Plugin-based client directives
 
-The reveal-on-scroll pattern via a Vue directive:
+A reveal-on-scroll pattern via a Vue directive:
 
 ```typescript
 // app/plugins/reveal.client.ts
@@ -198,18 +199,19 @@ Two layouts cover most marketing-site shapes:
 ```
 
 ```vue
-<!-- layouts/apply.vue -->
+<!-- layouts/wizard.vue -->
 <template>
   <div class="flex min-h-screen flex-col bg-default text-default">
-    <ApplyNav />
+    <WizardNav />
     <main class="flex-1 py-12"><slot /></main>
-    <ApplyFooter />
+    <WizardFooter />
   </div>
 </template>
 ```
 
 Don't try to make one layout cover both via slots and conditionals —
-two layouts with clear roles are easier to reason about.
+two layouts with clear roles are easier to reason about. See
+[nuxt-pages/layouts.md](../../nuxt-pages/references/layouts.md).
 
 ---
 
@@ -234,8 +236,8 @@ adding it. For a marketing site, that threshold is high.
 - ❌ Adopting the base/nuxt-ui/x-ui three-layer architecture for a
   marketing site — overkill, drags in admin-app deps
 - ❌ Creating a `models/` directory because "every Nuxt app has one"
-- ❌ Wrapping the one `$fetch` call in a `repositories/ApplyRepository.ts`
-- ❌ Building a "feature module" for a 4-page apply flow
+- ❌ Wrapping the one `$fetch` call in a `WizardRepository.ts`
+- ❌ Building a "feature module" for a 4-page wizard
 - ❌ Using `useFetch` for static data that should be in a const array
 
 ---

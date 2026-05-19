@@ -25,44 +25,43 @@ What does NOT go in `shared/`:
 ## Pattern: Zod schema as the single source of truth
 
 ```typescript
-// shared/utils/apply-schema.ts
+// shared/utils/wizard-schema.ts
 import { z } from 'zod'
 
-export const applyFormSchema = z.object({
-  name:     z.string().trim().min(1).max(200),
-  email:    z.string().trim().toLowerCase().email(),
-  business: z.string().trim().min(1).max(200),
-  services: z.array(z.string().max(100)).min(1).max(10)
+export const wizardFormSchema = z.object({
+  name:        z.string().trim().min(1).max(200),
+  email:       z.string().trim().toLowerCase().email(),
+  company:     z.string().trim().min(1).max(200),
+  preferences: z.array(z.string().max(100)).min(1).max(10)
 })
 
-export const applyPayloadSchema = applyFormSchema.extend({
-  fitCount:       z.number().int().min(0).max(5),
+export const wizardPayloadSchema = wizardFormSchema.extend({
   turnstileToken: z.string().min(1),
   website:        z.string().max(200).optional().default('')   // honeypot
 })
 
-export type ApplyForm    = z.infer<typeof applyFormSchema>
-export type ApplyPayload = z.infer<typeof applyPayloadSchema>
+export type WizardForm    = z.infer<typeof wizardFormSchema>
+export type WizardPayload = z.infer<typeof wizardPayloadSchema>
 ```
 
-Used on the **client** (via `app/composables/useApplyForm.ts`):
+Used on the **client** (via `app/composables/useWizardForm.ts`):
 
 ```typescript
-import { applyPayloadSchema, type ApplyForm } from '~~/shared/utils/apply-schema'
+import { wizardPayloadSchema, type WizardForm } from '~~/shared/utils/wizard-schema'
 
-const form = useState<ApplyForm>('apply-form', emptyForm)
+const form = useState<WizardForm>('wizard-form', emptyForm)
 
-const parsed = applyPayloadSchema.safeParse({ ...form.value, fitCount: 4, turnstileToken: token })
+const parsed = wizardPayloadSchema.safeParse({ ...form.value, turnstileToken: token })
 if (!parsed.success) { /* surface error */ }
 ```
 
-Used on the **server** (`server/api/apply.post.ts`):
+Used on the **server** (`server/api/wizard.post.ts`):
 
 ```typescript
-import { applyPayloadSchema } from '~~/shared/utils/apply-schema'
+import { wizardPayloadSchema } from '~~/shared/utils/wizard-schema'
 
 export default defineEventHandler(async (event) => {
-  const data = await readValidatedBody(event, applyPayloadSchema.parse)
+  const data = await readValidatedBody(event, wizardPayloadSchema.parse)
   // ↑ readValidatedBody is a Nitro helper that throws 400 on invalid input
 })
 ```
@@ -78,15 +77,14 @@ Two options:
 ### Option A: re-export a plain-TS shape from `shared/types/`
 
 ```typescript
-// shared/types/application.ts — hand-written, mirrors the schema
-export interface Application {
+// shared/types/submission.ts — hand-written, mirrors the schema
+export interface Submission {
   id: string
   createdAt: string
   name: string
   email: string
-  business: string
-  services: string[]
-  fitCount: number | null
+  company: string
+  preferences: string[]
   status: 'new' | 'reviewed' | 'accepted' | 'rejected'
 }
 ```
@@ -94,12 +92,12 @@ export interface Application {
 ```typescript
 // server/db/schema.ts — Drizzle-inferred type extends/equals the shared one
 import type { InferSelectModel } from 'drizzle-orm'
-import type { Application as SharedApplication } from '~~/shared/types/application'
+import type { Submission as SharedSubmission } from '~~/shared/types/submission'
 
-export type Application = InferSelectModel<typeof applications>
+export type Submission = InferSelectModel<typeof submissions>
 
 // Type-level check that the two stay in sync; fails compile if they diverge
-const _check: SharedApplication = {} as Application
+const _check: SharedSubmission = {} as Submission
 ```
 
 Pros: client bundle is tiny, types are explicit.
@@ -110,8 +108,8 @@ Cons: two declarations to maintain (hopefully a thin one).
 The client usually doesn't need the full DB row — it needs a response shape that may be smaller (no PII, no internal-only fields, etc.):
 
 ```typescript
-// shared/types/application.ts
-export interface ApplicationSummary {
+// shared/types/submission.ts
+export interface SubmissionSummary {
   id: string
   status: 'new' | 'reviewed' | 'accepted' | 'rejected'
   submittedAt: string
@@ -119,14 +117,14 @@ export interface ApplicationSummary {
 ```
 
 ```typescript
-// server/api/applications.get.ts
-import type { ApplicationSummary } from '~~/shared/types/application'
+// server/api/submissions.get.ts
+import type { SubmissionSummary } from '~~/shared/types/submission'
 
-export default defineEventHandler(async (): Promise<ApplicationSummary[]> => {
-  const rows = await db.select().from(applications)
+export default defineEventHandler(async (): Promise<SubmissionSummary[]> => {
+  const rows = await db.select().from(submissions)
   return rows.map(r => ({
     id: r.id,
-    status: r.status as ApplicationSummary['status'],
+    status: r.status as SubmissionSummary['status'],
     submittedAt: r.createdAt
   }))
 })
@@ -147,7 +145,7 @@ Use `~~/shared/utils/...` to import from shared code, not `~/`. The `~/shared/..
 
 `shared/utils/` and `shared/types/` are auto-imported into both contexts. After adding a new file there, run `nuxt prepare` (it's also part of `postinstall`) to regenerate `.nuxt/types/` so TypeScript sees the imports without explicit `import` statements.
 
-If you keep seeing "cannot find name `applyPayloadSchema`" in editor squigglies, that's usually the cause. Restart your TS server or re-run `npm run postinstall`.
+If you keep seeing "cannot find name `wizardPayloadSchema`" in editor squigglies, that's usually the cause. Restart your TS server or re-run `npm run postinstall`.
 
 ## When to skip `shared/` and just duplicate
 

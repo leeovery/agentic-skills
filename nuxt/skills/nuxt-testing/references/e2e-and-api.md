@@ -54,8 +54,8 @@ export default defineConfig({
 
 ```
 e2e/
-├── apply.happy-path.spec.ts      ← API-level pipeline test
-├── apply.validation.spec.ts      ← UI-level form validation
+├── wizard.happy-path.spec.ts      ← API-level pipeline test
+├── wizard.validation.spec.ts      ← UI-level form validation
 └── auth.login.spec.ts
 ```
 
@@ -80,8 +80,8 @@ test.beforeEach(async ({ request }) => {
   await request.get('/api/_dev/emails?clear=1')
 })
 
-test('POST /api/apply → 200 + both emails captured', async ({ request }) => {
-  const res = await request.post('/api/apply', { data: validPayload })
+test('POST /api/wizard → 200 + both emails captured', async ({ request }) => {
+  const res = await request.post('/api/wizard', { data: validPayload })
   expect(res.status()).toBe(200)
 
   const body = await res.json() as { ok: boolean, id: string }
@@ -92,11 +92,11 @@ test('POST /api/apply → 200 + both emails captured', async ({ request }) => {
   expect(count).toBe(2)
 
   const confirmation = emails.find(e => String(e.to).includes('ada@example.com'))
-  expect(confirmation.subject).toContain('Application received')
+  expect(confirmation.subject).toContain('Submission received')
 })
 
-test('POST /api/apply with honeypot filled → silent 200, no emails', async ({ request }) => {
-  const res = await request.post('/api/apply', {
+test('POST /api/wizard with honeypot filled → silent 200, no emails', async ({ request }) => {
+  const res = await request.post('/api/wizard', {
     data: { ...validPayload, website: 'spammer-bait' }
   })
   expect(res.status()).toBe(200)
@@ -105,8 +105,8 @@ test('POST /api/apply with honeypot filled → silent 200, no emails', async ({ 
   expect(count).toBe(0)
 })
 
-test('POST /api/apply with missing required field → 400', async ({ request }) => {
-  const res = await request.post('/api/apply', { data: { ...validPayload, name: '' } })
+test('POST /api/wizard with missing required field → 400', async ({ request }) => {
+  const res = await request.post('/api/wizard', { data: { ...validPayload, name: '' } })
   expect(res.status()).toBe(400)
 })
 ```
@@ -124,7 +124,7 @@ test('POST /api/apply with missing required field → 400', async ({ request }) 
 ```ts
 /**
  * API-level happy-path test. Exercises the full submission pipeline via a
- * direct POST to /api/apply — validates payload, checks Turnstile (CF test
+ * direct POST to /api/wizard — validates payload, checks Turnstile (CF test
  * keys), inserts into D1, fires both emails through the memory driver, then
  * asserts the captured email content.
  *
@@ -144,27 +144,27 @@ test.beforeEach(async ({ request }) => {
   await request.get('/api/_dev/emails?clear=1')
 })
 
-test('business step blocks advance when required fields are empty', async ({ page }) => {
-  await page.goto('/apply/business')
+test('preferences step blocks advance when required fields are empty', async ({ page }) => {
+  await page.goto('/wizard/preferences')
   await page.getByRole('button', { name: /continue/i }).click()
 
-  await expect(page).toHaveURL(/\/apply\/business$/)
+  await expect(page).toHaveURL(/\/wizard\/preferences$/)
 
   const errors = page.locator('[id$="-error"], p.text-error, [role="alert"]')
   await expect(errors.first()).toBeVisible()
 })
 
-test('socials — selecting a platform without a URL blocks advance', async ({ page }) => {
-  await page.goto('/apply/business')
+test('chip selection without dependent field blocks advance', async ({ page }) => {
+  await page.goto('/wizard/preferences')
   await page.getByLabel('Your name').fill('Test User')
   await page.getByLabel('Email').fill('test@example.com')
-  await page.getByLabel('Business name').fill('Test Biz')
-  await page.getByText('Select a range').first().click()
-  await page.getByRole('option', { name: 'Under £100k' }).click()
-  await page.getByRole('button', { name: 'LinkedIn', exact: true }).click()
+  await page.getByLabel('Company').fill('Test Co')
+  await page.getByText('Select a plan').first().click()
+  await page.getByRole('option', { name: 'Starter' }).click()
+  await page.getByRole('button', { name: 'Premium', exact: true }).click()
   await page.getByRole('button', { name: /continue/i }).click()
 
-  await expect(page).toHaveURL(/\/apply\/business$/)
+  await expect(page).toHaveURL(/\/wizard\/preferences$/)
 })
 ```
 
@@ -185,12 +185,12 @@ Playwright assertions auto-retry. Don't `waitForTimeout`; let `expect` poll.
 
 ```ts
 // ✅
-await expect(page).toHaveURL(/\/apply\/business$/)
+await expect(page).toHaveURL(/\/wizard\/preferences$/)
 await expect(page.getByRole('alert')).toBeVisible()
 
 // ❌
 await page.waitForTimeout(1000)
-expect(await page.url()).toMatch(/\/apply\/business$/)
+expect(await page.url()).toMatch(/\/wizard\/preferences$/)
 ```
 
 ## Bot Protection / Captcha
@@ -250,16 +250,16 @@ test('home page has correct OG tags in prerendered HTML', async ({ request }) =>
   // Raw HTML, no JS evaluation — what crawlers see
   const html = await (await request.get('/')).text()
 
-  expect(html).toContain('<meta property="og:title" content="Reach Systems"')
+  expect(html).toContain('<meta property="og:title" content="Example"')
   expect(html).toContain('<meta property="og:description"')
-  expect(html).toContain('<link rel="canonical" href="https://reachsystems.ai/"')
+  expect(html).toContain('<link rel="canonical" href="https://example.com/"')
 })
 
 test('sitemap.xml lists all prerendered routes', async ({ request }) => {
   const xml = await (await request.get('/sitemap.xml')).text()
-  expect(xml).toContain('<loc>https://reachsystems.ai/</loc>')
-  expect(xml).toContain('<loc>https://reachsystems.ai/about</loc>')
-  expect(xml).toContain('<loc>https://reachsystems.ai/founders-letter</loc>')
+  expect(xml).toContain('<loc>https://example.com/</loc>')
+  expect(xml).toContain('<loc>https://example.com/about</loc>')
+  expect(xml).toContain('<loc>https://example.com/pricing</loc>')
 })
 ```
 
@@ -280,15 +280,14 @@ Run `test:e2e:preview` in CI on a separate job — the build step makes it slow 
 `validPayload` inline at the top of a spec file works for one spec. For three+ specs sharing the same domain object, lift it into a builder. Keeps tests readable and avoids "what changed?" diffs when the schema grows.
 
 ```ts
-// e2e/fixtures/apply.ts
-import type { ApplyPayload } from '~~/shared/utils/apply-schema'
+// e2e/fixtures/wizard.ts
+import type { WizardPayload } from '~~/shared/utils/wizard-schema'
 
-export const validApplyPayload = (overrides: Partial<ApplyPayload> = {}): ApplyPayload => ({
+export const validWizardPayload = (overrides: Partial<WizardPayload> = {}): WizardPayload => ({
   name: 'Ada Lovelace',
   email: 'ada@example.com',
-  business: 'Lovelace & Babbage',
+  company: 'Lovelace & Babbage',
   /* ...all required fields with sensible defaults... */
-  fitCount: 5,
   turnstileToken: 'test-token',
   website: '',
   ...overrides
@@ -296,16 +295,16 @@ export const validApplyPayload = (overrides: Partial<ApplyPayload> = {}): ApplyP
 ```
 
 ```ts
-// e2e/apply.validation.spec.ts
-import { validApplyPayload } from './fixtures/apply'
+// e2e/wizard.validation.spec.ts
+import { validWizardPayload } from './fixtures/wizard'
 
 test('rejects empty name', async ({ request }) => {
-  const res = await request.post('/api/apply', { data: validApplyPayload({ name: '' }) })
+  const res = await request.post('/api/wizard', { data: validWizardPayload({ name: '' }) })
   expect(res.status()).toBe(400)
 })
 
 test('rejects malformed email', async ({ request }) => {
-  const res = await request.post('/api/apply', { data: validApplyPayload({ email: 'not-an-email' }) })
+  const res = await request.post('/api/wizard', { data: validWizardPayload({ email: 'not-an-email' }) })
   expect(res.status()).toBe(400)
 })
 ```
@@ -314,7 +313,7 @@ Rules:
 
 - **Builder, not constant.** A function that takes overrides composes; a constant doesn't.
 - **Type the overrides against the same schema type the production code uses.** Pulls in via `~~/shared/utils/...` keeps fixtures and production schema in sync.
-- **Don't add scenario-specific helpers to the base builder.** A `validApplyPayloadForRateLimit()` belongs in the spec that uses it.
+- **Don't add scenario-specific helpers to the base builder.** A `validWizardPayloadForRateLimit()` belongs in the spec that uses it.
 
 ## What NOT to Test at This Tier
 

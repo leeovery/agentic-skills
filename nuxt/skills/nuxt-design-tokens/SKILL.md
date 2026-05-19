@@ -46,7 +46,7 @@ the work.
   class catalogue, dark-mode auto-flip, brand palette via `app.config.ts`,
   component default variants
 - **[contextual-overrides.md](references/contextual-overrides.md)** — when
-  to rebind `--ui-*` vars in a section, the `.reach-section-dark` pattern,
+  to rebind `--ui-*` vars in a section, the `.section-dark` pattern,
   scoping rules
 - **[view-transitions.md](references/view-transitions.md)** — theme-toggle
   radial wipe via View Transitions API, fallback handling, `ClientOnly`

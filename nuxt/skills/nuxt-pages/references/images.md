@@ -34,7 +34,7 @@ Two components, different use cases:
 <!-- NuxtImg — modern format chosen at request time via Accept header -->
 <NuxtImg
   src="/img/hero.jpg"
-  alt="Founders at the office"
+  alt="Team at work"
   sizes="100vw md:50vw lg:33vw"
   width="1200"
   height="800"
@@ -45,7 +45,7 @@ Two components, different use cases:
 <!-- NuxtPicture — AVIF + WebP + JPEG fallback baked into the HTML -->
 <NuxtPicture
   src="/img/hero.jpg"
-  alt="Founders at the office"
+  alt="Team at work"
   sizes="100vw md:50vw lg:33vw"
   width="1200"
   height="800"
@@ -84,7 +84,7 @@ The hero image is almost always the LCP element. Tell the browser:
   preload                          
   loading="eager"                  
   fetchpriority="high"             
-  alt="Founders at the office"
+  alt="Team at work"
 />
 ```
 

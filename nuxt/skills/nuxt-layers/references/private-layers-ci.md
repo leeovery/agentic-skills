@@ -86,7 +86,7 @@ suddenly 404s for the layer, check token expiry before chasing anything else.
 | Source | Use case | Example |
 | --- | --- | --- |
 | Relative path | Active layer development, both repos checked out side-by-side | `../../nuxt-layers/base` |
-| `github:org/repo/path#ref` | Production CI, layer published as a private repo | `github:leeovery/nuxt-layers/nuxt-ui#main` |
+| `github:org/repo/path#ref` | Production CI, layer published as a private repo | `github:org/nuxt-layers/nuxt-ui#main` |
 | `npm:@org/layer-name` | Layer published as a private npm package | requires `.npmrc` auth in CI |
 
 Choose by who maintains the layer:

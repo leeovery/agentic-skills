@@ -8,8 +8,6 @@ embedded app surface, the right answer is:
 - Private flows / dashboards → **SPA** (`ssr: false`, client-only)
 - Dynamic pages with personalised content → **SSR** (default)
 
-This file is the decision guide and the syntax.
-
 ---
 
 ## The decision table
@@ -18,7 +16,7 @@ This file is the decision guide and the syntax.
 | --- | --- | --- | --- |
 | Landing / about / pricing | Prerender | `{ prerender: true }` | Identical for everyone, SEO matters, edge cache hit |
 | Blog / docs (CMS-backed but stable) | Prerender at build | `{ prerender: true }` | SEO + speed; rebuild on content change |
-| Apply flow / multi-step form | SPA | `{ ssr: false }` | Client state survives nav; no SEO need |
+| Wizard / multi-step form | SPA | `{ ssr: false }` | Client state survives nav; no SEO need |
 | Authenticated dashboard | SPA | `{ ssr: false }` | Personalised data; no SEO value |
 | Personalised landing | SSR (default) | (none) | Per-request render needed |
 | Aliases / redirects | Redirect | `{ redirect: '/target' }` | Cheaper than a redirect component |
@@ -31,11 +29,11 @@ This file is the decision guide and the syntax.
 // nuxt.config.ts
 export default defineNuxtConfig({
   routeRules: {
-    '/':                { prerender: true },
-    '/about':           { prerender: true },
-    '/founders-letter': { prerender: true },
-    '/apply':           { redirect: '/apply/fit-check' },
-    '/apply/**':        { ssr: false }
+    '/':         { prerender: true },
+    '/about':    { prerender: true },
+    '/pricing':  { prerender: true },
+    '/wizard':   { redirect: '/wizard/profile' },
+    '/wizard/**':{ ssr: false }
   }
 })
 ```
@@ -90,8 +88,8 @@ Use for **private flows** where SEO doesn't matter and shared client
 state matters.
 
 ```typescript
-'/apply/**': { ssr: false }   // multi-step form with useState
-'/admin/**': { ssr: false }   // authenticated dashboard
+'/wizard/**':    { ssr: false }   // multi-step form with useState
+'/dashboard/**': { ssr: false }   // authenticated dashboard
 ```
 
 ---
@@ -103,7 +101,7 @@ SSR, client-side router push on SPA). Cheaper than a `<script
 setup>navigateTo()</script>` redirect.
 
 ```typescript
-'/apply':         { redirect: '/apply/fit-check' }
+'/wizard':        { redirect: '/wizard/profile' }
 '/old-blog/(.+)': { redirect: { to: '/blog/${1}', statusCode: 301 } }
 ```
 
@@ -112,30 +110,31 @@ Default is 302 (temporary).
 
 ---
 
-## Hybrid example: marketing site + apply flow
+## Hybrid example: marketing site + wizard flow
 
 ```typescript
 routeRules: {
   // Static marketing — prerendered
-  '/':                { prerender: true },
-  '/about':           { prerender: true },
-  '/founders-letter': { prerender: true },
+  '/':         { prerender: true },
+  '/about':    { prerender: true },
+  '/pricing':  { prerender: true },
 
   // Alias
-  '/apply':           { redirect: '/apply/fit-check' },
+  '/wizard':   { redirect: '/wizard/profile' },
 
   // Multi-step form — SPA, shared state via useState
-  '/apply/**':        { ssr: false }
+  '/wizard/**':{ ssr: false }
 }
 ```
 
 What this produces on deploy:
 
-- `/`, `/about`, `/founders-letter` → static `.html` files in the
-  asset bundle, served from the edge
-- `/apply` → redirect handler returns 302 → `/apply/fit-check`
-- `/apply/fit-check`, `/apply/business`, etc. → empty shell from the
-  Worker, client-side rendering with shared `useApplyForm()` state
+- `/`, `/about`, `/pricing` → static `.html` files in the asset
+  bundle, served from the edge
+- `/wizard` → redirect handler returns 302 → `/wizard/profile`
+- `/wizard/profile`, `/wizard/preferences`, etc. → empty shell from
+  the server, client-side rendering with shared `useWizardForm()`
+  state
 
 ---
 
@@ -152,38 +151,38 @@ definePageMeta({ layout: 'default' })  // header + footer
 ```
 
 ```vue
-<!-- pages/apply/business.vue -->
+<!-- pages/wizard/preferences.vue -->
 <script setup lang="ts">
-definePageMeta({ layout: 'apply' })    // minimal nav + progress
+definePageMeta({ layout: 'wizard' })   // minimal nav + progress
 </script>
 ```
 
 ```
 app/layouts/
-├── default.vue   <UAppHeader /> + slot + <UAppFooter />
-└── apply.vue     <ApplyNav /> + slot + <ApplyFooter /> (minimal)
+├── default.vue   <AppHeader /> + slot + <AppFooter />
+└── wizard.vue    <WizardNav /> + slot + <WizardFooter /> (minimal)
 ```
 
 Layouts are flat (no nesting in Nuxt 4). Pick the right one per page
-rather than trying to compose multiple layouts.
+rather than trying to compose multiple layouts. See
+[layouts.md](./layouts.md).
 
 ---
 
 ## Multi-step page flow
 
 ```
-app/pages/apply/
-├── fit-check.vue       (step 1)
-├── not-a-fit.vue       (off-ramp from step 1)
-├── business.vue        (step 2)
-├── growth.vue          (step 3)
-├── partnership.vue     (step 4)
-└── thanks.vue          (post-submit)
+app/pages/wizard/
+├── profile.vue        (step 1)
+├── preferences.vue    (step 2)
+├── review.vue         (step 3)
+└── done.vue           (post-submit)
 ```
 
 Each page is its own component. State is shared via a composable
-(`useApplyForm()` — see nuxt-composables/multi-step-state.md). Pages
-navigate to each other via `<UButton to="/apply/growth">`.
+(`useWizardForm()` — see
+[nuxt-composables/multi-step-state.md](../../nuxt-composables/references/multi-step-state.md)).
+Pages navigate to each other via `<UButton to="/wizard/preferences">`.
 
 Don't try to model this as a single page with a `currentStep` ref —
 you'd lose browser back/forward navigation and deep linking.
@@ -195,8 +194,8 @@ you'd lose browser back/forward navigation and deep linking.
 ```vue
 <script setup lang="ts">
 useSeoMeta({
-  title: 'Reach Systems — Apply',
-  description: 'How we\'d work together.'
+  title: 'About',
+  description: 'How we got here.'
 })
 </script>
 ```
@@ -205,6 +204,8 @@ Run-time meta calls work on prerendered pages — the meta is baked
 into the static HTML. For SPA routes, set meta inside the page
 component too; the title updates as the client navigates (no static
 HTML to bake into).
+
+See [seo.md](./seo.md) for the full SEO story.
 
 ---
 
@@ -238,5 +239,7 @@ HTML to bake into).
   hybrid rendering on Cloudflare Workers, prerendered assets bundling
 - **[nuxt-composables](../../nuxt-composables/references/multi-step-state.md)** —
   shared state across SPA routes
+- **[layouts.md](./layouts.md)** — layout switching per-page
+- **[seo.md](./seo.md)** — SEO concerns interact with rendering strategy
 - **[pages.md](./pages.md)** — file-based routing, dynamic routes,
   page meta

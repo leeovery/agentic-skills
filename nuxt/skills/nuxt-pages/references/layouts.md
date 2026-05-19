@@ -39,9 +39,9 @@ The page content is wrapped in `<NuxtLayout>` once at the root:
 ## Picking the layout per page
 
 ```vue
-<!-- pages/apply/business.vue -->
+<!-- pages/wizard/preferences.vue -->
 <script setup lang="ts">
-definePageMeta({ layout: 'apply' })
+definePageMeta({ layout: 'wizard' })
 </script>
 ```
 
@@ -57,7 +57,7 @@ The layout name is the filename without the extension, kebab-cased:
 ```
 app/layouts/
 ├── default.vue       → layout: 'default'  (used when no override)
-├── apply.vue         → layout: 'apply'
+├── wizard.vue        → layout: 'wizard'
 └── checkout-step.vue → layout: 'checkout-step'
 ```
 
@@ -68,7 +68,7 @@ Add a layout when **two or more pages share chrome** that differs from the defau
 | Chrome shape | Layout name | Where it applies |
 | --- | --- | --- |
 | Site header + footer | `default` | Marketing / blog / docs pages |
-| Minimal nav + form-centric main | `apply` | Multi-step form flow |
+| Minimal nav + form-centric main | `wizard` | Multi-step form flow |
 | Sidebar + topbar | `dashboard` | Admin / authenticated app |
 | Centred card on neutral bg | `auth` | Login / signup / reset password |
 | No chrome | `blank` | OG image generation, embeds, fullscreen errors |
@@ -82,35 +82,35 @@ A site with both marketing and an app surface usually has 2 layouts:
 ```
 app/layouts/
 ├── default.vue   ← marketing chrome (AppHeader, AppFooter)
-└── apply.vue     ← form-flow chrome (ApplyNav, ApplyFooter, narrow main)
+└── wizard.vue    ← form-flow chrome (WizardNav, WizardFooter, narrow main)
 ```
 
 ```vue
-<!-- pages/index.vue -->        — uses default (no override)
-<!-- pages/about.vue -->        — uses default
-<!-- pages/apply/business.vue --><script>definePageMeta({ layout: 'apply' })</script>
-<!-- pages/apply/thanks.vue --> <script>definePageMeta({ layout: 'apply' })</script>
+<!-- pages/index.vue -->                  — uses default (no override)
+<!-- pages/about.vue -->                  — uses default
+<!-- pages/wizard/profile.vue --><script>definePageMeta({ layout: 'wizard' })</script>
+<!-- pages/wizard/done.vue --> <script>definePageMeta({ layout: 'wizard' })</script>
 ```
 
-Apply pages share the `ApplyNav` (with progress indicator) and a centred, narrower main column. Marketing pages get the full-width chrome.
+Wizard pages share the `WizardNav` (with progress indicator) and a centred, narrower main column. Marketing pages get the full-width chrome.
 
 ## Layouts can use composables
 
 Layouts are full Vue components — they can run `<script setup>` and call composables:
 
 ```vue
-<!-- app/layouts/apply.vue -->
+<!-- app/layouts/wizard.vue -->
 <script setup lang="ts">
-const { stepMeta } = useApplyForm()
+const { stepMeta } = useWizardForm()
 </script>
 
 <template>
   <div class="flex min-h-screen flex-col">
-    <ApplyNav :step="stepMeta.step" :total-steps="4" :label="stepMeta.label" />
+    <WizardNav :step="stepMeta.step" :total-steps="3" :label="stepMeta.label" />
     <main class="flex flex-1 items-start justify-center px-7 py-20 md:px-10 md:py-28">
       <div class="w-full max-w-[640px]"><slot /></div>
     </main>
-    <ApplyFooter />
+    <WizardFooter />
   </div>
 </template>
 ```
@@ -167,16 +167,16 @@ Use case: a page that flips chrome based on auth state. Better solution: put the
 `<NuxtPage>` mounts/unmounts as the route changes — including when only a query param changes, by default. To keep a layout-mounted component alive across navigations, place it in the layout (not the page).
 
 ```vue
-<!-- app/layouts/apply.vue -->
+<!-- app/layouts/wizard.vue -->
 <template>
   <div>
-    <ApplyNav /> <!-- stays mounted across /apply/business → /apply/growth -->
+    <WizardNav /> <!-- stays mounted across /wizard/profile → /wizard/preferences -->
     <slot /> <!-- this re-renders -->
   </div>
 </template>
 ```
 
-This is why the apply-flow nav stays smoothly visible during step transitions — it's in the layout, not the page.
+This is why a wizard's progress nav stays smoothly visible during step transitions — it's in the layout, not the page.
 
 ## Anti-patterns
 

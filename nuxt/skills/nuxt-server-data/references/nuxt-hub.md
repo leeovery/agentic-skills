@@ -13,7 +13,7 @@ export default defineNuxtConfig({
     db: {
       dialect: 'sqlite',
       connection: {
-        databaseId: '1b422498-d6bd-4146-a0d6-453a2b7ae2ce'  // Cloudflare D1 UUID
+        databaseId: '<your-d1-database-uuid>'
       }
     }
   }
@@ -33,21 +33,21 @@ export { db, schema } from '@nuxthub/db'
 Inside any `server/` file, both `db` and `schema` are available without import:
 
 ```typescript
-// server/api/apply.post.ts
-import { applications } from '../db/schema'
+// server/api/submissions.get.ts
+import { submissions } from '../db/schema'
 import { eq } from 'drizzle-orm'
 
 export default defineEventHandler(async () => {
-  return db.select().from(applications).where(eq(applications.status, 'new'))
+  return db.select().from(submissions).where(eq(submissions.status, 'new'))
 })
 ```
 
-Notice the schema *table* (`applications`) is imported by name; `db` itself is not. That's intentional — the table objects come from your file, the handle is framework-provided.
+Notice the schema *table* (`submissions`) is imported by name; `db` itself is not. That's intentional — the table objects come from your file, the handle is framework-provided.
 
-You can also access via `schema.applications` if you don't want the named import:
+You can also access via `schema.submissions` if you don't want the named import:
 
 ```typescript
-return db.select().from(schema.applications)
+return db.select().from(schema.submissions)
 ```
 
 Both work; named imports are tighter.
@@ -141,10 +141,10 @@ If a migration is listed there, NuxtHub considers it applied. If you need to for
 
 ```bash
 # Row count
-npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) FROM applications"
+npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) FROM submissions"
 
 # Recent rows
-npx wrangler d1 execute DB --remote --command "SELECT id, name, email, created_at FROM applications ORDER BY created_at DESC LIMIT 10"
+npx wrangler d1 execute DB --remote --command "SELECT id, name, email, created_at FROM submissions ORDER BY created_at DESC LIMIT 10"
 
 # Schema introspection
 npx wrangler d1 execute DB --remote --command "SELECT sql FROM sqlite_master WHERE type='table'"

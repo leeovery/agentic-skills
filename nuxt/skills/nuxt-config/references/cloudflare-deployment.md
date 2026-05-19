@@ -17,7 +17,7 @@ export default defineNuxtConfig({
   routeRules: {
     '/':                { prerender: true },
     '/about':           { prerender: true },
-    '/founders-letter': { prerender: true },
+    '/pricing':         { prerender: true },
     '/apply':           { redirect: '/apply/fit-check' },
     '/apply/**':        { ssr: false }
   }
@@ -108,7 +108,7 @@ hub: {
   db: {
     dialect: 'sqlite',
     connection: {
-      databaseId: '1b422498-...'   // Cloudflare D1 database UUID
+      databaseId: '<your-d1-database-uuid>'
     }
   }
 }

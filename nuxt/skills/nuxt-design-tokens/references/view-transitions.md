@@ -24,10 +24,10 @@ sun/moon icon" effect.
 ::view-transition-old(root) { z-index: 1; animation: none; opacity: 1; }
 ::view-transition-new(root) {
   z-index: 2;
-  animation: reach-theme-wipe 900ms var(--ease-out-expo) forwards;
+  animation: theme-wipe 900ms var(--ease-out-expo) forwards;
 }
 
-@keyframes reach-theme-wipe {
+@keyframes theme-wipe {
   from { clip-path: circle(0     at var(--wipe-x, 100%) var(--wipe-y, 0)); }
   to   { clip-path: circle(150%  at var(--wipe-x, 100%) var(--wipe-y, 0)); }
 }

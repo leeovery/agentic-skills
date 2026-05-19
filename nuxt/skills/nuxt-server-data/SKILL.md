@@ -28,12 +28,12 @@ The server-side persistence layer for a Nuxt + NuxtHub + Cloudflare app. Drizzle
 
 ```
 Vue component
-   │  $fetch('/api/apply', ...)
+   │  $fetch('/api/wizard', ...)
    ▼
-server/api/apply.post.ts        ← Nitro event handler
+server/api/wizard.post.ts        ← Nitro event handler
    │  validates via shared Zod schema
    ▼
-db.insert(applications).values(...)
+db.insert(submissions).values(...)
    │  auto-imported `db` from NuxtHub
    ▼
 Cloudflare D1                    ← SQLite at the edge
@@ -46,38 +46,36 @@ Cloudflare D1                    ← SQLite at the edge
 import { sql } from 'drizzle-orm'
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 
-export const applications = sqliteTable('applications', {
-  id:        text('id').primaryKey(),
-  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
-  name:      text('name').notNull(),
-  email:     text('email').notNull(),
-  services:  text('services', { mode: 'json' }).$type<string[]>(),
-  fitCount:  integer('fit_count'),
-  status:    text('status').notNull().default('new')
+export const submissions = sqliteTable('submissions', {
+  id:          text('id').primaryKey(),
+  createdAt:   text('created_at').notNull().default(sql`(datetime('now'))`),
+  name:        text('name').notNull(),
+  email:       text('email').notNull(),
+  preferences: text('preferences', { mode: 'json' }).$type<string[]>(),
+  status:      text('status').notNull().default('new')
 })
 ```
 
 ```typescript
-// server/api/apply.post.ts
+// server/api/wizard.post.ts
 import { and, eq, gt, sql } from 'drizzle-orm'
-import { applications } from '../db/schema'
+import { submissions } from '../db/schema'
 
 export default defineEventHandler(async (event) => {
-  const data = await readValidatedBody(event, applyPayloadSchema.parse)
+  const data = await readValidatedBody(event, wizardPayloadSchema.parse)
 
-  await db.insert(applications).values({
+  await db.insert(submissions).values({
     id: crypto.randomUUID(),
     name: data.name,
     email: data.email,
-    services: data.services,
-    fitCount: data.fitCount
+    preferences: data.preferences
   })
 
   return { ok: true }
 })
 ```
 
-Notice: `db` is **auto-imported** by NuxtHub — no `import { db } from ...` line. Schema is imported by name (`applications`) from `../db/schema`.
+Notice: `db` is **auto-imported** by NuxtHub — no `import { db } from ...` line. Schema is imported by name (`submissions`) from `../db/schema`.
 
 ## Critical: migrations don't auto-apply
 
@@ -103,6 +101,6 @@ Detail in [nuxt-hub.md](references/nuxt-hub.md). This is the single biggest foot
 ## Related
 
 - **[nuxt-config](../nuxt-config/references/cloudflare-deployment.md)** — Cloudflare Workers deployment, `wrangler.json` generation, secrets vs vars
-- **[nuxt-forms](../nuxt-forms/references/marketing-forms.md)** — the `apply.post.ts` route that consumes the `applications` table
+- **[nuxt-forms](../nuxt-forms/references/marketing-forms.md)** — the `wizard.post.ts` route that consumes the `submissions` table
 - **[nuxt-testing](../nuxt-testing/references/test-seams.md)** — DB test isolation seam (`/api/_dev/db`)
 - **[nuxt-repositories](../nuxt-repositories/SKILL.md)** — client-side API access (the layer above this one)

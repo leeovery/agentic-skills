@@ -4,8 +4,6 @@ A composable that holds form state across several route-level pages.
 Each page mounts/unmounts as the user navigates, but the state
 survives — because it lives in `useState`, not in the component.
 
-Pattern from `reach-systems-app/app/composables/useApplyForm.ts`.
-
 ---
 
 ## Why `useState`, not `ref`
@@ -13,7 +11,7 @@ Pattern from `reach-systems-app/app/composables/useApplyForm.ts`.
 `useState(key, init)` is Nuxt's SSR-safe shared-state primitive. Two
 properties matter here:
 
-1. **Keyed by string** — calling `useState('apply-form')` from any
+1. **Keyed by string** — calling `useState('wizard-form')` from any
    component returns the same reactive ref. State follows the key,
    not the component instance.
 2. **SSR-safe** — server and client read the same value. No hydration
@@ -33,13 +31,12 @@ prematurely.
 ## Shape
 
 ```typescript
-// composables/useApplyForm.ts
+// composables/useWizardForm.ts
 
-interface ApplyFormData {
+interface WizardFormData {
   name: string
   email: string
-  business: string
-  services: string[]
+  preferences: string[]
   // …
   turnstileToken: string
 }
@@ -50,42 +47,36 @@ interface SubmitState {
 }
 
 const STEP_META: Record<string, { step: number; label: string }> = {
-  'fit-check':   { step: 1, label: 'Step 1 of 4' },
-  'business':    { step: 2, label: 'Step 2 of 4' },
-  'growth':      { step: 3, label: 'Step 3 of 4' },
-  'partnership': { step: 4, label: 'Step 4 of 4' },
-  'thanks':      { step: 4, label: 'Application received' }
+  'profile':     { step: 1, label: 'Step 1 of 3' },
+  'preferences': { step: 2, label: 'Step 2 of 3' },
+  'review':      { step: 3, label: 'Step 3 of 3' },
+  'done':        { step: 3, label: 'All done' }
 }
 
-function emptyForm(): ApplyFormData {
-  return { name: '', email: '', business: '', services: [], turnstileToken: '' /* … */ }
+function emptyForm(): WizardFormData {
+  return { name: '', email: '', preferences: [], turnstileToken: '' /* … */ }
 }
 
-export function useApplyForm() {
-  const form        = useState<ApplyFormData>('apply-form', emptyForm)
-  const submitState = useState<SubmitState>('apply-submit', () => ({ loading: false, error: '' }))
-  const fitAnswers  = useState<boolean[]>('apply-fit', () => Array(5).fill(false))
+export function useWizardForm() {
+  const form        = useState<WizardFormData>('wizard-form', emptyForm)
+  const submitState = useState<SubmitState>('wizard-submit', () => ({ loading: false, error: '' }))
 
-  const fitCount     = computed(() => fitAnswers.value.filter(Boolean).length)
-  const fitQualifies = computed(() => fitCount.value >= 3)
-
-  // Derive current step from the route, not from a tracked index. Means a
-  // user landing on /apply/growth via URL gets the correct step state.
+  // Derive current step from the route, not from a tracked index. A user
+  // landing on /wizard/preferences via URL gets the correct step state.
   const route = useRoute()
   const stepMeta = computed(() => {
-    const slug = route.path.split('/').filter(Boolean).pop() ?? 'fit-check'
-    return STEP_META[slug] ?? STEP_META['fit-check']!
+    const slug = route.path.split('/').filter(Boolean).pop() ?? 'profile'
+    return STEP_META[slug] ?? STEP_META['profile']!
   })
 
   function reset() {
     form.value        = emptyForm()
-    fitAnswers.value  = Array(5).fill(false)
     submitState.value = { loading: false, error: '' }
   }
 
   async function submit() { /* see below */ }
 
-  return { form, fitAnswers, fitCount, fitQualifies, stepMeta, submit, submitState, reset }
+  return { form, stepMeta, submit, submitState, reset }
 }
 ```
 
@@ -96,7 +87,7 @@ export function useApplyForm() {
 The composable derives the current step from `route.path`, not from
 an internal counter. Why this matters:
 
-- **Deep-linking works.** A user with a saved URL hits `/apply/growth`
+- **Deep-linking works.** A user with a saved URL hits `/wizard/review`
   and sees step 3, with the form state empty if they haven't filled
   earlier steps.
 - **Back/forward browser nav works.** No internal state to keep in
@@ -106,8 +97,8 @@ an internal counter. Why this matters:
 ```typescript
 const route = useRoute()
 const stepMeta = computed(() => {
-  const slug = route.path.split('/').filter(Boolean).pop() ?? 'fit-check'
-  return STEP_META[slug] ?? STEP_META['fit-check']!
+  const slug = route.path.split('/').filter(Boolean).pop() ?? 'profile'
+  return STEP_META[slug] ?? STEP_META['profile']!
 })
 ```
 
@@ -123,18 +114,16 @@ page component, so the navigation flow is defined once.
 async function submit() {
   submitState.value.error = ''
 
-  const payload = { ...form.value, fitCount: fitCount.value }
-
-  const parsed = applyPayloadSchema.safeParse(payload)
+  const parsed = wizardPayloadSchema.safeParse(form.value)
   if (!parsed.success) {
     submitState.value.error = parsed.error.issues[0]?.message ?? 'Please check your answers.'
     return
   }
 
   try {
-    await $fetch('/api/apply', { method: 'POST', body: parsed.data })
+    await $fetch('/api/wizard', { method: 'POST', body: parsed.data })
     reset()
-    await navigateTo('/apply/thanks')
+    await navigateTo('/wizard/done')
   } catch (err) {
     const statusMessage = (err as { data?: { statusMessage?: string } })?.data?.statusMessage
     submitState.value.error = statusMessage || (err instanceof Error ? err.message : 'Something went wrong.')
@@ -150,7 +139,7 @@ Notes:
   it inside `submit()` would fight the UI. The page's click handler
   sets it.
 - **Reset → navigate after success.** Form is cleared before the
-  navigation; thanks page loads with empty state.
+  navigation; the done page loads with empty state.
 - **Capture `statusMessage` from server.** `$fetch` rejects with a
   FetchError that carries the server's `statusMessage` on
   `err.data.statusMessage`. Surface it to the user.
@@ -161,19 +150,19 @@ Notes:
 
 ## Multi-key state for related-but-independent pieces
 
-The composable splits state across multiple `useState` keys:
+Split state across `useState` keys when pieces have different
+lifetimes or reset behaviour:
 
-- `apply-form` — the form data
-- `apply-submit` — submit loading/error
-- `apply-fit` — the fit-check checkboxes (separate because they're
-  visual state, not part of the submitted payload)
+- `wizard-form` — the form data
+- `wizard-submit` — submit loading/error
+- `wizard-progress` — UI-only state (visited steps, optional
+  checkboxes that aren't part of the payload)
 
-Why split: each piece has different lifetime + reset behaviour.
-`reset()` clears all three; an individual error message can update
-without touching the form data; the fit checkboxes don't get
-serialised into the API payload.
+`reset()` clears all of them; an individual error message can update
+without touching the form data; UI-only state stays out of the
+submitted payload.
 
-Don't over-split — three keys here is the natural shape, not five.
+Don't over-split — two or three keys is the natural shape, not five.
 
 ---
 
@@ -184,7 +173,6 @@ Don't over-split — three keys here is the natural shape, not five.
 ```typescript
 function reset() {
   form.value        = emptyForm()
-  fitAnswers.value  = Array(5).fill(false)
   submitState.value = { loading: false, error: '' }
 }
 ```
@@ -218,7 +206,7 @@ When NOT to use:
 ```typescript
 // ❌ module-scoped ref — leaks across requests on the server
 const form = ref({ name: '', email: '' })
-export function useApplyForm() { return { form } }
+export function useWizardForm() { return { form } }
 
 // ❌ internal step counter — drifts from the URL
 const currentStep = ref(1)

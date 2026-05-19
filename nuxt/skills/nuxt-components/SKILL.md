@@ -11,7 +11,7 @@ Vue 3 Composition API components with standardized organization and patterns.
 
 **[components.md](references/components.md)** - Script setup order, patterns, organization
 
-**[design-system-primitives.md](references/design-system-primitives.md)** - Building semantic layout/typography primitives (Display, MonoLabel, SectionMarker, ReachSection, PageShell), the `tailwind-variants` (`tv()`) factory idiom for component variant APIs, composition rules, when to add a new primitive
+**[design-system-primitives.md](references/design-system-primitives.md)** - Building semantic layout/typography primitives (Display, MonoLabel, SectionMarker, PageSection, PageShell), the `tailwind-variants` (`tv()`) factory idiom for component variant APIs, composition rules, when to add a new primitive
 
 ## Directory Structure
 

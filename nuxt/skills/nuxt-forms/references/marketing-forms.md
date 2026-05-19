@@ -10,38 +10,38 @@ admin-app forms:
 - Server-side validation is the source of truth — client validation
   is UX sugar
 
-This file documents that pattern as built for the reach-systems apply
-flow: `UForm` + Zod schemas + Turnstile + honeypot + Resend + D1.
+This file documents that pattern: `UForm` + Zod schemas + Turnstile +
+honeypot + a queue/DB.
 
 ---
 
 ## Shape: composable + per-step `UForm`
 
-State lives in a `useApplyForm()` composable (see
-`nuxt-composables/multi-step-state.md` for the composable itself).
-Each step is a route-level page with its own `<UForm>`:
+State lives in a `useWizardForm()` composable (see
+`nuxt-composables/multi-step-state.md`). Each step is a route-level
+page with its own `<UForm>`:
 
 ```vue
-<!-- pages/apply/partnership.vue -->
+<!-- pages/wizard/preferences.vue -->
 <script setup lang="ts">
 import type { FormSubmitEvent, Form } from '@nuxt/ui'
 
-definePageMeta({ layout: 'apply' })
+definePageMeta({ layout: 'wizard' })
 
-const { form, submit, submitState } = useApplyForm()
+const { form, submit, submitState } = useWizardForm()
 
 const formRef = useTemplateRef<InstanceType<typeof Form>>('form')
 const turnstileRef = ref<{ reset: () => void } | null>(null)
 
-type Schema = typeof partnershipStepSchema
+type Schema = typeof preferencesStepSchema
 
 async function onSubmit(_event: FormSubmitEvent<Schema>) { … }
 </script>
 
 <template>
-  <UForm ref="form" :schema="partnershipStepSchema" :state="form" @submit="onSubmit">
-    <UFormField name="services" required>
-      <ApplyChipGroup v-model="form.services" :options="servicesOptions" multiple />
+  <UForm ref="form" :schema="preferencesStepSchema" :state="form" @submit="onSubmit">
+    <UFormField name="preferences" required>
+      <ChipGroup v-model="form.preferences" :options="preferenceOptions" multiple />
     </UFormField>
 
     <!-- honeypot, turnstile, submit -->
@@ -62,48 +62,46 @@ One schema file in `shared/utils/` so client (Nuxt auto-imports from
 see it.
 
 ```typescript
-// shared/utils/apply-schema.ts
+// shared/utils/wizard-schema.ts
 import { z } from 'zod'
 
-export const applyFormSchema = z.object({
-  name:    z.string().trim().min(1).max(200),
-  email:   z.string().trim().toLowerCase().email().max(200),
+export const wizardFormSchema = z.object({
+  name:        z.string().trim().min(1).max(200),
+  email:       z.string().trim().toLowerCase().email().max(200),
   // ...
-  services: z.array(z.string().max(100)).min(1).max(10),
-  budget:   z.string().trim().min(1).max(100)
+  preferences: z.array(z.string().max(100)).min(1).max(10),
+  budget:      z.string().trim().min(1).max(100)
 })
 
 // Step schemas — subsets of the full schema, for per-step UForm validation
-export const businessStepSchema    = applyFormSchema.pick({ name: true, email: true, /* ... */ })
-export const growthStepSchema      = applyFormSchema.pick({ acquisition: true, challenge: true, agency: true })
-export const partnershipStepSchema = applyFormSchema.pick({ services: true, budget: true, camera: true, other: true })
+export const profileStepSchema     = wizardFormSchema.pick({ name: true, email: true /* ... */ })
+export const preferencesStepSchema = wizardFormSchema.pick({ preferences: true, budget: true })
+export const reviewStepSchema      = wizardFormSchema.pick({ /* final-step fields */ })
 
 // Payload schema — what the server actually accepts. Extends the full schema
-// with server-required fields (Turnstile token, honeypot, derived counts).
-export const applyPayloadSchema = applyFormSchema.extend({
-  fitCount:       z.number().int().min(0).max(5),
+// with server-required fields (Turnstile token, honeypot).
+export const wizardPayloadSchema = wizardFormSchema.extend({
   turnstileToken: z.string().min(1, 'Human verification required'),
   website:        z.string().max(200).optional().default('')  // honeypot
 })
 
-export type ApplyForm = z.infer<typeof applyFormSchema>
-export type ApplyPayload = z.infer<typeof applyPayloadSchema>
+export type WizardForm    = z.infer<typeof wizardFormSchema>
+export type WizardPayload = z.infer<typeof wizardPayloadSchema>
 ```
 
 Pattern:
 
-- **`applyFormSchema`** — the canonical form shape (without
+- **`wizardFormSchema`** — the canonical form shape (without
   server-only fields)
 - **`<step>StepSchema`** — `pick()` subsets for per-step `:schema`
   validation
-- **`applyPayloadSchema`** — `.extend()` on top of the form schema
-  with server-required fields (Turnstile, honeypot, derived totals).
-  This is what the server route validates against.
+- **`wizardPayloadSchema`** — `.extend()` on top of the form schema
+  with server-required fields (Turnstile, honeypot). This is what the
+  server route validates against.
 
 Why subsets matter: each step's `<UForm :schema="...">` runs only
-the validators relevant to that step's fields. The user doesn't get
-"phone is required" while filling out the business step if phone
-lives on a later step.
+the validators relevant to that step's fields. The user doesn't see
+"phone is required" while filling out a step where phone isn't asked.
 
 ### Coercion via `z.preprocess`
 
@@ -139,7 +137,7 @@ Configuration:
 
 - Widget mode set to "invisible" on the Turnstile dashboard
 - Site key hardcoded in `nuxt.config.ts` (`turnstile.siteKey`) — public,
-  domain-restricted; see nuxt-config/cloudflare-deployment.md for why
+  domain-restricted; see `nuxt-config/cloudflare-deployment.md` for why
 - Secret key set as a Worker secret (`NUXT_TURNSTILE_SECRET_KEY`)
 
 ### Token-await pattern
@@ -178,7 +176,7 @@ token (Turnstile tokens are single-use).
 ### Server verification
 
 ```typescript
-// server/api/apply.post.ts
+// server/api/wizard.post.ts
 const result = await verifyTurnstileToken(data.turnstileToken, event)
 if (!result.success) {
   throw createError({ statusCode: 400, statusMessage: 'Human verification failed. Please try again.' })
@@ -223,10 +221,9 @@ Don't name it `honeypot` — bots may filter that out.
 
 ## The UForm submit-button gotcha
 
-Reach-systems found that a standard `<UButton type="submit">` inside
-`<UForm>` silently no-op'd in their setup (click → no event, no
-network). Direct trigger via the form's exposed `submit()` method
-works deterministically:
+A standard `<UButton type="submit">` inside `<UForm>` can silently
+no-op (click → no event, no network). Direct trigger via the form's
+exposed `submit()` method works deterministically:
 
 ```vue
 <script setup lang="ts">
@@ -261,16 +258,16 @@ Notes:
 - Errors caught in `onSubmit` are surfaced via shared state
   (`submitState.error`) rather than a UForm-internal store
 
-If you also try `<button type="submit">` and it works for you, great
-— but the manual-trigger path is the one to fall back to if you ever
-see a silent submit no-op.
+If `<UButton type="submit">` works for you, great — keep this manual-
+trigger path in mind as the fallback if you ever see a silent
+submit no-op.
 
 ---
 
 ## Chip toggle component (single/multi-select)
 
 ```vue
-<!-- ApplyChipGroup.vue -->
+<!-- ChipGroup.vue -->
 <script setup lang="ts">
 const model = defineModel<string | string[]>()
 
@@ -320,8 +317,8 @@ single and multi via the `multiple` prop. Type union matches what
 the consumer binds:
 
 ```vue
-<ApplyChipGroup v-model="form.services" :options="servicesOptions" multiple />
-<ApplyChipGroup v-model="form.camera"   :options="cameraOptions" />
+<ChipGroup v-model="form.preferences" :options="preferenceOptions" multiple />
+<ChipGroup v-model="form.plan"        :options="planOptions" />
 ```
 
 Built from `UButton`s rather than raw buttons so it inherits the
@@ -332,7 +329,10 @@ Nuxt UI focus ring, sizing, and `:ui` overrides.
 ## Server route shape
 
 ```typescript
-// server/api/apply.post.ts
+// server/api/wizard.post.ts
+import { and, eq, gt, sql } from 'drizzle-orm'
+import { submissions } from '../db/schema'
+
 const MAX_PER_IP_PER_HOUR = 3
 
 export default defineEventHandler(async (event) => {
@@ -344,7 +344,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Schema validation
-  const parsed = applyPayloadSchema.safeParse(raw)
+  const parsed = wizardPayloadSchema.safeParse(raw)
   if (!parsed.success) {
     throw createError({
       statusCode: 400,
@@ -364,10 +364,10 @@ export default defineEventHandler(async (event) => {
   const ip = getRequestIP(event, { xForwardedFor: true }) ?? ''
   if (ip) {
     const [row] = await db.select({ count: sql<number>`count(*)` })
-      .from(applications)
+      .from(submissions)
       .where(and(
-        eq(applications.ip, ip),
-        gt(applications.createdAt, sql`datetime('now', '-1 hour')`)
+        eq(submissions.ip, ip),
+        gt(submissions.createdAt, sql`datetime('now', '-1 hour')`)
       ))
     if (row && row.count >= MAX_PER_IP_PER_HOUR) {
       throw createError({ statusCode: 429, statusMessage: 'Too many submissions. Please try again later.' })
@@ -375,12 +375,13 @@ export default defineEventHandler(async (event) => {
   }
 
   // Persist + notify
-  await db.insert(applications).values({ id: crypto.randomUUID(), ip, ...data })
+  const record = { id: crypto.randomUUID(), ip, ...data }
+  await db.insert(submissions).values(record)
 
-  // Fire emails in parallel; don't fail the request if email fails — the row is saved
+  // Fire emails in parallel; don't fail the request if email fails
   await Promise.allSettled([
-    sendFounderNotification(record),
-    sendApplicantConfirmation(record)
+    sendNotification(record),
+    sendConfirmation(record)
   ])
 
   return { ok: true, id: record.id }
@@ -391,7 +392,7 @@ Order matters: honeypot first (cheapest), then schema, then Turnstile
 (network call), then rate limit (DB read), then persist. Reject as
 early as possible.
 
-Emails via `Promise.allSettled` so a Resend hiccup doesn't fail the
+Emails via `Promise.allSettled` so a provider hiccup doesn't fail the
 submission — the row is the source of truth.
 
 ### Client-side error surfacing
@@ -400,7 +401,7 @@ Server `statusMessage` is captured by the composable:
 
 ```typescript
 try {
-  await $fetch('/api/apply', { method: 'POST', body: parsed.data })
+  await $fetch('/api/wizard', { method: 'POST', body: parsed.data })
 } catch (err) {
   const statusMessage = (err as { data?: { statusMessage?: string } })?.data?.statusMessage
   submitState.value.error = statusMessage || (err instanceof Error ? err.message : 'Something went wrong.')
@@ -420,16 +421,18 @@ try {
 - ❌ Separate `clientSchema.ts` and `serverSchema.ts` — single file in
   `shared/utils/` ensures they don't drift
 - ❌ Storing Turnstile site key in `runtimeConfig.public` — it'll get
-  wiped on Cloudflare deploy (see nuxt-config/cloudflare-deployment.md)
+  wiped on Cloudflare deploy (see `nuxt-config/cloudflare-deployment.md`)
 - ❌ Reusing a Turnstile token after submission failure — tokens are
   single-use; always reset the widget on error
 - ❌ Failing the request when notification email fails — the
-  application is saved; email is a separate concern
+  submission is saved; email is a separate concern
 
 ## Related
 
 - **[nuxt-composables](../../nuxt-composables/references/multi-step-state.md)** —
-  `useApplyForm` composable shape
+  `useWizardForm` composable shape
 - **[nuxt-config](../../nuxt-config/references/cloudflare-deployment.md)** —
   Turnstile siteKey deploy behaviour
+- **[nuxt-server-data](../../nuxt-server-data/SKILL.md)** — the
+  `submissions` table the server route writes to
 - **[forms.md](./forms.md)** — Nuxt UI form / validation basics

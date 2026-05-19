@@ -15,7 +15,7 @@ export default defineNuxtConfig({
 
   site: {
     url: 'https://example.com',          // required — used by every submodule
-    name: 'Reach Systems',
+    name: 'Example',
     description: 'Default description fallback',
     defaultLocale: 'en'
   }
@@ -30,10 +30,10 @@ export default defineNuxtConfig({
 <!-- pages/about.vue -->
 <script setup lang="ts">
 useSeoMeta({
-  title: 'About — Reach Systems',
-  description: 'Founders Curtis and Lee on what Reach is and why it exists.',
-  ogTitle: 'About — Reach Systems',
-  ogDescription: 'Founders Curtis and Lee on what Reach is and why it exists.',
+  title: 'About',
+  description: 'How we got here.',
+  ogTitle: 'About',
+  ogDescription: 'How we got here.',
   twitterCard: 'summary_large_image'
 })
 </script>
@@ -51,8 +51,8 @@ Rules:
 ```vue
 <!-- app.vue -->
 <script setup lang="ts">
-const title = 'Reach Systems — You run the business. We\'ll grow it.'
-const description = 'Not an agency. An operating system for founder-led businesses.'
+const title = 'Site name — value prop'
+const description = 'One-sentence description of what the site does.'
 
 useSeoMeta({
   title,
@@ -78,10 +78,10 @@ Set a title template once:
 
 ```typescript
 // app.vue
-useHead({ titleTemplate: (title) => title ? `${title} · Reach Systems` : 'Reach Systems' })
+useHead({ titleTemplate: (title) => title ? `${title} · Site name` : 'Site name' })
 ```
 
-Page-level `title: 'About'` then renders as `About · Reach Systems`. Skip the template if you'd rather write the full title per page (more flexible, more typing).
+Page-level `title: 'About'` then renders as `About · Site name`. Skip the template if you'd rather write the full title per page (more flexible, more typing).
 
 ## Open Graph images via `nuxt-og-image`
 
@@ -115,7 +115,7 @@ defineProps<{ title: string }>()
 ```vue
 <!-- pages/about.vue -->
 <script setup lang="ts">
-defineOgImage({ component: 'Default', title: 'About — Reach Systems' })
+defineOgImage({ component: 'Default', title: 'About' })
 </script>
 ```
 
@@ -135,14 +135,13 @@ For a marketing site with ~5 pages, hand-designed PNGs are easier.
 // nuxt.config.ts
 sitemap: {
   exclude: [
-    '/apply/**',          // private flow, don't index
-    '/apply/not-a-fit',
-    '/apply/thanks'
+    '/wizard/**',         // private flow, don't index
+    '/wizard/done'
   ]
 }
 ```
 
-`/apply/**` shouldn't be in the sitemap (it's the SPA application flow — no SEO value, and `/thanks` would be confusing if crawled). Exclude it explicitly.
+A multi-step wizard / private flow shouldn't be in the sitemap — no SEO value, and `/done`-style success pages would be confusing if crawled. Exclude explicitly.
 
 ### Dynamic sitemap entries
 
@@ -170,7 +169,7 @@ The handler runs at sitemap-generation time (during build for prerendered output
 ```typescript
 // nuxt.config.ts
 robots: {
-  disallow: ['/apply'],
+  disallow: ['/wizard'],
   sitemap: 'https://example.com/sitemap.xml'
 }
 ```
@@ -179,7 +178,7 @@ For production: allow all by default, deny the private flow paths. For staging: 
 
 ```typescript
 robots: {
-  disallow: process.env.NUXT_PUBLIC_SITE_URL?.includes('staging') ? ['/'] : ['/apply'],
+  disallow: process.env.NUXT_PUBLIC_SITE_URL?.includes('staging') ? ['/'] : ['/wizard'],
   sitemap: `${process.env.NUXT_PUBLIC_SITE_URL}/sitemap.xml`
 }
 ```
@@ -205,24 +204,24 @@ JSON-LD schema for rich results in search. Component-based API:
 <script setup lang="ts">
 useSchemaOrg([
   defineOrganization({
-    name: 'Reach Systems',
-    url: 'https://reachsystems.ai',
+    name: 'Example',
+    url: 'https://example.com',
     logo: '/logo.png',
-    sameAs: ['https://linkedin.com/company/reach-systems']
+    sameAs: ['https://linkedin.com/company/example']
   })
 ])
 </script>
 ```
 
 ```vue
-<!-- pages/founders-letter.vue -->
+<!-- pages/blog/[slug].vue -->
 <script setup lang="ts">
 useSchemaOrg([
   defineArticle({
-    headline: 'A letter from the founders',
-    datePublished: '2026-04-22',
-    dateModified: '2026-05-01',
-    author: ['Curtis', 'Lee']
+    headline: post.title,
+    datePublished: post.publishedAt,
+    dateModified: post.updatedAt,
+    author: post.authors
   })
 ])
 </script>

@@ -1,8 +1,8 @@
 # Design System Primitives
 
-The reach-systems marketing site uses a small set of *semantic
-layout/typography primitives* — not domain components, not UI library
-wrappers. These cover 90 % of the page composition surface.
+A small set of *semantic layout/typography primitives* — not domain
+components, not UI library wrappers — covers 90 % of the page composition
+surface on a marketing site.
 
 This file documents that pattern: what each primitive is for, how they
 compose, and the `tailwind-variants` factory idiom that powers their
@@ -16,7 +16,7 @@ prop APIs.
 | `<MonoLabel>` | Uppercase mono caps label (meta info, eyebrows) with tone variants |
 | `<SectionMarker>` | Numbered section header with optional accent dot + caption |
 | `<PageShell>` | Max-width container (sets the site's editorial measure) |
-| `<ReachSection>` | Section wrapper with `tone` and `spacing` variants, wraps `PageShell` |
+| `<PageSection>` | Section wrapper with `tone` and `spacing` variants, wraps `PageShell` |
 
 These are auto-imported via Nuxt's component scan. Reach for them
 before reaching for raw heading tags or div wrappers.
@@ -144,7 +144,7 @@ Notice the composition: `SectionMarker` is built from `MonoLabel`s,
 not from raw Tailwind classes. Primitives compose primitives. When
 you change `MonoLabel`'s tracking, `SectionMarker` follows.
 
-## `<ReachSection>` — section wrapper with tone
+## `<PageSection>` — section wrapper with tone
 
 ```vue
 <script setup lang="ts">
@@ -169,7 +169,7 @@ const section = tv({
   variants: {
     tone: {
       default: 'bg-default',
-      dark:    'reach-section-dark dark bg-default text-default'
+      dark:    'section-dark dark bg-default text-default'
     },
     spacing: {
       default: 'py-24 md:py-28',
@@ -189,7 +189,7 @@ const section = tv({
 ```
 
 `tone="dark"` adds three classes:
-- `reach-section-dark` — the contextual override hook (see
+- `section-dark` — the contextual override hook (see
   `nuxt-design-tokens/references/contextual-overrides.md`)
 - `dark` — Tailwind class that flips child semantic classes to dark
   mode regardless of page mode
@@ -242,7 +242,7 @@ When NOT to use it:
 ## Composition rules
 
 1. **Primitives compose primitives.** `SectionMarker` is built from
-   `MonoLabel`. `ReachSection` is built from `PageShell`. Don't reach
+   `MonoLabel`. `PageSection` is built from `PageShell`. Don't reach
    past the primitive into raw Tailwind classes when a primitive
    exists.
 2. **`as` prop > new component.** Need an `h1` instead of an `h2`?
@@ -285,13 +285,13 @@ Sign you DON'T need a primitive:
 <!-- ✔ -->
 <Display>…</Display>
 
-<!-- ❌ section with inline padding + container; bypasses ReachSection + PageShell -->
+<!-- ❌ section with inline padding + container; bypasses PageSection + PageShell -->
 <section class="py-24 md:py-28 bg-default">
   <div class="mx-auto w-full max-w-[1320px] px-7 md:px-10">…</div>
 </section>
 
 <!-- ✔ -->
-<ReachSection>…</ReachSection>
+<PageSection>…</PageSection>
 
 <!-- ❌ a "DisplayXl" / "DisplayLarge" / "DisplayMedium" component family -->
 <DisplayXl>…</DisplayXl>

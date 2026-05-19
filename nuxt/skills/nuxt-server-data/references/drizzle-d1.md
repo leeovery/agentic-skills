@@ -17,30 +17,30 @@ Place schemas in `server/db/schema.ts`. NuxtHub picks them up via the `@nuxthub/
 import { sql } from 'drizzle-orm'
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 
-export const applications = sqliteTable('applications', {
-  id:        text('id').primaryKey(),
-  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+export const submissions = sqliteTable('submissions', {
+  id:          text('id').primaryKey(),
+  createdAt:   text('created_at').notNull().default(sql`(datetime('now'))`),
 
   // Foreign keys — `int` references the type in TypeScript, the SQL is
   // generated for you (`REFERENCES users(id) ON DELETE CASCADE`)
-  userId:    integer('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId:      integer('user_id').references(() => users.id, { onDelete: 'cascade' }),
 
   // JSON columns — D1 / SQLite store as text, Drizzle handles parse/stringify
-  socials:   text('socials', { mode: 'json' }).$type<Record<string, string>>(),
-  services:  text('services', { mode: 'json' }).$type<string[]>(),
+  socials:     text('socials', { mode: 'json' }).$type<Record<string, string>>(),
+  preferences: text('preferences', { mode: 'json' }).$type<string[]>(),
 
   // Constraints
-  status:    text('status').notNull().default('new'),
-  email:     text('email').notNull(),
+  status:      text('status').notNull().default('new'),
+  email:       text('email').notNull(),
 
   // Numbers
-  fitCount:  integer('fit_count')
+  score:       integer('score')
 })
 ```
 
 ### Conventions
 
-- **Table names**: `snake_case` plural (`applications`, `team_members`)
+- **Table names**: `snake_case` plural (`submissions`, `team_members`)
 - **Column names**: `snake_case` in SQL, `camelCase` in TypeScript — Drizzle handles the mapping via the first argument to the column builder
 - **`id` always primary key** — choose `text('id').primaryKey()` for UUIDs or `integer('id').primaryKey({ autoIncrement: true })` for sequential
 - **Timestamps as text via `datetime('now')`** — SQLite has no native datetime; `text` + `datetime('now')` is the idiomatic SQLite pattern and works with Drizzle's `sql\`(datetime('now'))\`` default
@@ -51,7 +51,7 @@ The killer feature for keeping a schema sane:
 
 ```typescript
 socials: text('socials', { mode: 'json' }).$type<Record<string, string>>()
-services: text('services', { mode: 'json' }).$type<string[]>()
+preferences: text('preferences', { mode: 'json' }).$type<string[]>()
 ```
 
 `mode: 'json'` makes Drizzle stringify on write and parse on read. `$type<…>()` adds the TypeScript type. On disk it's a `TEXT` column with JSON contents.
@@ -75,36 +75,35 @@ Use for: small structured data (≤10 KB), denormalised arrays/maps, anything yo
 `db` is auto-imported. The named tables are imported from `../db/schema`.
 
 ```typescript
-import { applications } from '../db/schema'
+import { submissions } from '../db/schema'
 import { and, eq, gt, sql } from 'drizzle-orm'
 
 // SELECT
-const rows = await db.select().from(applications).where(eq(applications.email, 'a@b.com'))
+const rows = await db.select().from(submissions).where(eq(submissions.email, 'a@b.com'))
 
 // SELECT specific columns
 const rows = await db
-  .select({ id: applications.id, name: applications.name })
-  .from(applications)
+  .select({ id: submissions.id, name: submissions.name })
+  .from(submissions)
 
 // INSERT
-await db.insert(applications).values({
+await db.insert(submissions).values({
   id: crypto.randomUUID(),
   name: data.name,
   email: data.email,
-  services: data.services,    // JSON column — array passes through
-  fitCount: data.fitCount
+  preferences: data.preferences  // JSON column — array passes through
 })
 
 // UPDATE
-await db.update(applications)
+await db.update(submissions)
   .set({ status: 'reviewed' })
-  .where(eq(applications.id, id))
+  .where(eq(submissions.id, id))
 
 // DELETE
-await db.delete(applications).where(eq(applications.id, id))
+await db.delete(submissions).where(eq(submissions.id, id))
 
 // COUNT (helper on the db handle, returns a number)
-const count = await db.$count(applications, eq(applications.status, 'new'))
+const count = await db.$count(submissions, eq(submissions.status, 'new'))
 ```
 
 ### Operators
@@ -114,18 +113,18 @@ import { eq, ne, gt, gte, lt, lte, and, or, not, inArray, like, ilike, isNull, i
 
 // Compound predicates
 where(and(
-  eq(applications.status, 'new'),
-  gt(applications.createdAt, sql`datetime('now', '-1 hour')`)
+  eq(submissions.status, 'new'),
+  gt(submissions.createdAt, sql`datetime('now', '-1 hour')`)
 ))
 
 // IN
-where(inArray(applications.status, ['new', 'reviewed']))
+where(inArray(submissions.status, ['new', 'reviewed']))
 
 // LIKE
-where(like(applications.email, '%@example.com'))
+where(like(submissions.email, '%@example.com'))
 ```
 
-Always use the operator helpers, not template-string SQL. They're typed against the column types — passing a string to `gt(applications.createdAt, ...)` errors at compile time if the column is an integer.
+Always use the operator helpers, not template-string SQL. They're typed against the column types — passing a string to `gt(submissions.createdAt, ...)` errors at compile time if the column is an integer.
 
 ### Raw SQL — when justified
 
@@ -133,10 +132,10 @@ Always use the operator helpers, not template-string SQL. They're typed against 
 
 ```typescript
 // Computed expressions that operators don't cover
-gt(applications.createdAt, sql`datetime('now', '-1 hour')`)
+gt(submissions.createdAt, sql`datetime('now', '-1 hour')`)
 
 // Aggregate counts
-const [row] = await db.select({ count: sql<number>`count(*)` }).from(applications)
+const [row] = await db.select({ count: sql<number>`count(*)` }).from(submissions)
 ```
 
 Anything more complex than this — joins with conditional logic, recursive CTEs — keep weighing whether a raw `sql\`\`` block is clearer or whether two simpler queries + JavaScript do the job. D1 is fast for simple queries; complex ones are where you get bitten by edge runtime limits.
@@ -146,12 +145,12 @@ Anything more complex than this — joins with conditional logic, recursive CTEs
 ```typescript
 const result = await db
   .select({
-    application: applications,
+    application: submissions,
     user: users
   })
-  .from(applications)
-  .innerJoin(users, eq(applications.userId, users.id))
-  .where(eq(applications.status, 'new'))
+  .from(submissions)
+  .innerJoin(users, eq(submissions.userId, users.id))
+  .where(eq(submissions.status, 'new'))
 ```
 
 Each row of the result has the shape `{ application: <ApplicationRow>, user: <UserRow> }` — Drizzle namespaces by table to avoid column name collisions.
@@ -164,16 +163,16 @@ Drizzle generates a TypeScript type from the schema. Use it for function signatu
 // server/db/schema.ts
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm'
 
-export type Application       = InferSelectModel<typeof applications>
-export type NewApplication    = InferInsertModel<typeof applications>
+export type Submission    = InferSelectModel<typeof submissions>
+export type NewSubmission = InferInsertModel<typeof submissions>
 ```
 
 ```typescript
 // server/utils/email.ts
-import type { Application } from '../db/schema'
+import type { Submission } from '../db/schema'
 
-export async function sendFounderNotification(app: Application): Promise<void> {
-  // app.id, app.name, etc. all typed from the schema
+export async function sendNotification(sub: Submission): Promise<void> {
+  // sub.id, sub.name, etc. all typed from the schema
 }
 ```
 
@@ -189,7 +188,7 @@ export async function sendFounderNotification(app: Application): Promise<void> {
 
 ## Anti-patterns
 
-- ❌ String SQL for normal queries — `db.run("SELECT * FROM applications WHERE id = '" + id + "'")` is both unsafe and untyped
+- ❌ String SQL for normal queries — `db.run("SELECT * FROM submissions WHERE id = '" + id + "'")` is both unsafe and untyped
 - ❌ Reaching into raw `db.session` / `db.dialect` — Drizzle's surface is the query builder; everything else is internals
 - ❌ Defining multiple `sqliteTable` calls for the same table name in different files — must be unique per schema export
 - ❌ Storing booleans as `text('active')` with `'true'/'false'` strings — use `integer('active', { mode: 'boolean' })` instead

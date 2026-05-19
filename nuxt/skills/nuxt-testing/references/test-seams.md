@@ -146,7 +146,7 @@ Reach for a mock only when the side effect is *external infrastructure* you can'
 ```
 server/
 ├── api/
-│   ├── apply.post.ts             # real handler
+│   ├── wizard.post.ts             # real handler
 │   └── _dev/                     # seam endpoints — env-guarded
 │       ├── emails.get.ts
 │       ├── jobs.get.ts
@@ -175,9 +175,9 @@ Cheap, deterministic, mirrors the email-seam pattern.
  * NUXT_DB_TEST_MODE; never exposed in production. Whitelist tables explicitly
  * so a misconfigured env can't wipe arbitrary tables.
  */
-import { applications } from '../../db/schema'
+import { submissions } from '../../db/schema'
 
-const CLEARABLE = { applications } as const
+const CLEARABLE = { submissions } as const
 type Clearable = keyof typeof CLEARABLE
 
 export default defineEventHandler(async (event) => {
@@ -208,14 +208,14 @@ export default defineEventHandler(async (event) => {
 // playwright spec
 test.beforeEach(async ({ request }) => {
   await request.get('/api/_dev/emails?clear=1')
-  await request.get('/api/_dev/db?clear=applications')
+  await request.get('/api/_dev/db?clear=submissions')
 })
 
-test('POST /api/apply persists a row', async ({ request }) => {
-  await request.post('/api/apply', { data: validPayload })
+test('POST /api/wizard persists a row', async ({ request }) => {
+  await request.post('/api/wizard', { data: validPayload })
 
   const { counts } = await (await request.get('/api/_dev/db')).json()
-  expect(counts.applications).toBe(1)
+  expect(counts.submissions).toBe(1)
 })
 ```
 
