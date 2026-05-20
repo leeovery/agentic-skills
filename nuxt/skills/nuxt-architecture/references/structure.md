@@ -1,5 +1,9 @@
 # Project Structure
 
+> **Note**: this document describes the **admin / SaaS / dashboard app shape** — the project type that benefits from models, repositories, features, and the three-layer extends chain. For marketing sites, blogs, landing pages, and other public-facing sites that have no domain entities to CRUD, see **[marketing-site-shape.md](./marketing-site-shape.md)** — most of the structure below doesn't apply there.
+>
+> Quick decision: do you have API entities the UI lists / shows / edits? → admin shape (this file). Is the site primarily narrative content + maybe one form? → marketing shape.
+
 ## Complete Directory Layout
 
 ```

@@ -11,6 +11,8 @@ Creating reusable stateful logic via Vue Composition API.
 
 **[composables.md](references/composables.md)** - Patterns, naming, state management, best practices
 
+**[multi-step-state.md](references/multi-step-state.md)** - SSR-safe shared state across routes via `useState`, deriving step from `route.path`, submit-with-side-effects, why caller owns `loading`
+
 ## Singleton Pattern (Shared State)
 
 State defined outside function persists across all callers:

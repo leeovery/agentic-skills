@@ -19,8 +19,10 @@ Don't create a composable for:
 
 State persists across all components. Use for app-wide state.
 
+> **SSR caveat**: the module-scope `let user = ref<User>()` form below is **only safe in SPA mode** (`ssr: false`). On the server, module scope is shared across requests — one user's state can leak into another's response. For SSR or hybrid (prerender + SSR) apps, use `useState('user', () => ...)` instead; it's request-scoped on the server and module-scoped on the client. See **[multi-step-state.md](./multi-step-state.md)** for the pattern.
+
 ```typescript
-// app/composables/useUser.ts
+// app/composables/useUser.ts — SPA-only (ssr: false)
 let user = ref<User>()  // Outside function = singleton
 
 export default function useUser() {
@@ -37,6 +39,20 @@ export default function useUser() {
   return { user, getUser, setUser, clearUser }
 }
 ```
+
+```typescript
+// app/composables/useUser.ts — SSR-safe equivalent
+export default function useUser() {
+  const user = useState<User | undefined>('user', () => undefined)
+
+  const setUser = (data: BaseEntity) => { user.value = User.hydrate(data) }
+  const clearUser = () => { user.value = undefined }
+
+  return { user, setUser, clearUser }
+}
+```
+
+Both work in the client; the `useState` form is the safer default unless you're sure the app will never render on the server.
 
 ### Usage
 

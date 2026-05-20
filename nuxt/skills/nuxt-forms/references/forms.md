@@ -1,5 +1,17 @@
 # Form Patterns
 
+## Which form pattern to use
+
+| Pattern | Use for | Reference |
+| --- | --- | --- |
+| `XForm` (x-ui layer) | Admin / SaaS CRUD — single-page form that POSTs to an API endpoint backed by a repository / model | This file |
+| `UForm` (Nuxt UI) + Zod schema | Public marketing flows — no backend repository / model, server route validates same schema | **[marketing-forms.md](./marketing-forms.md)** |
+| `useFormBuilder` | Programmatically constructed forms with conditional fields, dynamic schemas | This file (below) |
+
+Decision rule: do you have a Model and Repository for the entity being created/edited? → `XForm`. Is the form anonymous / public / one-shot? → `UForm` + `marketing-forms.md`. Is the form structure determined at runtime? → `useFormBuilder`.
+
+If you find yourself wrapping `XForm` to disable the model/repository part, you actually want `UForm`. If you find yourself reimplementing `XForm`'s loading state on `UForm`, you actually want `XForm`. Don't fight the pattern.
+
 ## XForm Component
 
 The XForm component from x-ui layer handles form state, submission, and validation:
