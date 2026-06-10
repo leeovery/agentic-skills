@@ -140,6 +140,23 @@ try {
 }
 ```
 
+### Counted waits (concurrent listeners)
+
+`start` / `stop` set and clear a key — right when a single operation waits on it.
+When several operations can wait on the **same** key at once and it must stay
+"waiting" until the last one finishes, use the counted API: `increment` /
+`decrement` (equivalently `start(key, true)` / `stop(key, true)`). The key reads
+as waiting while its count is greater than 0.
+
+```typescript
+const { increment, decrement } = useWait()
+
+increment(waitingFor.posts.saving)   // count → 1 (waiting)
+increment(waitingFor.posts.saving)   // count → 2
+decrement(waitingFor.posts.saving)   // count → 1 (still waiting)
+decrement(waitingFor.posts.saving)   // count → 0 (done)
+```
+
 ### Checking State
 
 ```typescript

@@ -89,6 +89,8 @@ const { setAppHeader } = useAppHeader()
 setAppHeader({
   title: 'Posts',
   icon: 'lucide:file-text',
+  // Optional: `subtitle` (trailing text after the title) and
+  // `rightText` (muted text on the right of the header bar).
 })
 
 // Breadcrumbs

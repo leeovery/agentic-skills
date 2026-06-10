@@ -27,6 +27,10 @@ export default function {verb}{Entity}ActionFactory() {
 
 ---
 
+> **Note:** `useHandleActionError` is an **app-level** composable, not part of the
+> shared layer. Create it in your app's `app/composables/` (teri-for-ops has a
+> reference implementation) — it centralises mapping API errors to flash messages.
+
 ## Complete Action Examples
 
 ### Create Post Action

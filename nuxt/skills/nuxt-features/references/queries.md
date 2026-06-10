@@ -135,8 +135,13 @@ const params = useJsonSpec()
 // No transformation
 .filters(filters)
 
-// Custom transformation
-.filters(filters, (key) => key.toUpperCase())
+// Snake / camel case
+.filters(filters, SnakeCase)
+.filters(filters, CamelCase)
+
+// NOTE: the second argument must be one of the built-in consts —
+// None (default), KebabCase, SnakeCase, CamelCase. Arbitrary functions
+// are NOT supported.
 ```
 
 ---
