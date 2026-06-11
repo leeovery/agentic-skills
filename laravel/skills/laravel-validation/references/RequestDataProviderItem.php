@@ -12,7 +12,7 @@ class RequestDataProviderItem implements Arrayable
 {
     public string $attribute;
 
-    public mixed $value;
+    public mixed $value = null;
 
     public ?string $expectedError = null;
 
@@ -21,6 +21,8 @@ class RequestDataProviderItem implements Arrayable
     public array|Closure $extraRequestData = [];
 
     public array $taps = [];
+
+    public bool $absent = false;
 
     public static function buildString(int $count, string $item = 'x'): string
     {
@@ -63,6 +65,13 @@ class RequestDataProviderItem implements Arrayable
     public function empty(): self
     {
         $this->value = null;
+
+        return $this;
+    }
+
+    public function absent(): self
+    {
+        $this->absent = true;
 
         return $this;
     }
@@ -144,8 +153,12 @@ class RequestDataProviderItem implements Arrayable
             value($tap, ...$args);
         }
 
+        if (! $this->absent) {
+            data_set($requestData, $this->attribute, value($this->value, ...$args));
+        }
+
         return array_replace_recursive(
-            data_set($requestData, $this->attribute, value($this->value, ...$args)),
+            $requestData,
             Arr::undot(value($this->extraRequestData, $requestData, ...$args))
         );
     }

@@ -106,6 +106,7 @@ The foundation for all validation testing:
 | `attribute()` | Set the field being tested | `->attribute('email')` |
 | `value()` | Set any custom test value | `->value('invalid-email')` |
 | `empty()` | Set value to null | `->empty()` |
+| `absent()` | Omit the field entirely (key not sent) — contrast with `empty()`, which sends `null` | `->absent()` |
 | `number()` | Generate random integer (10-1000) | `->number()` |
 | `boolean()` | Set boolean value | `->boolean()` or `->boolean(false)` |
 | `string()` | Generate string of specific length | `->string(256)` |
@@ -530,6 +531,38 @@ dataset('shipping create', [
 ]);
 ```
 
+### Presence Validation (`present` / `sometimes` / `missing`)
+
+Use `absent()` to omit a field entirely — the key is not sent at all. This is distinct from `empty()`, which sends the key with a `null` value. The `present` rule passes on a `null` value (the key exists), so only `absent()` can trigger it:
+
+```php
+dataset('profile update', [
+    // `present`: the field must be sent. empty() would PASS (key exists as null).
+    'Name must be present' => [
+        new RequestDataProviderItem()
+            ->attribute('name')
+            ->absent()
+            ->assertError('The name field must be present.'),
+    ],
+
+    // `sometimes`: rules are skipped entirely when the field is absent.
+    'Nickname validation is skipped when absent' => [
+        new RequestDataProviderItem()
+            ->attribute('nickname')
+            ->absent()
+            ->assertNotError('The nickname field must be a string.'),
+    ],
+
+    // `missing`: the field must NOT be present — absent() is the happy path.
+    'Token must be missing' => [
+        new RequestDataProviderItem()
+            ->attribute('token')
+            ->absent()
+            ->assertNotError('The token field must be missing.'),
+    ],
+]);
+```
+
 ---
 
 ## Advanced Patterns
@@ -867,6 +900,19 @@ new RequestDataProviderItem()
         ->assertError('...')
 ],
 ```
+
+### ❌ Don't Confuse `empty()` with `absent()`
+
+```php
+// empty() sends {"name": null} — the key IS present.
+// This PASSES the `present` rule, so the error never fires.
+->attribute('name')->empty()->assertError('The name field must be present.')  // ❌ won't fire
+
+// absent() omits the key entirely — {} — which is what `present` checks for.
+->attribute('name')->absent()->assertError('The name field must be present.')  // ✅
+```
+
+Use `empty()` for `required` (null fails required); use `absent()` for `present`, `sometimes`, and `missing` (which care about the key's existence, not its value).
 
 ### ❌ Don't Use Vague Error Messages
 
@@ -1340,6 +1386,7 @@ dataset('application create', [
 
 **Key Methods:**
 - **Value helpers**: `string(length)`, `email(valid)`, `number()`, `date(format)`, `array(count, item)`, `boolean(value)`
+- **Presence**: `empty()` (send `null`), `absent()` (omit the key — for `present` / `sometimes` / `missing` rules)
 - **Assertions**: `assertError(message)`, `assertNotError(message)`
 - **Request building**: `with(data)`, `tap(callback)`, `buildRequest()`
 - **Static helpers**: `buildString(count, item)`, `buildArray(count, item)`

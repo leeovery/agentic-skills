@@ -20,6 +20,7 @@ Form requests as single source of truth for validation, with comprehensive testi
 - RequestDataProviderItem helper
 - Pest datasets for systematic testing
 - Built-in helper methods (string, email, number, date, array, boolean)
+- Presence testing with `absent()` (for `present` / `sometimes` / `missing` rules)
 - Nested array testing
 - Conditional validation testing
 - Real-world examples
