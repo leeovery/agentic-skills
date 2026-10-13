@@ -12,26 +12,19 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->registerModelFactoryResolver();
+        $this->registerFactoryResolver();
     }
 
-    /**
-     * Register factory resolver for Data objects.
-     *
-     * This allows Factory::factoryForModel() to resolve Data test factories
-     * from the correct namespace (Database\Factories\Data\).
-     *
-     * Classes ending in 'Data' → Database\Factories\Data\{ClassName}Factory
-     * All other classes → Database\Factories\{ClassName}Factory
-     */
-    private function registerModelFactoryResolver(): void
+    private function registerFactoryResolver(): void
     {
-        Factory::guessFactoryNamesUsing(function (string $modelName) {
-            if (str($modelName)->endsWith('Data')) {
-                return 'Database\Factories\Data\\'.Str::afterLast($modelName, '\\').'Factory';
+        Factory::guessFactoryNamesUsing(function (string $modelName): string {
+            $basename = Str::afterLast($modelName, '\\');
+
+            if (str_ends_with($modelName, 'Data')) {
+                return "Database\\Factories\\Data\\{$basename}Factory";
             }
 
-            return 'Database\Factories\\'.Str::afterLast($modelName, '\\').'Factory';
+            return "Database\\Factories\\{$basename}Factory";
         });
     }
 }
