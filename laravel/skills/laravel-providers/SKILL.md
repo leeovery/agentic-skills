@@ -165,9 +165,12 @@ Templates are dash-named and committed. The files Laravel reads are dot-named, a
 
 **A service with its own manager and facade.** It gets its own provider. [laravel-services](../laravel-services/SKILL.md) owns that recipe.
 
+**Configuring a scoped instance from `boot()`**, such as a custom driver added to a service's manager with `extend()`, or settings a package's manager takes through a `for()` method. A queue worker forgets scoped instances before every job, so a manager configured once at boot is gone before the first job runs, and the one the container builds next has none of it. Register through `$this->callAfterResolving(SmsManager::class, fn (SmsManager $manager) => $manager->extend('log', fn () => new LogSmsDriver))`: it configures every instance the container builds, and the current one if it already exists. To test it, run the worker's reset first, `app()->forgetScopedInstances()` then `Facade::clearResolvedInstances()`, and fake anything scoped after it, because the reset drops those fakes too.
+
 ## Anti-patterns
 
-- ❌ A rate limiter, gate, route, listener or macro registered in a deferred provider's `boot()`. That `boot()` runs only when one of its `provides()` services is first resolved, so a job's `RateLimited` middleware can run before its limiter exists. Deferred providers only bind.
+- ❌ A rate limiter, gate, route, listener or macro registered in a deferred provider's `boot()`. During a request that `boot()` runs only once one of its `provides()` services is resolved, so a gate check, a macro call or a sync-dispatched job's `RateLimited` middleware can run before its registration exists. Artisan processes load every deferred provider when they boot, queue workers and the test suite included, so neither catches it. Deferred providers only bind.
+- ❌ A scoped instance configured once in `boot()`, such as `$this->app->make(SmsManager::class)->extend(...)`. The worker drops it before the first job.
 - ❌ `Relation::morphMap()`, or keys like `'order'` or a full class name.
 - ❌ A `Carbon` type hint, or `Carbon::parse()` feeding a `CarbonImmutable` property.
 - ❌ `$fillable` or `$guarded` on a model.
