@@ -85,6 +85,14 @@ class PaymentDataTransformer
 
 ### Enum Transformation
 
+When mapping from a **request**, use the `enum()` helper — it casts via `tryFrom()` and returns `null` when the key is absent (ideal for nullable fields; validation guarantees presence for required ones). Don't round-trip through `$request->string('status')->toString()` or `OrderStatus::from($request->input('status'))`:
+
+```php
+'status' => $request->enum('status', OrderStatus::class),
+```
+
+When mapping from an **external payload** whose raw values don't line up with your enum cases, map them explicitly with `match`:
+
 ```php
 'status' => match (data_get($data, 'type')) {
     'succeeded', 'paid' => PaymentStatus::Succeeded,
@@ -131,7 +139,7 @@ Three approaches for mapping collections, from simplest to most control:
     )),
 ```
 
-Use request with index when you need `boolean()`, `integer()`, `date()` helpers. Use `new Data()` when you want explicit control over child DTO construction.
+Use request with index when you need `boolean()`, `integer()`, `date()`, `enum()` helpers. Use `new Data()` when you want explicit control over child DTO construction.
 
 **First-class callable for reusable transformers:**
 

@@ -41,7 +41,7 @@ $data = CreateOrderData::from([
 $data = new CreateOrderData(
     customerEmail: $request->input('customer_email'),
     deliveryDate: CarbonImmutable::parse($request->input('delivery_date')),
-    status: OrderStatus::from($request->input('status')),
+    status: $request->enum('status', OrderStatus::class),
     items: OrderItemData::collect($request->input('items')),
 );
 ```
