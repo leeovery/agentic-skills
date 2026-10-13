@@ -92,6 +92,26 @@ class InvoiceIssuedReactor extends Reactor
 }
 ```
 
+## Reach for these when the situation calls for it
+
+**A step or reactor whose side effect mustn't run twice.** An activity retries after a failure and a queued reactor can be redelivered, so the work behind either can run again. Key the side effect with [leeovery/laravel-idempotency](https://github.com/leeovery/laravel-idempotency). Work that lives in the database, such as recording an event or starting a workflow, goes in `Idempotency::once()`: it claims the key and runs the work in one transaction, and skips the work when the key is already claimed.
+
+```php
+class InvoiceIssuedReactor extends Reactor
+{
+    public function onInvoiceIssued(InvoiceIssued $event): void
+    {
+        $invoiceUuid = $event->aggregateRootUuid();
+
+        Idempotency::once("invoice:{$invoiceUuid}:collect-payment", function () use ($invoiceUuid): void {
+            WorkflowStub::make(CollectInvoicePaymentWorkflow::class)->start($invoiceUuid);
+        });
+    }
+}
+```
+
+An irreversible external effect, such as a send, can't sit in a transaction, so it never goes in `once()`. Check `Idempotency::completed($key)`, do the work, then call `Idempotency::complete($key)`. A crash between the two repeats the send on the retry instead of losing it.
+
 ## Anti-patterns
 
 - ❌ Loading the invoice in a workflow's `handle()` to check `isPaid()`. Whether the final notice still applies is the action's decision.
@@ -99,9 +119,11 @@ class InvoiceIssuedReactor extends Reactor
 - ❌ An activity that does more than load its model and call its action.
 - ❌ A model as a workflow or activity argument. The engine rejects it.
 - ❌ A workflow for steps that never wait. Chain the jobs.
+- ❌ A send or any other external call inside `Idempotency::once()`. The rollback can't take it back.
 
 ## Related
 
 - [laravel-event-sourcing](../laravel-event-sourcing/SKILL.md) — aggregates, events and the reactors that start workflows
 - [laravel-actions](../laravel-actions/SKILL.md) — the operations activities call
 - [laravel-jobs](../laravel-jobs/SKILL.md) — chains and batches, for processes that don't wait
+- [leeovery/laravel-idempotency](https://github.com/leeovery/laravel-idempotency) — idempotency keys for side effects that may run twice

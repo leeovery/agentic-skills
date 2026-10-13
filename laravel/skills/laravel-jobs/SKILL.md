@@ -119,6 +119,8 @@ class ExpireOrderJob implements ShouldBeUnique, ShouldQueue
 }
 ```
 
+**The job's side effect mustn't repeat on redelivery.** `ShouldBeUnique` keeps a second copy off the queue; it doesn't stop a retried or redelivered job doing its work again. Key the side effect inside the action with [leeovery/laravel-idempotency](https://github.com/leeovery/laravel-idempotency), as [laravel-workflows](../laravel-workflows/SKILL.md) shows.
+
 **The job calls a rate-limited downstream.** Return `RateLimited` from `middleware()` (`RateLimitedWithRedis` when the app runs Redis), with the limiter defined where [laravel-providers](../laravel-providers/SKILL.md) puts them. Bound retries with `retryUntil()`, not `$tries`: every release by the limiter counts as an attempt. The `DateTimeImmutable` return type holds because laravel-providers makes `now()` immutable.
 
 **Retrying can't help.** A job with `retryUntil()` retries every exception until the deadline. For exceptions that won't clear, `FailOnException` (Laravel 12.19+) fails the job at once.
@@ -211,3 +213,4 @@ The code that dispatches asserts with `Queue::fake()` or `Event::fake()`. More i
 - [laravel-testing](../laravel-testing/SKILL.md) — test style and fakes
 - [laravel-event-sourcing](../laravel-event-sourcing/SKILL.md) — stored events, which carry plain values
 - [laravel-workflows](../laravel-workflows/SKILL.md) — processes that wait on signals or long timers
+- [leeovery/laravel-idempotency](https://github.com/leeovery/laravel-idempotency) — idempotency keys for side effects that must not repeat
