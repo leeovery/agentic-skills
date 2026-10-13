@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-10-13
+
+✨ Added
+- New `laravel-event-sourcing` skill — aggregates as their own state machine, with projectors and reactors, on spatie/laravel-event-sourcing.
+- Copy-ready `ProtectsInvariants` trait, `OperationAllowedFrom` attribute and `IllegalTransition` exception for guarding aggregate operations by state.
+- New `laravel-workflows` skill — long-running Durable Workflow processes that only sequence, with each step an activity calling an action.
+
+🔧 Changed
+- The actions, architecture, enums, jobs and state-machines skills now point to the event-sourcing and workflows skills, and the state-machines skill is scoped to models that aren't event-sourced.
+- Laravel plugin README and root README list 22 skills, with a new Event Sourcing and Workflows section.
+
 ## [0.2.1] - 2026-10-13
 
 🔧 Changed
