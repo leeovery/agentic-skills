@@ -11,7 +11,7 @@ Jobs, events and listeners move work off the request; none of them does the work
 
 - **A job calls one action.** The constructor takes what the action needs, `handle()` injects the action and calls it. Nothing else: no queries, no branching, no `$order->update(...)`. The operation then runs the same whether it's queued or called directly. [laravel-actions](../laravel-actions/SKILL.md) owns the logic.
 - **Named after the action it wraps.** `ExpireOrderJob` calls `ExpireOrderAction`, in `app/Jobs/`.
-- **A job takes the model.** Constructor-promoted `public Order $order`. `SerializesModels` stores the id and re-fetches the row when the job runs, so the action sees current data. Not an `int $orderId` with a lookup in `handle()`, unless the row may be hard-deleted first (see below).
+- **A job takes the model.** Constructor-promoted `public Order $order`. `SerializesModels` stores the id and re-fetches the row when the job runs, so the action sees current data. Never an `int $orderId` with a lookup in `handle()`, even when the row may be gone by then (see below).
 - **Queue options only when the job needs them.** No `$tries`, `$timeout`, `backoff()` or `failed()` by default; the worker's settings hold until a job proves otherwise. Never `$tries` with `retryUntil()`: Laravel ignores `$tries` once `retryUntil()` is set.
 - **Queue names are cases of `App\Enums\Queue`.** A small enum, one case per queue a worker serves (`Default`, `Processing`). A job on a named queue sets it in its constructor, `$this->onQueue(Queue::Processing)`; Laravel 12 takes the case directly. Horizon's supervisors list them from the enum too: `'queue' => [Queue::Default->value, Queue::Processing->value]`.
 - **On Laravel 13, queue options are attributes.** `#[Queue]`, `#[UniqueFor]`, `#[Tries]`, `#[Backoff]`, `#[Timeout]` from `Illuminate\Queue\Attributes`; alias the first `as OnQueue` beside the `Queue` enum: `#[OnQueue(Queue::Processing)]`.
@@ -143,29 +143,19 @@ class ChargeOrderJob implements ShouldQueue
 }
 ```
 
-**The record may be hard-deleted before the job runs.** Take the model, keep only its id, and return early when the row is gone; restoring a missing model throws and fails the job. A soft-deleted model still restores, because the restore query skips global scopes. Callers dispatch with the model as usual; add `withTrashed()` to the lookup when the action works on soft-deleted rows.
+**The record may be gone when the job runs.** A soft-deleted model still restores, because the restore query skips global scopes; only a hard delete loses it. Restoring a missing model throws and fails the job. When that means the work is already done or no longer matters, as when an earlier run purged the row, mark the job `#[DeleteWhenMissingModels]` (Laravel 11.3+; `public bool $deleteWhenMissingModels = true;` below that) and Laravel deletes the job quietly. Keep passing the model.
 
 ```php
+#[DeleteWhenMissingModels]
 class PurgeOrderFilesJob implements ShouldQueue
 {
     use Queueable;
 
-    public int $orderId;
-
-    public function __construct(Order $order)
-    {
-        $this->orderId = $order->id;
-    }
+    public function __construct(public Order $order) {}
 
     public function handle(PurgeOrderFilesAction $purgeOrderFilesAction): void
     {
-        $order = Order::query()->find($this->orderId);
-
-        if ($order === null) {
-            return;
-        }
-
-        $purgeOrderFilesAction($order);
+        $purgeOrderFilesAction($this->order);
     }
 }
 ```
@@ -204,7 +194,7 @@ The code that dispatches asserts with `Queue::fake()` or `Event::fake()`. More i
 ## Anti-patterns
 
 - ❌ A query, condition or write in a job's or listener's `handle()` beyond calling the action.
-- ❌ `int $orderId` plus `findOrFail()` for a row that can't be hard-deleted first. Pass the model.
+- ❌ `int $orderId` plus a lookup in `handle()`. Pass the model, with `#[DeleteWhenMissingModels]` when the row may be gone.
 - ❌ `$tries`, `$timeout`, `backoff()` and `failed()` copied onto every job, or `$tries` beside `retryUntil()`.
 - ❌ `onQueue('processing')`. Use the `Queue` enum.
 - ❌ A sync listener whose only work is dispatching a job. Queue the listener.
