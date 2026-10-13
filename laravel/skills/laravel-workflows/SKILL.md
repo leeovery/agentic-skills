@@ -12,7 +12,7 @@ A workflow is a long-running process on Durable Workflow (`durable-workflow/work
 - **Reach for a workflow when the process waits.** On a signal from outside, or a timer measured in days. Steps that only need to run in order, retry on their own or report progress are a chain or batch of jobs, each calling its action ([laravel-jobs](../laravel-jobs/SKILL.md)).
 - **A workflow only sequences.** What runs when, the waits, the signals. It never writes state, never reads the database to choose its next step, and never decides an outcome. Writes and decisions belong to the actions it runs and, under event sourcing, the aggregate ([laravel-event-sourcing](../laravel-event-sourcing/SKILL.md)), so every business rule lives in one place whichever path triggers the operation.
 - **Every step that does work is an activity calling one action.** The same action a controller would call ([laravel-actions](../laravel-actions/SKILL.md)). The activity's `handle()` takes the workflow's arguments first and the action after them, named after its class; the engine resolves the action from the container.
-- **Models cross the boundary, not ids.** Workflow and activity arguments are typed models, `handle(Invoice $invoice)`. The engine stores the model's identifier and fetches the row again when the step runs, as `SerializesModels` does for a job, so each step sees current data.
+- **Ids cross the boundary, and each activity loads its own model.** Workflow and activity arguments are plain values: the model's public id, `handle(string $invoiceUuid)`. Durable Workflow 2.5's codec rejects a model argument with `unsupported_value_type`, even though its docs say models pass by identifier. The workflow never loads the model itself, because that would be a database read; the activity does, so each step works on the current row.
 - **Under event sourcing, reactors start and signal workflows.** A reactor on the stored event that begins the process starts the workflow; a reactor on the event a waiting workflow needs signals it. Starting or signalling a workflow is a side effect, and side effects belong in reactors, which a replay never re-runs.
 - **Engine mechanics come from the package's docs.** Timers, signals, and starting or loading a workflow: read the [Durable Workflow docs](https://durable-workflow.com/docs/installation/) ([durable-workflow.com](https://durable-workflow.com)). The v2 API lives under `Workflow\V2`; examples written for the old package don't apply.
 
@@ -27,7 +27,6 @@ declare(strict_types=1);
 
 namespace App\Workflows;
 
-use App\Models\Invoice;
 use App\Workflows\Activities\IssueFinalNoticeActivity;
 use App\Workflows\Activities\RemindInvoiceActivity;
 use Workflow\V2\Workflow;
@@ -37,18 +36,18 @@ use function Workflow\V2\days;
 
 class CollectInvoicePaymentWorkflow extends Workflow
 {
-    public function handle(Invoice $invoice): void
+    public function handle(string $invoiceUuid): void
     {
-        activity(RemindInvoiceActivity::class, $invoice);
+        activity(RemindInvoiceActivity::class, $invoiceUuid);
 
         days(7);
 
-        activity(IssueFinalNoticeActivity::class, $invoice);
+        activity(IssueFinalNoticeActivity::class, $invoiceUuid);
     }
 }
 ```
 
-Each activity calls the action it's named after:
+Each activity loads the invoice and calls the action it's named after:
 
 ```php
 <?php
@@ -63,9 +62,9 @@ use Workflow\V2\Activity;
 
 class RemindInvoiceActivity extends Activity
 {
-    public function handle(Invoice $invoice, RemindInvoiceAction $remindInvoiceAction): void
+    public function handle(string $invoiceUuid, RemindInvoiceAction $remindInvoiceAction): void
     {
-        $remindInvoiceAction($invoice);
+        $remindInvoiceAction(Invoice::query()->where('uuid', $invoiceUuid)->firstOrFail());
     }
 }
 ```
@@ -80,7 +79,6 @@ declare(strict_types=1);
 namespace App\Reactors;
 
 use App\Events\Invoice\InvoiceIssued;
-use App\Models\Invoice;
 use App\Workflows\CollectInvoicePaymentWorkflow;
 use Spatie\EventSourcing\EventHandlers\Reactors\Reactor;
 use Workflow\V2\WorkflowStub;
@@ -89,19 +87,17 @@ class InvoiceIssuedReactor extends Reactor
 {
     public function onInvoiceIssued(InvoiceIssued $event): void
     {
-        $invoice = Invoice::query()->where('uuid', $event->aggregateRootUuid())->firstOrFail();
-
-        WorkflowStub::make(CollectInvoicePaymentWorkflow::class)->start($invoice);
+        WorkflowStub::make(CollectInvoicePaymentWorkflow::class)->start($event->aggregateRootUuid());
     }
 }
 ```
 
 ## Anti-patterns
 
-- ❌ `if ($invoice->isPaid())` in a workflow's `handle()`. Whether the final notice still applies is the action's decision.
+- ❌ Loading the invoice in a workflow's `handle()` to check `isPaid()`. Whether the final notice still applies is the action's decision.
 - ❌ A write, a query or a call to a service in a workflow, outside an activity.
-- ❌ An activity that does more than call its action.
-- ❌ `int $invoiceId` as a workflow or activity argument, with a lookup in `handle()`.
+- ❌ An activity that does more than load its model and call its action.
+- ❌ A model as a workflow or activity argument. The engine rejects it.
 - ❌ A workflow for steps that never wait. Chain the jobs.
 
 ## Related
