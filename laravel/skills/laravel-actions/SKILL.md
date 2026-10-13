@@ -1,31 +1,25 @@
 ---
 name: laravel-actions
-description: Action-oriented architecture for Laravel — invokable classes containing domain logic. Use when creating or modifying actions, business logic, or domain operations.
+description: Every domain operation is an invokable action class; controllers, jobs, listeners, commands and the scheduler only call one. Use when writing or changing business logic, deciding where logic lives, composing actions, or calling an action from an entry point.
 ---
 
 # Laravel Actions
 
-Actions are the **heart of your domain logic**. Every business operation lives in an action.
+An action is one domain operation in one class with one public method, `__invoke()`. All business logic lives in actions. Everything that triggers an operation — a controller, job, listener, command or the scheduler — gathers its input and calls one action, nothing more.
 
-**Related guides:**
-- [DTOs](../laravel-dtos/SKILL.md) - DTOs for passing data to actions
-- [Controllers](../laravel-controllers/SKILL.md) - Controllers delegate to actions
-- [Models](../laravel-models/SKILL.md) - Models accessed by actions
-- [Testing](../laravel-testing/SKILL.md) - Testing with triple-A pattern
+## Rules
 
-## Philosophy
+- **One operation per class.** Named `{Verb}{Subject}Action` (`CancelOrderAction`, `GetInvoiceTotalsAction`), under `app/Actions/{Entity or Subsystem}/`. Never group by verb.
+- **Typed input.** Take the models the operation acts on, plus a DTO, enum or value object for everything else. Never an array of request data or a loose run of primitives.
+- **Return what the caller needs.** The model it changed, the thing it created, or `void`. Return the model you hold; don't re-query it with `fresh()`.
+- **Guard first.** Business-rule preconditions go in a private `guard()` called before any work, using `throw_unless`/`throw_if` with a domain exception factory. A state precondition asks the state: `$order->state->canTransitionTo(OrderCancelled::class)`, or a model `is…()` helper.
+- **Transaction when there's more than one write.** Wrap in `DB::transaction` when the action makes several writes, or a write plus something that must roll back with it. A single write needs none.
+- **Nothing external inside the transaction.** HTTP calls, file storage and payments run before or after the closure, never inside it; a rollback can't undo them.
+- **Reads can be actions too.** A read that computes, caches, transforms or calls a service is a `Get…Action` or `Fetch…Action`. A filterable, paginated listing is a query class instead (see [laravel-controllers](../laravel-controllers/SKILL.md)).
+- **Context in mutable private properties.** When several private methods need the same input, store it in `private Order $order;`, never `readonly`: the same instance is invoked again and again, for example once per item in a loop.
+- **`resolve()`, never `app()`.**
 
-**Controllers, Jobs, and Listeners contain ZERO domain logic** - they only delegate to actions.
-
-Actions are:
-- **Invokable classes** - Single `__invoke()` method
-- **Single responsibility** - Each action does exactly one thing
-- **Composable** - Actions call other actions to build workflows
-- **Stateless** - Each invocation is independent (but can store invocation context)
-- **Type-safe** - Strict parameter and return types
-- **Transactional** - Wrap database modifications in transactions
-
-## Basic Structure
+## Example
 
 ```php
 <?php
@@ -34,89 +28,26 @@ declare(strict_types=1);
 
 namespace App\Actions\Order;
 
-use App\Data\CreateOrderData;
+use App\Exceptions\OrderException;
 use App\Models\Order;
-use App\Models\User;
+use App\States\Order\OrderCancelled;
 use Illuminate\Support\Facades\DB;
 
-class CreateOrderAction
-{
-    public function __invoke(User $user, CreateOrderData $data): Order
-    {
-        return DB::transaction(function () use ($user, $data) {
-            $order = $this->createOrder($user, $data);
-            $this->attachOrderItems($order, $data);
-
-            return $order->fresh(['items']);
-        });
-    }
-
-    private function createOrder(User $user, CreateOrderData $data): Order
-    {
-        return $user->orders()->create([
-            'status' => $data->status,
-            'notes' => $data->notes,
-        ]);
-    }
-
-    private function attachOrderItems(Order $order, CreateOrderData $data): void
-    {
-        $order->items()->createMany(
-            $data->items->map(fn ($item) => [
-                'product_id' => $item->productId,
-                'quantity' => $item->quantity,
-                'price' => $item->price,
-            ])->all()
-        );
-    }
-}
-```
-
-## Key Patterns
-
-### 1. Dependency Injection for Action Composition
-
-**Inject other actions** to build complex workflows:
-
-```php
-class CreateOrderAction
-{
-    public function __construct(
-        private readonly CalculateOrderTotalAction $calculateTotal,
-        private readonly NotifyOrderCreatedAction $notifyOrderCreated,
-    ) {}
-
-    public function __invoke(User $user, CreateOrderData $data): Order
-    {
-        return DB::transaction(function () use ($user, $data) {
-            $order = $this->createOrder($user, $data);
-
-            // Compose with other actions
-            $total = ($this->calculateTotal)($order);
-            $order->update(['total' => $total]);
-
-            ($this->notifyOrderCreated)($order);
-
-            return $order->fresh();
-        });
-    }
-}
-```
-
-### 2. Guard Methods for Validation
-
-**Validate business rules** before executing:
-
-```php
 class CancelOrderAction
 {
+    public function __construct(
+        private readonly ReleaseStockAction $releaseStockAction,
+    ) {}
+
     public function __invoke(Order $order): Order
     {
         $this->guard($order);
 
-        return DB::transaction(function () use ($order) {
+        return DB::transaction(function () use ($order): Order {
             $order->updateToCancelled();
-            $this->refundPayment($order);
+
+            ($this->releaseStockAction)($order);
+
             return $order;
         });
     }
@@ -124,303 +55,102 @@ class CancelOrderAction
     private function guard(Order $order): void
     {
         throw_unless(
-            $order->canBeCancelled(),
-            OrderException::cannotCancelOrder($order)
+            $order->state->canTransitionTo(OrderCancelled::class),
+            OrderException::cannotCancel(),
         );
     }
 }
 ```
 
-### 3. Private Helper Methods
+## Calling actions
 
-**Break complex operations** into smaller, focused private methods:
+| Caller | How |
+|---|---|
+| Controller | Method injection: `CancelOrderAction $cancelOrderAction` |
+| Job | Injection into `handle()` |
+| Listener | Constructor injection |
+| Command | Injection into `handle()` |
+| Scheduler | `$schedule->call(ExpireStaleOrdersAction::class)` |
+| Another action | See composing actions |
 
-```php
-public function __invoke(User $user, CreateApplicationData $data): Application
-{
-    return DB::transaction(function () use ($user, $data) {
-        $application = $this->createApplication($user, $data);
-        $this->createContacts($application, $data);
-        $this->createAddresses($application, $data);
-        $this->createDocuments($application, $data);
+Name the variable after the class (`$cancelOrderAction`), never `$action`.
 
-        return $application;
-    });
-}
-```
+## Composing actions
 
-### 4. Readonly Properties for Context
+Actions call other actions. How they get them depends on the call:
 
-**Store invocation context** in readonly properties to avoid parameter passing:
+- **Inject** a collaborator the action calls every time, as in the example.
+- **`resolve(ReleaseStockAction::class)($order)` inline** for a call that's conditional, made per item, or a fallback in a `catch`. Injecting something used one time in ten adds noise to the constructor.
 
-```php
-class ProcessOrderAction
-{
-    private readonly Order $order;
+Services are usually called through their facade (`Payments::refund($order)`), which reads cleanly and lets a test mock it with `shouldReceive`. Injecting the service is fine when it reads better.
 
-    public function __invoke(Order $order): void
-    {
-        $this->order = $order;
-        $this->guard();
+Composing actions runs synchronously in one process. A multi-step process that needs per-step retries or progress tracking is a workflow, not a chain of actions; its tasks delegate to actions.
 
-        DB::transaction(function (): void {
-            $this->processPayment();
-            $this->updateInventory();
-            $this->sendNotifications();
-        });
-    }
+## Reach for these when the situation calls for it
 
-    private function guard(): void
-    {
-        throw_unless($this->order->isPending(), 'Order must be pending');
-    }
-
-    private function processPayment(): void
-    {
-        // Access $this->order without passing it
-    }
-}
-```
-
-## Naming Conventions
-
-**Format:** `{Verb}{Entity}Action`
-
-**Examples:**
-- `CreateOrderAction`
-- `UpdateUserProfileAction`
-- `DeleteDocumentAction`
-- `CalculateOrderTotalAction`
-- `SendEmailNotificationAction`
-- `ProcessPaymentAction`
-
-## When to Create an Action
-
-### ✅ Create an action when:
-
-- **Any** domain operation (including simple CRUD)
-- Implementing business logic of any complexity
-- Building reusable operations used across multiple places
-- Composing multiple steps into a workflow
-- Job or listener needs to perform domain logic
-- **Any operation that touches your models or data**
-
-### ❌ Don't create an action for:
-
-- Pure data retrieval for display (use queries/query builders)
-- HTTP-specific concerns (belongs in middleware/controllers)
-- Formatting/presentation logic (use resources/transformers)
-
-**Critical Rule:** Controllers should contain **zero domain logic**. Even a simple `$user->update($data)` should be delegated to `UpdateUserAction`.
-
-## Invocation Patterns
-
-### Via Dependency Injection
+**Concurrent writes to the same record.** Re-fetch it with a lock inside the transaction and change the locked copy:
 
 ```php
-public function store(
-    CreateOrderRequest $request,
-    CreateOrderAction $action
-) {
-    $order = $action(user(), CreateOrderData::from($request));
-    return OrderResource::make($order);
-}
-```
-
-### Via `resolve()` Helper
-
-```php
-// In controllers
-$order = resolve(CreateOrderAction::class)(
-    user(),
-    CreateOrderData::from($request)
-);
-
-// Inside another action
-$result = resolve(ProcessPaymentAction::class)($order, $paymentData);
-```
-
-**Important:** Use `resolve()` not `app()` for consistency.
-
-## Database Transactions
-
-**Always wrap data modifications** in transactions:
-
-```php
-public function __invoke(CreateOrderData $data): Order
-{
-    return DB::transaction(function () use ($data) {
-        $order = Order::create($data->toArray());
-        $order->items()->createMany($data->items->toArray());
-
-        return $order;
-    });
-}
-```
-
-## Error Handling
-
-**Throw domain exceptions** for business rule violations:
-
-```php
-class CreateOrderAction
-{
-    public function __invoke(User $user, CreateOrderData $data): Order
-    {
-        if ($user->orders()->pending()->count() >= 5) {
-            throw OrderException::tooManyPendingOrders($user);
-        }
-
-        return DB::transaction(function () use ($user, $data) {
-            return $user->orders()->create($data->toArray());
-        });
-    }
-}
-```
-
-## Testing Actions
-
-**Unit tests** should test actions in isolation using the triple-A pattern:
-
-```php
-use function Pest\Laravel\assertDatabaseHas;
-
-it('creates an order', function () {
-    // Arrange
-    $user = User::factory()->create();
-    $data = CreateOrderData::testFactory()->make();
-
-    // Act
-    $order = resolve(CreateOrderAction::class)($user, $data);
-
-    // Assert
-    expect($order)->toBeInstanceOf(Order::class);
-    assertDatabaseHas('orders', ['id' => $order->id]);
-});
-
-it('throws exception when user has too many pending orders', function () {
-    // Arrange
-    $user = User::factory()
-        ->has(Order::factory()->pending()->count(5))
-        ->create();
-    $data = CreateOrderData::testFactory()->make();
-
-    // Act & Assert
-    expect(fn () => resolve(CreateOrderAction::class)($user, $data))
-        ->toThrow(OrderException::class);
+return DB::transaction(function () use ($order): Order {
+    $order = Order::query()->lockForUpdate()->findOrFail($order->id);
+    // mutate $order
 });
 ```
 
-## Common Patterns
-
-### Simple CRUD Action
+**An operation over many records.** A plural sweep action iterates with `lazyById()` and dispatches one job per record. The per-record action keeps its own guard, because the record may have changed by the time its job runs.
 
 ```php
-class UpdateUserAction
+class ExpireStaleOrdersAction
 {
-    public function __invoke(User $user, UpdateUserData $data): User
+    public function __invoke(): void
     {
-        $user->update($data->toArray());
-        return $user->fresh();
+        Order::query()
+            ->whereStale()
+            ->lazyById()
+            ->each(ExpireOrderJob::dispatch(...));
     }
 }
 ```
 
-### Multi-Step Workflow
+**Events or jobs dispatched inside a transaction.** Make them wait for the commit so a rollback can't leave them behind: events implement `ShouldDispatchAfterCommit`, listeners `ShouldHandleEventsAfterCommit`, and queued jobs dispatch with `->afterCommit()`.
+
+## Testing
+
+Call the action directly, and mock the actions it composes:
 
 ```php
-class OnboardUserAction
-{
-    public function __construct(
-        private readonly CreateUserProfileAction $createProfile,
-        private readonly SendWelcomeEmailAction $sendWelcome,
-        private readonly AssignDefaultRoleAction $assignRole,
-    ) {}
+use function Pest\Laravel\mock;
 
-    public function __invoke(RegisterUserData $data): User
-    {
-        return DB::transaction(function () use ($data) {
-            $user = User::create($data->toArray());
+test('will release stock when an order is cancelled', function (): void {
+    $order = Order::factory()->paid()->create();
 
-            ($this->createProfile)($user, $data->profileData);
-            ($this->assignRole)($user);
-            ($this->sendWelcome)($user);
+    mock(ReleaseStockAction::class)
+        ->shouldReceive('__invoke')
+        ->once()
+        ->withArgs(fn (Order $_order): bool => $_order->is($order));
 
-            return $user;
-        });
-    }
-}
+    resolve(CancelOrderAction::class)($order);
+
+    expect($order->state)->toBeInstanceOf(OrderCancelled::class);
+});
 ```
 
-### External Service Integration
+More in [laravel-testing](../laravel-testing/SKILL.md).
 
-```php
-class ProcessPaymentAction
-{
-    public function __construct(
-        private readonly StripeService $stripe,
-    ) {}
+## Anti-patterns
 
-    public function __invoke(Order $order, PaymentData $data): Payment
-    {
-        $this->guard($order);
+- ❌ Domain logic in a controller, job, listener, command or model — even a lone `$order->update(...)`.
+- ❌ `readonly` properties for invocation context.
+- ❌ An HTTP call, file write or payment inside `DB::transaction`.
+- ❌ A guard that throws a string: `throw_if($order->isPaid(), 'Order already paid')`. Use an exception factory.
+- ❌ `return $order->fresh();`
+- ❌ `app(CancelOrderAction::class)`.
+- ❌ An action that takes `array $data` from a request.
 
-        return DB::transaction(function () use ($order, $data) {
-            $stripePayment = $this->stripe->charge($data);
+## Related
 
-            $payment = $order->payments()->create([
-                'amount' => $data->amount,
-                'stripe_id' => $stripePayment->id,
-                'status' => PaymentStatus::Completed,
-            ]);
-
-            $order->markAsPaid();
-
-            return $payment;
-        });
-    }
-
-    private function guard(Order $order): void
-    {
-        throw_if($order->isPaid(), 'Order already paid');
-    }
-}
-```
-
-## Action Organization
-
-**Group by domain entity:**
-
-```
-app/Actions/
-├── Order/
-│   ├── CreateOrderAction.php
-│   ├── CancelOrderAction.php
-│   ├── ProcessOrderAction.php
-│   └── CalculateOrderTotalAction.php
-├── User/
-│   ├── CreateUserAction.php
-│   ├── UpdateUserProfileAction.php
-│   └── DeleteUserAction.php
-└── Payment/
-    ├── ProcessPaymentAction.php
-    └── RefundPaymentAction.php
-```
-
-**Not by action type** (avoid CreateActions/, UpdateActions/, etc.)
-
-## Multi-Tenancy
-
-**Separate Central and Tenanted actions:**
-
-```
-app/Actions/
-├── Central/
-│   ├── CreateTenantAction.php
-│   └── ProvisionDatabaseAction.php
-└── Tenanted/
-    ├── CreateOrderAction.php
-    └── UpdateUserAction.php
-```
-
-See [Multi-tenancy](../laravel-multi-tenancy/SKILL.md) for comprehensive patterns.
+- [laravel-dtos](../laravel-dtos/SKILL.md) — the data actions take
+- [laravel-state-machines](../laravel-state-machines/SKILL.md) — `updateTo{State}()` and transition rules
+- [laravel-exceptions](../laravel-exceptions/SKILL.md) — the exception factories guards throw
+- [laravel-jobs](../laravel-jobs/SKILL.md) — jobs that wrap an action
+- [laravel-testing](../laravel-testing/SKILL.md) — testing actions
