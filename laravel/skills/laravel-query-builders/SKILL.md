@@ -1,28 +1,27 @@
 ---
 name: laravel-query-builders
-description: Custom query builders for type-safe, composable database queries. Use when creating or modifying query builders, query scopes, or complex database queries.
+description: Reusable query constraints live on a custom Eloquent builder per model, never in local scopes, and every query starts with Model::query(). Use when writing Eloquent queries, adding a query constraint or scope, defining an eager-load set, or registering a model's builder.
 ---
 
 # Laravel Query Builders
 
-**Always use custom query builders** instead of local scopes.
+When a model needs query constraints that more than one caller uses, they go on a custom builder for that model: `OrderBuilder extends Builder`, one method per constraint, each returning `self` so they chain. Local scopes are never used. Every query is started with `Model::query()`, so the chain is typed as the model's builder from its first call.
 
-**Related guides:**
-- [Models](../laravel-models/SKILL.md) - Model integration with custom builders
-- [Controllers](../laravel-controllers/SKILL.md) - Using query objects in controllers
+## Rules
 
-## Why Custom Builders Over Scopes
+- **Start every query with `Model::query()`.** `Order::query()->wherePaid()->get()`, never `Order::wherePaid()` or `Order::where(...)`. Every chain then reads the same way and starts from a real method that returns the model's builder, rather than a static call forwarded through `__callStatic` and `__call`.
+- **A builder, never a local scope.** No `scopeWherePaid()`. A builder method is a plain, typed method that autocompletes and can call the other constraints on the builder.
+- **Create a builder when a model needs a reusable constraint.** Not for every model, and never empty "for later". A one-off `where()` stays inline in the action or query class that uses it.
+- **One builder per model, named `{Model}Builder`.** It lives in `Builders/` beside the other classes of its kind (see [laravel-architecture](../laravel-architecture/SKILL.md)).
+- **Register it with `#[UseEloquentBuilder(OrderBuilder::class)]` on the model** (Laravel 12.19+). Below 12.19, override `newEloquentBuilder()`, as shown after the example.
+- **Name by what the method does.** `where*` adds a constraint: `wherePaid()`, `whereCustomer()`, `whereHasBackorderedLines()`. `with*` loads relations or adds a computed column: `withRelations()`, `withLowestBid()`.
+- **Methods compose.** A constraint built from others calls them (`whereOverdue()` calls `wherePaid()`), so each rule is written once.
+- **Type parameters as the domain types they are.** Models, enums, contracts. A related model goes through `whereBelongsTo($customer)`; never accept `Customer|int` and branch on `instanceof`.
+- **Dates are `CarbonInterface`, never `Carbon`.** The app runs on `CarbonImmutable` (see [laravel-providers](../laravel-providers/SKILL.md)), so a `Carbon` parameter throws a `TypeError` when passed `now()`.
+- **Type every query closure.** A `whereHas()` closure receives the related model's builder, `function (OrderLineBuilder $query): void`; a nested `where()` closure receives this one, `function (OrderBuilder $query): void`. Eager-load constraints receive the relation itself: type them as what they are, `HasMany`; it forwards builder calls. The type is what makes the builder's methods autocomplete inside the closure.
+- **`withRelations()` is the model's eager-load set.** When a model is usually loaded with the same relations, they're listed once, in `withRelations()`, and reused by query classes, route binding and other builders' eager-load constraints. One name on every builder; never `withRelated()`, `withAll()` or `withFullRelations()`.
 
-**❌ Do NOT use local scopes.**
-
-**✅ Use custom query builders because they provide:**
-1. **Better type hinting** - Full IDE autocomplete
-2. **Type-safe nested queries** - Type-hint closures in `whereHas()`, `orWhereHas()`, etc.
-3. **Better organization** - All query logic in one class
-4. **More composable** - Easier to chain and compose
-5. **Easier testing** - Test query logic in isolation
-
-## Basic Builder Structure
+## Example
 
 ```php
 <?php
@@ -31,141 +30,58 @@ declare(strict_types=1);
 
 namespace App\Builders;
 
-use App\Enums\OrderStatus;
-use App\Models\User;
-use Carbon\Carbon;
+use App\Models\Customer;
+use App\States\Order\OrderPaid;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class OrderBuilder extends Builder
-{
-    public function wherePending(): self
-    {
-        return $this->where('status', OrderStatus::Pending);
-    }
-
-    public function whereCompleted(): self
-    {
-        return $this->where('status', OrderStatus::Completed);
-    }
-
-    public function whereCustomer(User|int $customer): self
-    {
-        $customerId = $customer instanceof User ? $customer->id : $customer;
-        return $this->where('customer_id', $customerId);
-    }
-
-    public function whereTotalGreaterThan(int $amount): self
-    {
-        return $this->where('total', '>', $amount);
-    }
-
-    public function wherePlacedBetween(Carbon $start, Carbon $end): self
-    {
-        return $this->whereBetween('placed_at', [$start, $end]);
-    }
-
-    public function withRelated(): self
-    {
-        return $this->with(['customer', 'items.product', 'shipments']);
-    }
-
-    public function recent(): self
-    {
-        return $this->latest('placed_at');
-    }
-}
-```
-
-## Type-Safe Nested Queries
-
-**Type-hint closures** for full IDE support in relationship queries:
-
-```php
-public function whereHasItems(array|string $productIds): self
-{
-    return $this->whereHas('items', function (OrderItemBuilder $query) use ($productIds): void {
-        $query->whereIn('product_id', (array) $productIds);
-    });
-}
-```
-
-**Usage:**
-
-```php
-Order::query()
-    ->whereHas('items', function (OrderItemBuilder $query): void {
-        $query->whereActive()        // Custom method - autocomplete works!
-              ->whereProduct($id);   // Full type safety!
-    })
-    ->whereHas('customer', function (CustomerBuilder $query): void {
-        $query->whereVerified()      // Custom method
-              ->wherePremium();      // IDE knows all methods!
-    })
-    ->get();
-```
-
-## PHPDoc for External Methods
-
-Document methods from Spatie packages or macros:
-
-```php
 /**
  * @method static OrderBuilder whereState(string $column, string|array $state)
  * @method static OrderBuilder whereNotState(string $column, string|array $state)
  */
 class OrderBuilder extends Builder
 {
-    // ...
-}
-```
-
-## Builder Traits
-
-Extract reusable query logic:
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Builders\Concerns;
-
-use Illuminate\Support\Arr;
-
-trait HasProducts
-{
-    public function whereHasProducts(array|string $productIds): self
+    public function whereOverdue(CarbonInterface $asOf): self
     {
-        return $this->whereHas('products', function ($query) use ($productIds): void {
-            $query->whereIn('id', Arr::wrap($productIds));
+        return $this
+            ->wherePaid()
+            ->where('dispatch_by', '<', $asOf);
+    }
+
+    public function wherePaid(): self
+    {
+        return $this->whereState('state', OrderPaid::class);
+    }
+
+    public function whereCustomer(Customer $customer): self
+    {
+        return $this->whereBelongsTo($customer);
+    }
+
+    public function whereHasBackorderedLines(): self
+    {
+        return $this->whereHas('lines', function (OrderLineBuilder $query): void {
+            $query->whereBackordered();
         });
     }
 
-    public function whereHasActiveProducts(): self
+    public function withRelations(): self
     {
-        return $this->whereHas('products', function ($query): void {
-            $query->where('active', true);
-        });
+        return $this->with([
+            'customer',
+            'lines' => function (HasMany $query): void {
+                $query->withRelations();
+            },
+        ]);
     }
 }
 ```
 
-**Usage in builder:**
+The model registers it:
 
 ```php
-class OrderBuilder extends Builder
-{
-    use HasProducts;
-
-    // ...
-}
-```
-
-## Register Builder in Model
-
-### Preferred: PHP Attribute (Laravel 12+)
-
-```php
+use App\Builders\OrderBuilder;
 use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
 
 #[UseEloquentBuilder(OrderBuilder::class)]
@@ -175,134 +91,54 @@ class Order extends Model
 }
 ```
 
-### Fallback: Method Override (pre-Laravel 12)
+Below Laravel 12.19, override the method instead. `$query` stays untyped: the parent's parameter is untyped, and PHP rejects a narrower type in an override.
 
 ```php
-public function newEloquentBuilder($query): OrderBuilder
+class Order extends Model
 {
-    return new OrderBuilder($query);
+    public function newEloquentBuilder($query): OrderBuilder
+    {
+        return new OrderBuilder($query);
+    }
 }
 ```
 
-## Usage Examples
-
-### Basic Chaining
+A caller reads as a sentence:
 
 ```php
 Order::query()
-    ->wherePending()
-    ->whereTotalGreaterThan(10000)
-    ->wherePlacedBetween(now()->subWeek(), now())
-    ->withRelated()
-    ->recent()
-    ->paginate();
-```
-
-### Lazy Iteration
-
-```php
-Order::query()
-    ->whereCompleted()
-    ->lazyById()
-    ->each(function (Order $order): void {
-        // Process order
-    });
-```
-
-### Complex Queries
-
-```php
-$orders = Order::query()
-    ->wherePending()
-    ->whereCustomer($user)
-    ->whereHasItems([$productId1, $productId2])
-    ->wherePlacedBetween($startDate, $endDate)
-    ->withRelated()
+    ->whereCustomer($customer)
+    ->whereOverdue(now())
+    ->withRelations()
     ->get();
 ```
 
-## Empty Builders
+## Reach for these when the situation calls for it
 
-**Always create builders** even if empty initially - for future extensibility:
+**A package adds scopes to the model**, such as spatie/laravel-model-states' `whereState()`. Declare each with `@method static OrderBuilder` on the builder, as in the example, so chains through them stay typed.
 
-```php
-<?php
+**Several models share a constraint through a model concern and contract**, such as ownership. Put the constraint in a builder trait, `Builders/Concerns/IsOwnableScopes`, used by each of those models' builders. It reads the column from the model rather than hard-coding it: `$this->where($this->getModel()->getOwnedByField(), $owner->getKey())`, taking the contract (`Ownable $owner`) as its parameter.
 
-declare(strict_types=1);
+**Every query on a model must carry a constraint.** Add a global scope registered with `#[ScopedBy(...)]`, and have its `apply()` call the builder's method rather than repeat the constraint. "No local scopes" doesn't rule out global ones.
 
-namespace App\Builders;
+**The project's PHPStan level reports missing generic types.** Add `/** @extends Builder<Order> */` to the builder. Otherwise leave it off; the `self` return types already carry the type.
 
-use Illuminate\Database\Eloquent\Builder;
+**An index listing filtered, sorted and paginated from request input.** That's a query class built on the builder, not a builder method; see [laravel-controllers](../laravel-controllers/SKILL.md).
 
-class CustomerBuilder extends Builder
-{
-    // Empty for now, but ready for future methods
-}
-```
+## Anti-patterns
 
-## Common Builder Methods
+- ❌ `public function scopePaid(Builder $query)`: a local scope.
+- ❌ `Order::where('state', ...)` or `Order::wherePaid()`: no `query()`.
+- ❌ An empty builder created in case it's needed later.
+- ❌ `wherePlacedBetween(Carbon $from, Carbon $to)`.
+- ❌ `whereCustomer(Customer|int $customer)` with an `instanceof` branch.
+- ❌ `whereHas('lines', function ($query) { ... })`: an untyped closure.
+- ❌ The same `->with([...])` list repeated across query classes instead of one `withRelations()`.
+- ❌ Request input, pagination or sorting parameters read inside a builder method.
 
-### Status Filtering
+## Related
 
-```php
-public function whereActive(): self
-{
-    return $this->where('status', 'active');
-}
-
-public function whereInactive(): self
-{
-    return $this->where('status', 'inactive');
-}
-```
-
-### Date Ranges
-
-```php
-public function whereCreatedAfter(Carbon $date): self
-{
-    return $this->where('created_at', '>', $date);
-}
-
-public function whereCreatedToday(): self
-{
-    return $this->whereDate('created_at', today());
-}
-```
-
-### User/Owner Filtering
-
-```php
-public function whereUser(User|int $user): self
-{
-    $userId = $user instanceof User ? $user->id : $user;
-    return $this->where('user_id', $userId);
-}
-```
-
-### Relationship Loading
-
-```php
-public function withFullRelations(): self
-{
-    return $this->with([
-        'user',
-        'items.product',
-        'customer.address',
-    ]);
-}
-```
-
-## Builder Organization
-
-```
-app/Builders/
-├── OrderBuilder.php
-├── CustomerBuilder.php
-├── ProductBuilder.php
-└── Concerns/
-    ├── HasProducts.php
-    ├── HasDates.php
-    └── HasStatus.php
-```
-
+- [laravel-models](../laravel-models/SKILL.md): the model a builder belongs to, and its relationships
+- [laravel-controllers](../laravel-controllers/SKILL.md): query classes for index listings
+- [laravel-state-machines](../laravel-state-machines/SKILL.md): the states that `whereState()` constrains
+- [laravel-providers](../laravel-providers/SKILL.md): `CarbonImmutable` dates, and the lazy-loading reporting an incomplete `withRelations()` sets off

@@ -11,6 +11,8 @@ app/
 ├── Actions/{Entity}/
 ├── Booters/
 ├── Builders/
+├── Casts/                        # custom casts, e.g. for value objects
+├── Collections/                  # custom Eloquent collections
 ├── Console/Commands/
 ├── Data/
 │   ├── Data.php                  # base DTO class

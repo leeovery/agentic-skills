@@ -1,30 +1,23 @@
 ---
 name: laravel-value-objects
-description: Immutable value objects for domain values. Use when creating or modifying value objects like money, coordinates, or other domain primitives.
+description: Domain values are immutable value objects in app/Values, validated on construction, compared by value and cast onto models through Castable. Use when creating or changing a value object, its model cast, an action's result object, or money handling.
 ---
 
 # Laravel Value Objects
 
-Value objects are **simple, immutable objects** representing domain concepts.
+A value object is a domain value that has rules: a coordinate, a date range, an email address. It is defined by what it holds, not by an identity, and it can't exist in an invalid state, so code that receives one never checks it again. Behaviour that belongs to the value lives on it. A DTO only carries data between layers ([laravel-dtos](../laravel-dtos/SKILL.md)); once a value has rules or behaviour of its own, it's a value object.
 
-**Related guides:**
-- [DTOs](../laravel-dtos/SKILL.md) - DTOs are for data transfer, value objects for domain concepts
+## Rules
 
-## When to Use
+- **Lives in `app/Values/`, named for the value.** `Coordinate`, `DateRange`, never `CoordinateValue` or `CoordinateVO`. A project on the domain layout keeps its `ValueObjects/` (see [laravel-architecture](../laravel-architecture/SKILL.md)).
+- **Immutable.** A `readonly class` with its parts as public promoted properties, and no setters. An operation that would change it returns a new instance. A value handed to several objects can't then change under one of them.
+- **Valid or it doesn't exist.** The public constructor validates its input and throws `InvalidArgumentException`, or the project's domain exception when a caller is expected to handle it. No separate `validate()` or `isValid()` for a caller to forget.
+- **Named constructors for other inputs.** `fromString()`, `fromArray()` parse their input, then call `new self(...)`, so validation stays in the constructor. The constructor stays public: it is the plain, validated way in.
+- **Equal by value.** An `equals(self $other): bool` that compares the parts. Equality is a domain decision (case, precision, normalisation), and `==` on objects hides it.
+- **Behaviour belongs on the value.** Distance between coordinates, whether a range contains a date, formatting the value itself. Anything that needs the database or a service stays in an action.
+- **Interfaces only when they're used.** `Stringable` when it's printed, `JsonSerializable` when it's serialised, `Arrayable` when it becomes an array. A `__toString()` that a named constructor can parse back makes the pair round-trip.
 
-**Use value objects when:**
-- Complex domain value with behavior
-- Immutability required
-- Rich validation logic
-- Need equality comparison
-- Encapsulating domain rules
-
-**Use DTOs when:**
-- Transferring data between layers
-- No domain behavior needed
-- See [DTOs](../laravel-dtos/SKILL.md)
-
-## Simple Value Object
+## Example
 
 ```php
 <?php
@@ -33,161 +26,170 @@ declare(strict_types=1);
 
 namespace App\Values;
 
-use App\Enums\ProcessResult as ProcessResultEnum;
+use App\Casts\CoordinateCast;
+use Illuminate\Contracts\Database\Eloquent\Castable;
+use InvalidArgumentException;
+use Stringable;
 
-class ProcessResult
+readonly class Coordinate implements Castable, Stringable
+{
+    private const float EARTH_RADIUS_KM = 6371.0;
+
+    public function __construct(
+        public float $latitude,
+        public float $longitude,
+    ) {
+        throw_unless(
+            $latitude >= -90 && $latitude <= 90,
+            InvalidArgumentException::class,
+            "Latitude must be between -90 and 90, {$latitude} given.",
+        );
+
+        throw_unless(
+            $longitude >= -180 && $longitude <= 180,
+            InvalidArgumentException::class,
+            "Longitude must be between -180 and 180, {$longitude} given.",
+        );
+    }
+
+    public static function fromString(string $value): self
+    {
+        throw_unless(
+            preg_match('/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/', $value, $matches),
+            InvalidArgumentException::class,
+            "\"{$value}\" is not a latitude,longitude pair.",
+        );
+
+        return new self((float) $matches[1], (float) $matches[2]);
+    }
+
+    public static function castUsing(array $arguments): string
+    {
+        return CoordinateCast::class;
+    }
+
+    public function equals(self $other): bool
+    {
+        return $this->latitude === $other->latitude
+            && $this->longitude === $other->longitude;
+    }
+
+    public function distanceInKmTo(self $other): float
+    {
+        $latitudeDelta = deg2rad($other->latitude - $this->latitude);
+        $longitudeDelta = deg2rad($other->longitude - $this->longitude);
+
+        $haversine = sin($latitudeDelta / 2) ** 2
+            + cos(deg2rad($this->latitude)) * cos(deg2rad($other->latitude)) * sin($longitudeDelta / 2) ** 2;
+
+        return self::EARTH_RADIUS_KM * 2 * asin(sqrt($haversine));
+    }
+
+    public function __toString(): string
+    {
+        return "{$this->latitude},{$this->longitude}";
+    }
+}
+```
+
+## Casting onto a model
+
+A value object stored on a model implements `Castable`, and its `castUsing()` names a dedicated cast in `app/Casts/`. The model then casts to the value itself: `'location' => Coordinate::class`. The cast's `set()` accepts only that value object and throws for anything else, so a raw array or string can't be written past it. A value spread over several columns is read from `$attributes` and written back as an array of columns:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Casts;
+
+use App\Values\Coordinate;
+use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
+use Illuminate\Database\Eloquent\Model;
+use InvalidArgumentException;
+
+/**
+ * @implements CastsAttributes<Coordinate, Coordinate>
+ */
+class CoordinateCast implements CastsAttributes
+{
+    public function get(Model $model, string $key, mixed $value, array $attributes): ?Coordinate
+    {
+        if (is_null($attributes['latitude'] ?? null) || is_null($attributes['longitude'] ?? null)) {
+            return null;
+        }
+
+        return new Coordinate((float) $attributes['latitude'], (float) $attributes['longitude']);
+    }
+
+    /**
+     * @return array{latitude: ?float, longitude: ?float}
+     */
+    public function set(Model $model, string $key, mixed $value, array $attributes): array
+    {
+        if (is_null($value)) {
+            return ['latitude' => null, 'longitude' => null];
+        }
+
+        if (! $value instanceof Coordinate) {
+            throw new InvalidArgumentException("The {$key} attribute must be a ".Coordinate::class.'.');
+        }
+
+        return ['latitude' => $value->latitude, 'longitude' => $value->longitude];
+    }
+}
+```
+
+## Reach for these when the situation calls for it
+
+**The domain handles money.** Use moneyphp/money's `Money` as the value, build it through one `MoneyFactory`, and store it with a `MoneyCast`. Read [money.md](references/money.md) before writing any code that stores, calculates or displays an amount of money.
+
+**An action can end in more than one expected way, and its caller acts on which.** Return a result object: an outcome enum plus an optional message, with a named constructor per outcome. The caller matches on the outcome. Errors still throw; a result is for outcomes the caller expects, such as "nothing to do".
+
+```php
+readonly class ImportResult
 {
     public function __construct(
-        public readonly ProcessResultEnum $result,
-        public readonly ?string $message = null,
+        public ImportOutcome $outcome,
+        public ?string $message = null,
     ) {}
 
-    public static function success(?string $message = null): self
+    public static function skipped(string $reason): self
     {
-        return new self(ProcessResultEnum::Success, $message);
-    }
-
-    public static function skip(?string $message = null): self
-    {
-        return new self(ProcessResultEnum::Skip, $message);
-    }
-
-    public static function fail(?string $message = null): self
-    {
-        return new self(ProcessResultEnum::Fail, $message);
-    }
-
-    public function isSuccess(): bool
-    {
-        return $this->result === ProcessResultEnum::Success;
-    }
-
-    public function isFail(): bool
-    {
-        return $this->result === ProcessResultEnum::Fail;
+        return new self(ImportOutcome::Skipped, $reason);
     }
 }
 ```
 
-## Money Value Object
+Name the enum for the outcome (`ImportOutcome`), not the result, so the two never need an import alias.
 
-**[View full implementation →](references/Money.php)**
+## Testing
 
-## Usage Examples
-
-### ProcessResult
+Unit-test each constructor rule, each named constructor and each behaviour; every rule is a test that fails when the rule goes:
 
 ```php
-// In actions
-return ProcessResult::success('Order processed successfully');
-return ProcessResult::skip('Order already processed');
-return ProcessResult::fail('Payment declined');
-
-// Checking results
-if ($result->isSuccess()) {
-    // Handle success
-}
-
-if ($result->isFail()) {
-    // Handle failure
-}
+test('will reject a latitude outside -90 to 90', function (): void {
+    new Coordinate(90.5, 0.0);
+})->throws(InvalidArgumentException::class);
 ```
 
-### Money (Brick\Money wrapper)
+More in [laravel-testing](../laravel-testing/SKILL.md).
 
-```php
-// Creating money values
-$price = Money::of(29.99);                    // From major units (£29.99)
-$shipping = Money::ofMinor(500);              // From minor units (£5.00)
-$usdPrice = Money::of(19.99, 'USD');          // Explicit currency
+## Anti-patterns
 
-// Arithmetic (returns new instances)
-$total = $price->plus($shipping);
-$discounted = $total->minus(Money::of(5));
-$refund = $total->negated();
+- ❌ A setter, or a property that isn't `readonly`.
+- ❌ A constructor that accepts anything, with validation left to the caller.
+- ❌ A private constructor that forces every caller through static factories.
+- ❌ `__call()` forwarding to a wrapped library. The value's API should be readable in its class.
+- ❌ A value object that queries the database or calls a service.
+- ❌ A cast whose `set()` accepts a raw array or string as well as the value object.
+- ❌ An array or a loose pair of primitives (`$latitude`, `$longitude`) passed around where a value object exists.
 
-// Comparison
-$total->isZero();
-$total->isGreaterThan($price);
-$total->isEqualTo($other);
+## Related
 
-// Display
-echo $total->format();                        // "£34.99"
-echo $refund->format(showNegativeInParentheses: true);  // "(£34.99)"
-
-// Storage (minor units as int)
-$total->getMinorAmount();                     // 3499
-$total->getCurrencyCode();                    // "GBP"
-```
-
-**[→ Full implementation: Money.php](references/Money.php)**
-
-## Key Patterns
-
-### 1. Immutability
-
-Use `final readonly class` — all properties immutable, class cannot be extended:
-
-```php
-final readonly class Money implements JsonSerializable, Stringable
-{
-    private function __construct(private BrickMoney $money) {}
-}
-```
-
-### 2. Private Constructor + Static Factories
-
-Force controlled instantiation:
-
-```php
-private function __construct(/* ... */) {}
-
-public static function of(BigNumber|int|float|string $amount, string $currency = 'GBP'): self
-public static function ofMinor(BigNumber|int|float|string $minorAmount, string $currency = 'GBP'): self
-public static function success(?string $message = null): self
-```
-
-### 3. Library Wrapping
-
-Wrap third-party libraries behind your own API using `__call()` delegation:
-
-```php
-public function __call(string $name, array $arguments): mixed
-{
-    // Delegate to wrapped library, wrapping results as needed
-}
-```
-
-### 4. Return New Instances
-
-Operations always return new instances (immutability):
-
-```php
-$discounted = $price->minus(Money::of(5));  // $price unchanged
-$refund = $price->negated();                // $price unchanged
-```
-
-### 5. Implement Serialization Interfaces
-
-Value objects typically implement `JsonSerializable`, `Stringable`, and `Wireable` (Livewire) for integration with framework features and storage.
-
-## Directory Structure
-
-```
-app/ValueObjects/
-├── Money.php
-├── ProcessResult.php
-├── Coordinate.php
-└── EmailAddress.php
-```
-
-## Summary
-
-**Value objects:**
-- Are immutable (use `readonly`)
-- Have static factory methods
-- Encapsulate domain logic
-- Return new instances from operations
-- Validate in constructor
-
-**Use for domain concepts with behavior, not simple data transfer.**
+- [laravel-models](../laravel-models/SKILL.md) — model casts beyond value objects
+- [laravel-dtos](../laravel-dtos/SKILL.md) — data that crosses layers, which may hold value objects
+- [laravel-enums](../laravel-enums/SKILL.md) — fixed sets of values, and the outcome enum of a result object
+- [laravel-actions](../laravel-actions/SKILL.md) — the actions that take value objects and return result objects
+- [laravel-exceptions](../laravel-exceptions/SKILL.md) — domain exceptions a constructor can throw
+- [laravel-testing](../laravel-testing/SKILL.md) — test style

@@ -1,258 +1,110 @@
-# DTO Transformers
+# DTO transformers
 
-**Transformer classes transform external system data into internal DTOs.** Use when you need explicit, testable mapping logic between different data structures.
+## A list the action takes on its own
 
-**Related guides:**
-- [SKILL.md](../SKILL.md) - Core DTO patterns
-- [test-factories.md](test-factories.md) - Test factories for tests
-- [helpers.php](./helpers.php) - `collect_get()` helper implementation
-
-## When to Use Transformers
-
-**Use transformers when:**
-- Integrating external systems (APIs, webhooks, message queues)
-- Multiple data sources map to the same DTO
-- Complex transformations with enum conversions, date handling, nested DTOs
-- Transformation logic warrants dedicated testing
-
-**Don't use transformers when:**
-- Simple data - use `Data::from($array)` directly
-- Direct model to DTO - use `Data::from($model)`
-- Internal application data - use `::from()` with arrays
-
-## Transformer Structure
+When an action takes a list rather than a DTO that holds one, the mapping gets a collection transformer, `{Item}DataCollectionTransformer`. When several Form Requests on one surface carry the same input, one transformer takes them all as a union.
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace App\Data\Transformers;
+namespace App\Data\Transformers\Api\V1;
 
-use App\Data\PaymentData;
-use App\Enums\PaymentStatus;
+use App\Data\OrderItemData;
+use App\Http\Api\V1\Requests\CreateOrderRequest;
+use App\Http\Api\V1\Requests\UpdateOrderRequest;
+use Illuminate\Support\Collection;
 
-class PaymentDataTransformer
+class OrderItemDataCollectionTransformer
 {
-    public static function fromStripePaymentIntent(array $payload): PaymentData
+    /**
+     * @return Collection<int, OrderItemData>
+     */
+    public static function fromRequest(CreateOrderRequest|UpdateOrderRequest $request): Collection
     {
-        return PaymentData::from([
-            'id' => data_get($payload, 'id'),
-            'amount' => data_get($payload, 'amount'),
-            'currency' => data_get($payload, 'currency'),
-            'status' => match (data_get($payload, 'status')) {
-                'succeeded', 'paid' => PaymentStatus::Succeeded,
-                'processing', 'pending' => PaymentStatus::Pending,
-                default => PaymentStatus::Unknown,
-            },
-            'rawData' => $payload,
-        ]);
-    }
-
-    public static function fromPayPalOrder(array $order): PaymentData
-    {
-        return PaymentData::from([
-            'id' => data_get($order, 'purchase_units.0.payments.captures.0.id'),
-            'amount' => (int) (data_get($order, 'purchase_units.0.amount.value') * 100),
-            'currency' => data_get($order, 'purchase_units.0.amount.currency_code'),
-            'status' => match (data_get($order, 'status')) {
-                'COMPLETED' => PaymentStatus::Succeeded,
-                'PENDING' => PaymentStatus::Pending,
-                default => PaymentStatus::Unknown,
-            },
-            'rawData' => $order,
-        ]);
+        return $request->collect('items')->keys()->map(
+            fn (int $index): OrderItemData => new OrderItemData(
+                productId: $request->integer("items.{$index}.product_id"),
+                quantity: $request->integer("items.{$index}.quantity"),
+            ),
+        );
     }
 }
 ```
 
-**Naming conventions:**
-- `from{SystemName}{DataType}` - e.g., `fromStripePaymentIntent`
-- `from{SystemName}{EventType}` - e.g., `fromFinderAutomatedMatch`
+Each child is read back through the request by index, so every value still goes through a typed helper. Pass a list straight through, `TagData::collect($request->collect('tags'))`, only when every child key is already a property name and every value is a string. Pass `$request->collect()`, not `input()`: `collect()` returns the container it's given.
 
-## Key Patterns
+## An external payload
 
-### Safe Data Access
+A transformer that maps one service's payloads lives with that service, in `app/Services/{Name}/Transformers/`, next to its `Data/`. Read nested or optional keys with `data_get()`, and translate the service's values onto your own enum with `match`.
 
 ```php
-// Array access with default
-'town' => data_get($match, 'address.town', default: null)
+<?php
 
-// Collection access - use collect_get() helper
-'items' => collect_get($payload, 'line_items')
-    ->map(fn ($item) => OrderItemData::from([...]))
-```
+declare(strict_types=1);
 
-### Enum Transformation
+namespace App\Services\Shipping\Transformers;
 
-When mapping from a **request**, use the `enum()` helper — it casts via `tryFrom()` and returns `null` when the key is absent (ideal for nullable fields; validation guarantees presence for required ones). Don't round-trip through `$request->string('status')->toString()` or `OrderStatus::from($request->input('status'))`:
+use App\Services\Shipping\Data\ShipmentData;
+use App\Services\Shipping\Enums\ShipmentStatus;
+use Illuminate\Support\Facades\Date;
 
-```php
-'status' => $request->enum('status', OrderStatus::class),
-```
-
-When mapping from an **external payload** whose raw values don't line up with your enum cases, map them explicitly with `match`:
-
-```php
-'status' => match (data_get($data, 'type')) {
-    'succeeded', 'paid' => PaymentStatus::Succeeded,
-    'processing', 'pending' => PaymentStatus::Pending,
-    default => PaymentStatus::Unknown,
-},
-```
-
-### Nested DTO Collections
-
-Three approaches for mapping collections, from simplest to most control:
-
-**1. Direct pass-through** - when keys match exactly:
-```php
-'images' => $request->input('images'),
-```
-
-**2. Map from array** - when keys differ, let package cast:
-```php
-'images' => collect($request->input('images'))
-    ->map(fn (array $image) => [
-        'url' => $image['image_url'],
-        'size' => $image['file_size'],
-        'caption' => $image['alt_text'],
-    ]),
-```
-
-**3. Map using request with index** - for request helpers or explicit construction:
-```php
-// Let package cast
-'images' => collect($request->input('images'))
-    ->map(fn (array $image, int $index) => [
-        'url' => $request->input("images.{$index}.image_url"),
-        'size' => $request->integer("images.{$index}.file_size"),
-        'isPublic' => $request->boolean("images.{$index}.is_public"),
-    ]),
-
-// Or construct child DTO directly for explicit control
-'images' => collect($request->input('images'))
-    ->map(fn (array $image, int $index) => new PostImageData(
-        url: $request->input("images.{$index}.image_url"),
-        size: $request->integer("images.{$index}.file_size"),
-        isPublic: $request->boolean("images.{$index}.is_public"),
-    )),
-```
-
-Use request with index when you need `boolean()`, `integer()`, `date()`, `enum()` helpers. Use `new Data()` when you want explicit control over child DTO construction.
-
-**First-class callable for reusable transformers:**
-
-```php
-'matches' => collect_get($payload, 'loas')
-    ->map(MatchDataTransformer::fromFinderMatch(...))
-```
-
-### Conditional Nested DTOs
-
-```php
-'employer' => ($employer = $suggestion->employer)
-    ? EmployerData::from([
-        'id' => $employer->id,
-        'name' => $employer->name,
-    ])
-    : null,
-```
-
-### Raw Data Preservation
-
-Always preserve the original payload for debugging and auditing:
-
-```php
-'rawData' => $payload,
-```
-
-### Validation Guards
-
-```php
-public static function fromInboundMessage(InboundMessage $message): ResponseData
+class ShipmentDataTransformer
 {
-    throw_unless(
-        data_get($message->payload, 'result'),
-        InvalidResponseException::missingResult($message)
-    );
+    public static function fromPayload(array $payload): ShipmentData
+    {
+        $deliveredAt = data_get($payload, 'delivery.completed_at');
 
-    return ResponseData::from([...]);
+        return new ShipmentData(
+            reference: data_get($payload, 'id'),
+            trackingNumber: data_get($payload, 'tracking.number'),
+            status: match (data_get($payload, 'status')) {
+                'in_transit', 'out_for_delivery' => ShipmentStatus::InTransit,
+                'delivered' => ShipmentStatus::Delivered,
+                default => ShipmentStatus::Unknown,
+            },
+            deliveredAt: $deliveredAt ? Date::parse($deliveredAt) : null,
+        );
+    }
 }
 ```
 
-## Organization
+A list in a payload maps with the same method as a first-class callable: `collect(data_get($payload, 'shipments', []))->map(ShipmentDataTransformer::fromPayload(...))`.
 
-```
-app/Data/Transformers/
-├── PaymentDataTransformer.php
-├── Stripe/
-│   ├── PaymentDataTransformer.php
-│   └── CustomerDataTransformer.php
-└── Web/
-    └── OrderDataTransformer.php
-```
+## Testing a transformer
 
-**Principles:**
-- One transformer per DTO (can have multiple `from*` methods)
-- Subdirectories for external services with multiple transformers
-- Name: `{DTO}Transformer`
-
-## Usage
+Build the Form Request with `::create()` and call the transformer. No route, controller or validation runs, so the test pins only the mapping.
 
 ```php
-// In controller or message handler
-$paymentData = PaymentDataTransformer::fromStripePaymentIntent($webhook['data']);
+<?php
 
-// Pass to action
-resolve(ProcessPaymentAction::class)($paymentData);
-```
+declare(strict_types=1);
 
-## Testing
+use App\Data\Transformers\Api\V1\CreateOrderDataTransformer;
+use App\Enums\OrderPriority;
+use App\Http\Api\V1\Requests\CreateOrderRequest;
 
-```php
-test('transforms stripe payment status to enum', function (): void {
-    $data = PaymentDataTransformer::fromStripePaymentIntent([
-        'id' => 'pi_123',
-        'amount' => 1000,
-        'currency' => 'gbp',
-        'status' => 'succeeded',
+test('will map a create order request', function (): void {
+    $request = CreateOrderRequest::create('/', 'POST', [
+        'customer_email' => 'jane@example.com',
+        'delivery_date' => '2026-03-01',
+        'priority' => 'express',
+        'is_gift' => '1',
+        'items' => [['product_id' => '7', 'quantity' => '2']],
     ]);
 
+    $data = CreateOrderDataTransformer::fromRequest($request);
+
     expect($data)
-        ->id->toBe('pi_123')
-        ->status->toBe(PaymentStatus::Succeeded);
+        ->customerEmail->toBe('jane@example.com')
+        ->priority->toBe(OrderPriority::Express)
+        ->isGift->toBeTrue()
+        ->and($data->deliveryDate->toDateString())->toBe('2026-03-01')
+        ->and($data->items->sole())
+        ->productId->toBe(7)
+        ->quantity->toBe(2);
 });
 ```
 
-## Anti-Patterns
-
-**Don't put transformation logic in actions:**
-```php
-// BAD - transformation hidden in action
-class ProcessPaymentAction
-{
-    public function __invoke(array $stripeData): Payment { /* mapping here */ }
-}
-
-// GOOD - explicit transformer
-class ProcessPaymentAction
-{
-    public function __invoke(PaymentData $data): Payment { /* domain logic */ }
-}
-```
-
-**Don't add business logic to transformers:**
-```php
-// BAD - sending emails in transformer
-public static function fromStripeOrder(array $order): OrderData
-{
-    $data = OrderData::from([...]);
-    Mail::to($data->customer)->send(new HighValueOrder($data)); // NO!
-    return $data;
-}
-```
-
-**Remember:** Transformers only transform. Business logic belongs in actions.
-
-For test factories, see **[test-factories.md](test-factories.md)**.
+String input in the test is deliberate: it is what a real request carries, and it proves the typed helpers do the casting.
