@@ -17,6 +17,10 @@ nuxt/                      # Nuxt skills plugin
   agntc.json
   README.md
   skills/                 # 18 Nuxt skills (SKILL.md, plus references/ where needed)
+go/                        # Go skills plugin
+  agntc.json
+  README.md
+  skills/                 # 8 Go skills (SKILL.md, plus references/ where needed)
 release                   # Bash script for semver releases with AI-generated notes
 ```
 
