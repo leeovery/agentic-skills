@@ -11,6 +11,7 @@ An action is one domain operation in one class with one public method, `__invoke
 
 - **One operation per class.** Named `{Verb}{Subject}Action` (`CancelOrderAction`, `GetInvoiceTotalsAction`), under `app/Actions/{Entity or Subsystem}/`. Never group by verb.
 - **Typed input.** Take the models the operation acts on, plus a DTO, enum or value object for everything else. Never an array of request data or a loose run of primitives.
+- **The acting user is an argument.** When the operation depends on who's doing it, the caller passes the user in. Never call `user()` or `auth()` inside an action: it would then only work inside a request.
 - **Return what the caller needs.** The model it changed, the thing it created, or `void`. Return the model you hold; don't re-query it with `fresh()`.
 - **Guard first.** Business-rule preconditions go in a private `guard()` called before any work, using `throw_unless`/`throw_if` with a domain exception factory. A state precondition asks the state: `$order->state->canTransitionTo(OrderCancelled::class)`, or a model `is…()` helper.
 - **Transaction when there's more than one write.** Wrap in `DB::transaction` when the action makes several writes, or a write plus something that must roll back with it. A single write needs none.
