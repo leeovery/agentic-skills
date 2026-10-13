@@ -12,7 +12,7 @@ Agentic Skills — a collection of opinionated development skills for AI coding 
 laravel/                   # Laravel skills plugin
   agntc.json              # Plugin config — declares supported agents
   README.md               # Plugin-specific documentation
-  skills/                 # 20 Laravel skills (SKILL.md, plus references/ where needed)
+  skills/                 # 22 Laravel skills (SKILL.md, plus references/ where needed)
 nuxt/                      # Nuxt skills plugin
   agntc.json
   README.md

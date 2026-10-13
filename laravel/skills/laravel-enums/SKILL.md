@@ -18,7 +18,7 @@ An enum is the one definition of a fixed set of values: a status, a type, a queu
 - **Exhaustive `match`, no `default` arm.** A new case then fails loudly with `UnhandledMatchError` in the first test that hits it, instead of silently taking the default.
 - **The display label is `label()`.** Not `getLabel()`. Other per-case values follow suit: `remoteValue()`, not `getRemoteValue()`.
 - **Predicates are real methods.** A case callers often ask about gets one written out (`isClickAndCollect()`), never left to a magic `__call`, so static analysis sees it.
-- **A status with transition rules or side effects is a state machine, not an enum.** When moving from one value to another has preconditions, or triggers work, use a state machine ([laravel-state-machines](../laravel-state-machines/SKILL.md)). An enum fits a status whose values can be set freely.
+- **A status with transition rules or side effects is a state machine, not an enum.** When moving from one value to another has preconditions, or triggers work, use a state machine ([laravel-state-machines](../laravel-state-machines/SKILL.md)). An enum fits a status whose values can be set freely. On an event-sourced aggregate the state is an enum, because the aggregate is the state machine ([laravel-event-sourcing](../laravel-event-sourcing/SKILL.md)).
 
 ## Example
 
@@ -185,3 +185,4 @@ If the project has its own enum concerns, use their API.
 - [laravel-jobs](../laravel-jobs/SKILL.md) — the queue-name enum
 - [laravel-validation](../laravel-validation/SKILL.md) — validating enum input
 - [laravel-dtos](../laravel-dtos/SKILL.md) — enum properties, built with `$request->enum()`
+- [laravel-event-sourcing](../laravel-event-sourcing/SKILL.md) — state enums on an event-sourced aggregate

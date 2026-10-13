@@ -17,7 +17,7 @@ Jobs, events and listeners move work off the request; none of them does the work
 - **On Laravel 13, queue options are attributes.** `#[Queue]`, `#[UniqueFor]`, `#[Tries]`, `#[Backoff]`, `#[Timeout]` from `Illuminate\Queue\Attributes`; alias the first `as OnQueue` beside the `Queue` enum: `#[OnQueue(Queue::Processing)]`.
 - **Actions dispatch jobs.** After their writes: `ExpireOrderJob::dispatch($order)`, or `dispatchIf($condition, …)`. A controller calls the action; the action decides what to queue.
 - **Events are `{Subject}{PastTense}` in `app/Events/`.** `OrderPaid`, `InvoiceSent`; no `Event` suffix. An event for a state change is fired by its transition and nowhere else ([laravel-state-machines](../laravel-state-machines/SKILL.md)); where a file also imports the state, alias the event `as OrderPaidEvent`. Any other event is dispatched by the action that made the change.
-- **An event carries the model, nothing derived.** `public function __construct(public Order $order) {}`. Listeners read what they need from it, so a new listener never means changing the event.
+- **An event carries the model, nothing derived.** `public function __construct(public Order $order) {}`. Listeners read what they need from it, so a new listener never means changing the event. Stored events in an event-sourced app are different: they carry plain values ([laravel-event-sourcing](../laravel-event-sourcing/SKILL.md)).
 - **Listeners are queued and call one action.** `implements ShouldQueue`, the action constructor-injected, `handle()` passes it the event's model. A slow or failing listener then can't fail the request that fired the event.
 - **Listeners are named for what they do.** After the action they call, without the suffix: `SendOrderReceipt` calls `SendOrderReceiptAction`. Never `SendOrderReceiptListener`.
 - **Listeners are discovered, never registered.** Laravel maps each listener in `app/Listeners` to the event its `handle()` type-hints. A union type (`handle(OrderPaid|OrderRefunded $event)`) shares one listener across events that carry the same model; discovery registers it for each.
@@ -168,7 +168,7 @@ class PurgeOrderFilesJob implements ShouldQueue
 
 **An operation over many records.** One sweep action dispatches one job per record; see [laravel-actions](../laravel-actions/SKILL.md).
 
-**Steps that each need their own retries, or a process whose progress matters.** Chain the jobs, one action each, with `Bus::chain([...])->catch(...)->dispatch()`: a step runs only once the one before it succeeds, and each retries on its own terms. When the steps can run side by side and something must happen once all are done, batch them: `Bus::batch([...])->then(...)->catch(...)->dispatch()`, with the jobs using `Batchable` and the `job_batches` table in place; `Bus::findBatch($id)->progress()` reports how far along it is. Between them these cover most multi-step processes. A project that runs long-lived processes on a workflow engine uses that instead.
+**Steps that each need their own retries, or a process whose progress matters.** Chain the jobs, one action each, with `Bus::chain([...])->catch(...)->dispatch()`: a step runs only once the one before it succeeds, and each retries on its own terms. When the steps can run side by side and something must happen once all are done, batch them: `Bus::batch([...])->then(...)->catch(...)->dispatch()`, with the jobs using `Batchable` and the `job_batches` table in place; `Bus::findBatch($id)->progress()` reports how far along it is. Between them these cover most multi-step processes. A process that waits on outside signals or long timers is a workflow instead ([laravel-workflows](../laravel-workflows/SKILL.md)).
 
 ## Testing
 
@@ -209,3 +209,5 @@ The code that dispatches asserts with `Queue::fake()` or `Event::fake()`. More i
 - [laravel-enums](../laravel-enums/SKILL.md) — enums for fixed identifiers
 - [laravel-providers](../laravel-providers/SKILL.md) — where rate limiters are defined
 - [laravel-testing](../laravel-testing/SKILL.md) — test style and fakes
+- [laravel-event-sourcing](../laravel-event-sourcing/SKILL.md) — stored events, which carry plain values
+- [laravel-workflows](../laravel-workflows/SKILL.md) — processes that wait on signals or long timers

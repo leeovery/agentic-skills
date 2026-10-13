@@ -1,11 +1,11 @@
 ---
 name: laravel-state-machines
-description: A status whose transitions have rules or side effects is a spatie/laravel-model-states state with a class per transition and updateTo/is helpers on the model. Use when adding or changing a model's status, its transitions or state-dependent behaviour.
+description: A status whose transitions have rules or side effects is a spatie/laravel-model-states state with a class per transition and updateTo/is helpers on the model. Use when adding or changing a status, its transitions or state-dependent behaviour on a model that isn't event-sourced.
 ---
 
 # Laravel State Machines
 
-A status earns a state machine when its transitions have rules (only some moves are allowed) or side effects (timestamps, events, other writes). It is a `state` column cast to a spatie/laravel-model-states base state: the base state declares every allowed move, each move with work attached has its own transition class, and the model is the only thing that starts a transition. A status that is a plain value, set freely with nothing reacting, is a backed enum instead (see [laravel-enums](../laravel-enums/SKILL.md)).
+A status earns a state machine when its transitions have rules (only some moves are allowed) or side effects (timestamps, events, other writes). It is a `state` column cast to a spatie/laravel-model-states base state: the base state declares every allowed move, each move with work attached has its own transition class, and the model is the only thing that starts a transition. A status that is a plain value, set freely with nothing reacting, is a backed enum instead (see [laravel-enums](../laravel-enums/SKILL.md)). An event-sourced model doesn't use model-states: its aggregate is the state machine ([laravel-event-sourcing](../laravel-event-sourcing/SKILL.md)). Plain models in the same app still do.
 
 ## Rules
 
@@ -202,3 +202,4 @@ More in [laravel-testing](../laravel-testing/SKILL.md).
 - [laravel-query-builders](../laravel-query-builders/SKILL.md) — `where{State}()` scopes
 - [laravel-jobs](../laravel-jobs/SKILL.md) — events and the listeners that react to them
 - [laravel-testing](../laravel-testing/SKILL.md) — test style and factories
+- [laravel-event-sourcing](../laravel-event-sourcing/SKILL.md) — state and transitions on an event-sourced model
