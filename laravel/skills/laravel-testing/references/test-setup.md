@@ -24,6 +24,8 @@ uses(TestCase::class, FastRefreshDatabase::class)->in('Feature', 'Unit', 'Archit
 
 Saloon's guard is global and adds a check each time it's called, so it runs once here rather than per test. Leave it out until the app has a Saloon connector.
 
+In a multi-tenant app, `Pest.php` applies [laravel-multi-tenancy](../../laravel-multi-tenancy/SKILL.md)'s `FastRefreshDatabaseWithTenancy` in place of `FastRefreshDatabase`, never beside it.
+
 Below the `uses()` call go the project's own test helpers, as plain functions: one per way a test signs in, when the app has more than one kind of user or guard, and any custom expectation added with `expect()->extend()`. Every test file then shares them, and the next agent finds them in one place.
 
 `tests/TestCase.php`:

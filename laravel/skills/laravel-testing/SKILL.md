@@ -193,4 +193,5 @@ A role that may create asserts `assertUnprocessable()` on the same empty `POST`:
 - [laravel-models](../laravel-models/SKILL.md) — `#[UseFactory]` and model helpers
 - [laravel-query-builders](../laravel-query-builders/SKILL.md) — the builder methods under test
 - [laravel-quality](../laravel-quality/SKILL.md) — the architecture test, composer scripts and strict types
+- [laravel-multi-tenancy](../laravel-multi-tenancy/SKILL.md) — the harness a multi-tenant app uses in place of plain `FastRefreshDatabase`
 - [laravel-providers](../laravel-providers/SKILL.md) — `.env-testing` and the other env templates
