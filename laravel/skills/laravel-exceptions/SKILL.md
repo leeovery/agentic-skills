@@ -15,7 +15,7 @@ A broken business rule is a domain exception, thrown by the action that owns the
 - **Every HTTP factory passes its status code.** Pick the code that fits the failure; there's no fixed table. The concern falls back to 500 for a missing code, which turns an expected failure into a server error.
 - **Write the message for the client.** Laravel sends an `HttpExceptionInterface` exception's message to the client even with `APP_DEBUG` off, 5xx included; every other exception becomes `Server Error`. Give a sentence the caller can act on, with public identifiers only: a fixed sentence, or `sprintf` with an `(ulid: %s)` suffix. Never a path, a query, a provider's raw error or the cause's message.
 - **Chain the cause.** A factory that wraps a caught exception takes `Throwable $previous` and passes it as the third constructor argument. The report keeps the original trace; the client sees only your message.
-- **Expected client errors aren't reported during a request; the same exceptions are reported from queues and the scheduler.** During a request the client has been told and nothing is broken. In a job or scheduled task there's no client, so the failure needs attention. `Httpable::report()` does this, and it must return `true` to skip reporting: Laravel treats any return value except `false` as "handled" and skips its own reporting, the error tracker's hook included.
+- **Client errors aren't reported during a request; server errors always are.** A 4xx during a request is expected: the client has been told and nothing is broken. A 5xx means something is broken whoever called. In a job or scheduled task there's no client, so every failure needs attention. `Httpable::report()` does this, and it must return `true` to skip reporting: Laravel treats any return value except `false` as "handled" and skips its own reporting, the error tracker's hook included.
 - **Control-flow exceptions aren't HTTP.** An exception thrown and caught inside a job to choose a path extends `Exception` with no interface and no concern. It never reaches a client.
 - **Let the framework map its own failures.** A missing model is `findOrFail()` or route binding (404), a denied policy is `AuthorizationException` (403), invalid input is a Form Request (422). Don't write factories that duplicate them.
 - **Nothing per exception in the `ExceptionBooter`.** It holds the error tracker's hook; the interface and the concern do the mapping, so no `render()` or `report()` callbacks for domain exceptions. [laravel-providers](../laravel-providers/SKILL.md) owns booters.
@@ -65,7 +65,7 @@ class OrderException extends Exception implements HttpExceptionInterface
 
 ## The `Httpable` concern
 
-One per project, in `app/Exceptions/Concerns/`. If the project already has one, use it, but check its `report()`: one that returns `runningInConsole()` is inverted, reporting every client error during requests and silencing them in queues.
+One per project, in `app/Exceptions/Concerns/`. If the project already has one, use it, but check its `report()`: one that returns `runningInConsole()` is inverted, reporting every client error during requests and silencing every failure in queues.
 
 ```php
 <?php
@@ -81,7 +81,7 @@ trait Httpable
     public function report(Application $app): bool
     {
         // Any return except false tells Laravel the exception is handled and skips default reporting.
-        return ! $app->runningInConsole();
+        return $this->getStatusCode() < 500 && ! $app->runningInConsole();
     }
 
     public function getStatusCode(): int
