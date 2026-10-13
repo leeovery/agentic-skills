@@ -32,7 +32,7 @@ Each plugin is a set of skills for one framework or language: how the code is st
 
 | Plugin | Description | Skills |
 |--------|-------------|--------|
-| [**laravel**](laravel/) | Laravel development: action-oriented architecture, strict typing, DTOs, and maintainability | 20 skills |
+| [**laravel**](laravel/) | Laravel development: action-oriented architecture, strict typing, DTOs, and maintainability | 22 skills |
 | [**nuxt**](nuxt/) | Nuxt 4 + Vue 3: domain-driven, type-safe, composable-first architecture | 18 skills |
 | [**go**](go/) | Go: standard library first, small packages by concern, named types, errors handled once | 8 skills |
 

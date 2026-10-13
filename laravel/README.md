@@ -90,6 +90,15 @@ npx skills add leeovery/agentic-skills/laravel
 | [**laravel-multi-tenancy**](skills/laravel-multi-tenancy/) | Multi-tenant apps on stancl/tenancy v4 |
 | [**laravel-packages**](skills/laravel-packages/) | Extracting infrastructure into a package with package-tools, a shipped fake and Testbench |
 
+### Event Sourcing and Workflows
+
+Early: these hold the decisions made so far, and grow as the patterns are proven in production.
+
+| Skill | Description |
+|-------|-------------|
+| [**laravel-event-sourcing**](skills/laravel-event-sourcing/) | Aggregates that are their own state machine, with projectors and reactors, on spatie/laravel-event-sourcing |
+| [**laravel-workflows**](skills/laravel-workflows/) | Long-running processes on Durable Workflow that only sequence, each step an activity calling an action |
+
 ### Testing
 
 | Skill | Description |
