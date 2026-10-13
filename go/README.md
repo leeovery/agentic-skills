@@ -1,6 +1,21 @@
-# Go Skills
+<div align="center">
 
-Opinionated Go 1.27 patterns for coding agents: the standard library first, one owner for every rule, and named types in place of loose strings and ints.
+# 🐹 Go Skills
+
+**Opinionated Go patterns for AI coding agents**
+
+The standard library first, one owner for every rule,
+<br>and named types in place of loose strings and ints.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+[![Go 1.27](https://img.shields.io/badge/Go-1.27-00ADD8.svg)](https://go.dev)
+[![Lint: golangci-lint v2](https://img.shields.io/badge/lint-golangci--lint%20v2-00ADD8.svg)](https://golangci-lint.run)
+
+[Installation](#installation) · [Skills](#skills) · [Credits](#credits) · [All plugins](../README.md)
+
+</div>
+
+---
 
 **These are opinionated.** They favour small packages split by concern, operations as plain functions or small structs of their collaborators, named types and typed enums, errors wrapped and handled once, a logger that's always injected, interfaces declared where they're used, goroutines that each have an owner and an end, and tests written with the `testing` package alone. No testify, go-cmp, mocking library, or helper library like `lo`. They won't be for everyone, and that's okay.
 
@@ -8,13 +23,16 @@ Opinionated Go 1.27 patterns for coding agents: the standard library first, one 
 
 ## Installation
 
-**agntc** (recommended):
+### agntc (recommended)
+
 ```bash
 npx agntc@latest add leeovery/agentic-skills/go
-npx agntc@latest remove leeovery/agentic-skills/go
 ```
 
-**Vercel Skills CLI:**
+Remove it with `npx agntc@latest remove leeovery/agentic-skills/go`.
+
+### Vercel Skills CLI
+
 ```bash
 npx skills add leeovery/agentic-skills/go
 ```

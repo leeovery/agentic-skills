@@ -1,6 +1,21 @@
-# Laravel Skills
+<div align="center">
 
-Opinionated Laravel development patterns and practices refined over **20 years in the industry** and **10+ years working with Laravel**.
+# 🧱 Laravel Skills
+
+**Opinionated Laravel patterns for AI coding agents**
+
+Architecture, data, the HTTP layer, jobs, testing and tenancy,
+<br>refined over 20 years in the industry and 10+ years with Laravel.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+[![Laravel 12 | 13](https://img.shields.io/badge/Laravel-12%20%7C%2013-FF2D20.svg)](https://laravel.com)
+[![Tests: Pest](https://img.shields.io/badge/tests-Pest-F472B6.svg)](https://pestphp.com)
+
+[Installation](#installation) · [Skills](#skills) · [All plugins](../README.md)
+
+</div>
+
+---
 
 **These are opinionated.** They represent how I build Laravel applications — action-oriented architecture, strict typing, explicit DTOs, and a relentless focus on maintainability. They won't be for everyone, and that's okay.
 
@@ -10,13 +25,16 @@ Each skill states its rules with the reason behind them, and keeps situational t
 
 ## Installation
 
-**agntc** (recommended):
+### agntc (recommended)
+
 ```bash
 npx agntc@latest add leeovery/agentic-skills/laravel
-npx agntc@latest remove leeovery/agentic-skills/laravel
 ```
 
-**Vercel Skills CLI:**
+Remove it with `npx agntc@latest remove leeovery/agentic-skills/laravel`.
+
+### Vercel Skills CLI
+
 ```bash
 npx skills add leeovery/agentic-skills/laravel
 ```
