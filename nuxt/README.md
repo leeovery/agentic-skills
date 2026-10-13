@@ -1,6 +1,22 @@
-# Nuxt Skills
+<div align="center">
 
-Opinionated Nuxt 4 + Vue 3 development patterns refined across multiple production applications.
+# ⛰️ Nuxt Skills
+
+**Opinionated Nuxt patterns for AI coding agents**
+
+Models, features, components, forms, auth, server data and testing,
+<br>refined across multiple production applications.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+[![Nuxt 4](https://img.shields.io/badge/Nuxt-4-00DC82.svg)](https://nuxt.com)
+[![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D.svg)](https://vuejs.org)
+[![Tailwind CSS 4](https://img.shields.io/badge/Tailwind%20CSS-4-06B6D4.svg)](https://tailwindcss.com)
+
+[Installation](#installation) · [Skills](#skills) · [All plugins](../README.md)
+
+</div>
+
+---
 
 **These are opinionated.** They represent a domain-driven, type-safe, composable-first architecture — featuring the feature module pattern (queries/mutations/actions), model hydration with casting, and a clear separation between data and presentation layers. They won't be for everyone, and that's okay.
 
@@ -8,13 +24,16 @@ Opinionated Nuxt 4 + Vue 3 development patterns refined across multiple producti
 
 ## Installation
 
-**agntc** (recommended):
+### agntc (recommended)
+
 ```bash
 npx agntc@latest add leeovery/agentic-skills/nuxt
-npx agntc@latest remove leeovery/agentic-skills/nuxt
 ```
 
-**Vercel Skills CLI:**
+Remove it with `npx agntc@latest remove leeovery/agentic-skills/nuxt`.
+
+### Vercel Skills CLI
+
 ```bash
 npx skills add leeovery/agentic-skills/nuxt
 ```
