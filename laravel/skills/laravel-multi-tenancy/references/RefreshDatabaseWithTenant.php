@@ -15,28 +15,25 @@ trait RefreshDatabaseWithTenant
 
     public function beginDatabaseTransaction(): void
     {
-        // This is called at the start of every test case...
+        $this->restoreTestingTenantRecord();
 
-        // If we have a Tenant statically available, we'll check if it exists in the database
-        // and create it if it doesn't. This is useful when running tests in parallel and
-        // ensuring the Tenant exists between tests (in case of inadvertent deletion).
-        if (filled(static::$testingTenant) && ! Tenant::find(static::$testingTenant)) {
-
-            // Create quietly to avoid triggering the pipeline, which would create and migrate
-            // the tenant database. We don't want that here, we just want to create the tenant.
-            Tenant::createQuietly(static::$testingTenant->getAttributes());
-
-        }
-
-        // Create (if not already created) and set the testing tenant.
         $this->getTestingTenant();
 
-        // Start a transaction for the central database.
+        // Central connection first; once tenancy is initialised the default connection is the tenant's.
         $this->parentBeginDatabaseTransaction();
-
         $this->initializeTenant();
-
-        // Start a transaction for the tenant database.
         $this->parentBeginDatabaseTransaction();
+    }
+
+    private function restoreTestingTenantRecord(): void
+    {
+        $testingTenant = static::$testingTenant;
+
+        if (! $testingTenant || Tenant::query()->whereKey($testingTenant->getTenantKey())->exists()) {
+            return;
+        }
+
+        // Quietly, so the provisioning pipeline doesn't try to create the database that already exists.
+        Tenant::query()->createQuietly($testingTenant->getAttributes());
     }
 }

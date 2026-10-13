@@ -1,177 +1,90 @@
-# Multi-Tenancy Testing
+# Testing a multi-tenant app
 
-Testing patterns for multi-tenant applications using Stancl Tenancy package.
+The harness gives every tenanted test an initialised tenant without the test mentioning one, and keeps the cost of a tenant database to once per run.
 
-**Related guides:**
-- [Multi-tenancy](../SKILL.md) - Core multi-tenancy patterns
-- [Testing](../../laravel-testing/SKILL.md) - General testing patterns
+- **One testing tenant per run.** The first tenanted test creates it through the real `TenantCreated` pipeline, so its database is created, migrated and seeded exactly as in production. Every later tenanted test reuses it.
+- **Two transactions per test.** `RefreshDatabaseWithTenant` opens one on the central connection, initialises the testing tenant, then opens one on the tenant connection. Both roll back after the test.
+- **Extra tenants are cleaned up.** A tenant a test creates is deleted after it, which drops its database. If a test deletes the testing tenant, the next test creates a fresh one.
+- **Parallel-safe.** Tenant databases get a `_test` suffix, or `_test_{token}` per parallel process.
 
-## Testing Central Actions
+## Files
 
-```php
-use App\Actions\Central\Tenant\CreateTenantAction;
-use App\Data\Central\CreateTenantData;
+| Copy to | From |
+|---|---|
+| `tests/TestCase.php` | [TestCase.php](TestCase.php): central tests; tears down tenancy and extra tenants |
+| `tests/TenantTestCase.php` | [TenantTestCase.php](TenantTestCase.php): tenanted tests |
+| `tests/Concerns/ManagesTenants.php` | [ManagesTenants.php](ManagesTenants.php) |
+| `tests/Concerns/RefreshDatabaseWithTenant.php` | [RefreshDatabaseWithTenant.php](RefreshDatabaseWithTenant.php) |
+| `tests/Pest.php` | [Pest.php](Pest.php): merge into the project's own; it assigns the test case by folder |
 
-it('creates a tenant with database', function () {
-    $data = CreateTenantData::from([
-        'tenantId' => 'tenant-1',
-        'name' => 'Acme Corp',
-        'domain' => 'acme.myapp.com',
-    ]);
+Merge `TestCase.php` into the project's base test case rather than replacing it: keep whatever else that class already does.
 
-    $tenant = resolve(CreateTenantAction::class)($data);
+## What the app needs
 
-    expect($tenant)
-        ->toBeInstanceOf(Tenant::class)
-        ->id->toBe('tenant-1')
-        ->name->toBe('Acme Corp');
+- **`tenancy.database.drop_tenant_databases_on_migrate_fresh` is `true`.** `RefreshDatabase` runs `migrate:fresh` once per run; with this set, stancl deletes the previous run's tenants first, dropping their databases. Without it, every run leaves its tenant databases behind.
+- **The tenant factory leaves `id` to `models.id_generator`.** A fixed id collides as soon as a test creates a second tenant.
+- **`TestCase::json()` matches the identification method.** The reference adds the tenant key under the configured header, for header identification. With domain identification, build request URLs on the tenant's domain instead; with path identification, put the tenant key in the path.
 
-    // Verify database exists
-    expect($tenant->database()->exists())->toBeTrue();
-});
-```
-
-## Testing Tenanted Actions
-
-```php
-use App\Actions\Tenanted\Order\CreateOrderAction;
-use App\Services\Tenancy\Landlord;
-
-it('creates order in tenant context', function () {
-    $tenant = Tenant::factory()->create();
-
-    resolve(Landlord::class)->runAs($tenant, function () {
-        $user = User::factory()->create();
-        $data = CreateOrderData::factory()->make();
-
-        $order = resolve(CreateOrderAction::class)($user, $data);
-
-        expect($order)
-            ->toBeInstanceOf(Order::class)
-            ->user_id->toBe($user->id);
-
-        assertDatabaseHas('orders', [
-            'id' => $order->id,
-            'user_id' => $user->id,
-        ]);
-    });
-});
-```
-
-## Testing Traits
-
-### ManagesTenants Trait
-
-**Location:** `tests/Concerns/ManagesTenants.php`
-
-Provides tenant management functionality for tests:
-- Creating and tracking test tenants
-- Cleaning up tenant databases after tests
-- Parallel testing support
-- Tenant initialization helpers
-
-**[View full implementation →](ManagesTenants.php)**
-
-### RefreshDatabaseWithTenant Trait
-
-**Location:** `tests/Concerns/RefreshDatabaseWithTenant.php`
-
-Extends Laravel's RefreshDatabase trait to handle both central and tenant databases in transactions.
-
-**[View full implementation →](RefreshDatabaseWithTenant.php)**
-
-### TenantTestCase
-
-**Location:** `tests/TenantTestCase.php`
-
-Base test case for all tenant-scoped tests.
-
-**[View full implementation →](TenantTestCase.php)**
-
-### Enhanced TestCase
-
-**Location:** `tests/TestCase.php`
-
-Base test case with multi-tenancy support.
-
-**[View full implementation →](TenancyTestCase.php)**
-
-### Pest Configuration
-
-**Location:** `tests/Pest.php`
-
-Configure Pest to automatically use the correct test case based on directory structure.
-
-**[View full implementation →](TenancyPest.php)**
-
-## Test Directory Structure
+## Folders
 
 ```
 tests/
-├── Concerns/
-│   ├── ManagesTenants.php
-│   └── RefreshDatabaseWithTenant.php
 ├── Feature/
-│   ├── Central/              # Tests extending TestCase
-│   │   └── TenantManagementTest.php
-│   └── Tenanted/             # Tests extending TenantTestCase
-│       ├── OrderTest.php
-│       └── CustomerTest.php
-├── Unit/
-│   ├── Central/
-│   │   └── CreateTenantActionTest.php
-│   └── Tenanted/
-│       └── CreateOrderActionTest.php
-├── Pest.php
-├── TestCase.php
-└── TenantTestCase.php
+│   ├── Tenanted/          # TenantTestCase
+│   │   ├── Actions/Order/ExpireStaleOrdersActionTest.php
+│   │   └── Api/V1/OrderTest.php
+│   └── Central/           # TestCase (as is everything outside Tenanted/)
+│       └── Actions/Order/ExpireStaleOrdersForAllTenantsActionTest.php
+└── Unit/
 ```
 
-## Using Test Helpers
+Most tests are tenanted, because most code is tenant code. A test goes outside `Tenanted/` only when the code under test runs central.
 
-**Central tests** (no tenant context needed):
+## A tenanted test
 
 ```php
-// tests/Feature/Central/TenantManagementTest.php
+<?php
 
-it('creates a tenant', function () {
-    $tenant = create_tenant('tenant-1', ['name' => 'Acme Corp']);
+declare(strict_types=1);
 
-    expect($tenant)
-        ->toBeInstanceOf(Tenant::class)
-        ->name->toBe('Acme Corp');
+use App\Models\Order;
+use App\Models\User;
+use Laravel\Sanctum\Sanctum;
+
+use function Pest\Laravel\getJson;
+
+test('can list orders', function (): void {
+    Sanctum::actingAs(User::factory()->create());
+    Order::factory()->count(2)->create();
+
+    getJson('/api/v1/orders')
+        ->assertOk()
+        ->assertJsonCount(2, 'data');
 });
 ```
 
-**Tenanted tests** (automatic tenant context):
+Nothing in it names the tenant: the user and orders are created in the testing tenant's database, and `getJson()` sends the tenant header through the `json()` override. Log in with the project's own helper where it has one; `Sanctum::actingAs()` stands in for it here.
+
+## A central test that creates tenants
 
 ```php
-// tests/Feature/Tenanted/OrderTest.php
+<?php
 
-it('creates an order', function () {
-    // Tenant is automatically initialized via TenantTestCase
-    $user = User::factory()->create();
+declare(strict_types=1);
 
-    $response = actingAs($user)
-        ->postJson('/orders', [
-            'items' => [
-                ['product_id' => 1, 'quantity' => 2],
-            ],
-        ]);
+use App\Actions\Central\Order\ExpireStaleOrdersForAllTenantsAction;
+use App\Jobs\ExpireStaleOrdersJob;
+use Illuminate\Support\Facades\Queue;
 
-    $response->assertCreated();
+test('will dispatch one job per tenant', function (): void {
+    $this->createTenant();
+    $this->createTenant();
+    Queue::fake();
 
-    // Database assertions are scoped to tenant database
-    assertDatabaseHas('orders', [
-        'user_id' => $user->id,
-    ]);
+    resolve(ExpireStaleOrdersForAllTenantsAction::class)();
+
+    Queue::assertPushed(ExpireStaleOrdersJob::class, 2);
 });
 ```
 
-## Key Benefits
-
-1. **Automatic tenant database management** - Databases created and cleaned up automatically
-2. **Parallel testing support** - Each test suite gets unique tenant database suffix
-3. **Directory-based test organization** - Central vs Tenanted tests auto-detected
-4. **Transaction handling** - Both central and tenant databases wrapped in transactions
-5. **HTTP header injection** - Tenant ID automatically added to API requests
+`createTenant()` provisions a real tenant database, so create only as many as the test needs. Fake the queue after creating them: if the project queues its provisioning pipeline, faking first would stop the databases being created. Under `Queue::fake()` stancl adds no tenant key to the payload, so the test asserts the count, not which tenant each job belongs to.

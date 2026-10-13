@@ -6,10 +6,8 @@ namespace Tests;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
-use Illuminate\Http\Middleware\TrustProxies;
-use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
+use Stancl\Tenancy\Resolvers\RequestDataTenantResolver;
 use Tests\Concerns\ManagesTenants;
 
 abstract class TestCase extends BaseTestCase
@@ -20,10 +18,8 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
-        static::setupTenancyConfiguration();
+        static::setUpTenancyConfiguration();
         static::setUpTenantCreationListener();
-        $this->withoutMiddleware([ThrottleRequestsWithRedis::class, TrustProxies::class]);
-        Http::preventStrayRequests();
     }
 
     protected function tearDown(): void
@@ -34,15 +30,10 @@ abstract class TestCase extends BaseTestCase
         parent::tearDown();
     }
 
-    public function json(
-        $method,
-        $uri,
-        array $data = [],
-        array $headers = [],
-        $options = 0
-    ): TestResponse {
+    public function json($method, $uri, array $data = [], array $headers = [], $options = 0): TestResponse
+    {
         if ($tenant = tenant()) {
-            $headers['X-Tenant'] = $tenant->getTenantKey();
+            $headers[RequestDataTenantResolver::headerName()] = $tenant->getTenantKey();
         }
 
         return parent::json($method, $uri, $data, $headers, $options);
