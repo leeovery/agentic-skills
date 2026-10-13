@@ -29,6 +29,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Enums\RateLimiterName;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\User;
@@ -79,7 +80,7 @@ class AppServiceProvider extends ServiceProvider
 
     private function bootRateLimiters(): void
     {
-        RateLimiter::for('api', function (Request $request): Limit {
+        RateLimiter::for(RateLimiterName::Api, function (Request $request): Limit {
             if (environment('local')) {
                 return Limit::none();
             }
@@ -156,7 +157,7 @@ Templates are dash-named and committed. The files Laravel reads are dot-named, a
 
 **Templates that hold real secrets.** Encrypt them with git-crypt through `.gitattributes`. Use one key for the local and testing templates (developers and CI) and a second for the deployed environments (`filter=git-crypt-remote`, created with `git-crypt init -k remote`), so access is split.
 
-**Factories that put fake dates into `CarbonImmutable` properties**, such as DTO test factories. Register a Faker provider that returns `CarbonImmutable`. Read [references/service-providers.md](references/service-providers.md).
+**Fake dates passed straight into a `CarbonImmutable` parameter**, such as a value object built with `new` in a factory or test. `fake()->dateTimeBetween()` returns a mutable `DateTime`; register a Faker provider that returns `CarbonImmutable`. (laravel-data and Eloquent casts convert a `DateTime` themselves, so DTO and model factories don't need it.) Read [references/service-providers.md](references/service-providers.md).
 
 **A dev-only tool such as Telescope.** Keep it out of package discovery and `bootstrap/providers.php`, and register it from `register()` in local only. See [references/service-providers.md](references/service-providers.md).
 
