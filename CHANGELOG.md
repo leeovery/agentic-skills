@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-10-13
+
+✨ Added
+- Guidance on keeping side effects from repeating on retry or redelivery in the jobs and workflows skills, using leeovery/laravel-idempotency — `Idempotency::once()` for database work, `completed()`/`complete()` for sends.
+- Workflows skill gains a "reach for these" section with a reactor example that starts a workflow exactly once.
+- Providers skill explains how to configure a scoped manager from `boot()` with `callAfterResolving()`, and how to test it after a worker reset.
+
+🔧 Changed
+- Packages and services skills now say that anything registered on a scoped manager at boot is lost when a queue worker resets, and point to a separate singleton registry or `callAfterResolving()`.
+- Deferred-provider guidance is more precise — `boot()` runs only once a service is resolved during a request, while artisan processes (queue workers, tests) load every deferred provider, so tests don't catch the problem.
+
+🐛 Fixed
+- Anti-patterns now cover sending or calling an external service inside `Idempotency::once()`, and configuring a scoped instance once in `boot()` — both silently fail in practice.
+
 ## [0.2.2] - 2026-10-13
 
 ✨ Added
