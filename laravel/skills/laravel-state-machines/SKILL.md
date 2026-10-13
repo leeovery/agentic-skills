@@ -167,6 +167,7 @@ Test each transition class directly: build the model in the source state, run `h
 
 ```php
 use App\Events\OrderPaid as OrderPaidEvent;
+use Illuminate\Support\Facades\Event;
 
 test('will transition a pending order to paid', function (): void {
     Event::fake([OrderPaidEvent::class]);
