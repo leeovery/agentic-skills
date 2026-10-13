@@ -39,8 +39,10 @@ This skill is the map. Every kind of class has one job and one home, and the ski
 | A business rule that failed | One exception per entity, named constructors | `Exceptions/` | [laravel-exceptions](../laravel-exceptions/SKILL.md) |
 | Middleware, exception handling, schedule, model defaults | Booters and providers | `Booters/`, `Providers/` | [laravel-providers](../laravel-providers/SKILL.md) |
 | Self-contained infrastructure worth reusing | Package | its own repository | [laravel-packages](../laravel-packages/SKILL.md) |
+| An event-sourced model's state, transitions and read models | Aggregate, projector, reactor | `Aggregates/`, `Projectors/`, `Reactors/` | [laravel-event-sourcing](../laravel-event-sourcing/SKILL.md) |
+| A process that waits on outside signals or long timers | Workflow and its activities | `Workflows/`, `Workflows/Activities/` | [laravel-workflows](../laravel-workflows/SKILL.md) |
 
-A multi-step process is actions composed in one call, or a chain or batch of jobs when its steps need their own retries or progress ([laravel-jobs](../laravel-jobs/SKILL.md)). Which fits depends on the project.
+A multi-step process is actions composed in one call, a chain or batch of jobs when its steps need their own retries or progress ([laravel-jobs](../laravel-jobs/SKILL.md)), or a workflow when it waits on outside signals or long timers ([laravel-workflows](../laravel-workflows/SKILL.md)). Which fits depends on the project.
 
 Read [structure.md](references/structure.md) when creating a directory, placing a class whose home isn't in the table, or working in a project on the `src/{App,Domain,Support}` layout.
 
