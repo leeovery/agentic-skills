@@ -124,7 +124,7 @@ Read [references/factories.md](references/factories.md) when writing or extendin
 | When the code under test … | The test |
 |---|---|
 | calls another action | `mock(ReleaseStockAction::class)->shouldReceive('__invoke')`, per [laravel-actions](../laravel-actions/SKILL.md) |
-| calls a service | `Shipping::shouldReceive('cancelShipment')` on its facade; the driver's own test uses Saloon fixtures, per [laravel-services](../laravel-services/SKILL.md) |
+| calls a service | `Shipping::shouldReceive('cancelShipment')` on its facade, or `mock(ShippingManager::class)` when it injects the manager; the driver's own test uses Saloon fixtures, per [laravel-services](../laravel-services/SKILL.md) |
 | dispatches an event | `Event::fake([OrderShipped::class])`, then `Event::assertDispatched(fn (OrderShipped $event): bool => $event->order->is($order))` |
 | queues a job | `Queue::fake()`, then `Queue::assertPushed(fn (ExpireOrderJob $job): bool => $job->order->is($order))`; the job's own test is in [laravel-jobs](../laravel-jobs/SKILL.md) |
 | writes files | `Storage::fake('documents')` |
