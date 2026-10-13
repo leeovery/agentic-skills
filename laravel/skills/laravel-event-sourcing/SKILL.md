@@ -63,7 +63,6 @@ use App\Attributes\OperationAllowedFrom;
 use App\Enums\OrderState;
 use App\Events\Order\OrderCancelled;
 use App\Events\Order\OrderPlaced;
-use App\Models\Customer;
 use Spatie\EventSourcing\AggregateRoots\AggregateRoot;
 
 class OrderAggregate extends AggregateRoot
@@ -73,11 +72,11 @@ class OrderAggregate extends AggregateRoot
     private OrderState $state = OrderState::Uninitialised;
 
     #[OperationAllowedFrom(OrderState::Uninitialised)]
-    public function place(Customer $customer, int $total): self
+    public function place(int $total): self
     {
         $this->ensure();
 
-        return $this->recordThat(new OrderPlaced(customerId: $customer->id, total: $total));
+        return $this->recordThat(new OrderPlaced(total: $total));
     }
 
     #[OperationAllowedFrom([OrderState::Placed, OrderState::Paid])]
@@ -112,26 +111,12 @@ use Spatie\EventSourcing\StoredEvents\ShouldBeStored;
 class OrderPlaced extends ShouldBeStored
 {
     public function __construct(
-        public int $customerId,
         public int $total,
     ) {}
 }
 ```
 
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Events\Order;
-
-use Spatie\EventSourcing\StoredEvents\ShouldBeStored;
-
-class OrderCancelled extends ShouldBeStored
-{
-    public function __construct(public string $reason) {}
-}
-```
+`OrderCancelled` has the same shape, carrying `public string $reason`. The projector writes the read model from both:
 
 ```php
 <?php
@@ -152,7 +137,6 @@ class OrderProjector extends Projector
     {
         Order::query()->create([
             'uuid' => $event->aggregateRootUuid(),
-            'customer_id' => $event->customerId,
             'total' => $event->total,
             'state' => OrderState::Placed,
             'placed_at' => $event->createdAt(),
@@ -170,48 +154,7 @@ class OrderProjector extends Projector
 }
 ```
 
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Actions\Order;
-
-use App\Aggregates\OrderAggregate;
-use App\Models\Order;
-
-class CancelOrderAction
-{
-    public function __invoke(Order $order, string $reason): void
-    {
-        OrderAggregate::retrieve($order->uuid)->cancel($reason)->persist();
-    }
-}
-```
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Reactors;
-
-use App\Events\Order\OrderCancelled;
-use App\Mail\OrderCancelledMail;
-use App\Models\Order;
-use Illuminate\Support\Facades\Mail;
-use Spatie\EventSourcing\EventHandlers\Reactors\Reactor;
-
-class OrderCancelledReactor extends Reactor
-{
-    public function onOrderCancelled(OrderCancelled $event): void
-    {
-        $order = Order::query()->where('uuid', $event->aggregateRootUuid())->firstOrFail();
-
-        Mail::to($order->customer)->queue(new OrderCancelledMail($order));
-    }
-}
-```
+`CancelOrderAction` is the one line in the rules above. A reactor looks like a projector, extending `Reactor`; [laravel-workflows](../laravel-workflows/SKILL.md) shows one starting a workflow.
 
 ## Anti-patterns
 

@@ -14,7 +14,7 @@ A workflow is a long-running process on Durable Workflow (`durable-workflow/work
 - **Every step that does work is an activity calling one action.** The same action a controller would call ([laravel-actions](../laravel-actions/SKILL.md)). The activity's `handle()` takes the workflow's arguments first and the action after them, named after its class; the engine resolves the action from the container.
 - **Models cross the boundary, not ids.** Workflow and activity arguments are typed models, `handle(Invoice $invoice)`. The engine stores the model's identifier and fetches the row again when the step runs, as `SerializesModels` does for a job, so each step sees current data.
 - **Under event sourcing, reactors start and signal workflows.** A reactor on the stored event that begins the process starts the workflow; a reactor on the event a waiting workflow needs signals it. Starting or signalling a workflow is a side effect, and side effects belong in reactors, which a replay never re-runs.
-- **Engine mechanics come from the package's docs.** Timers, signals, and starting or loading a workflow: read the [Durable Workflow docs](https://durable-workflow.com/docs/2.0/installation/) ([durable-workflow.com](https://durable-workflow.com)). The v2 API lives under `Workflow\V2`; examples written for the old package don't apply.
+- **Engine mechanics come from the package's docs.** Timers, signals, and starting or loading a workflow: read the [Durable Workflow docs](https://durable-workflow.com/docs/installation/) ([durable-workflow.com](https://durable-workflow.com)). The v2 API lives under `Workflow\V2`; examples written for the old package don't apply.
 
 ## Example
 
