@@ -40,7 +40,7 @@ This skill is the map. Every kind of class has one job and one home, and the ski
 | Middleware, exception handling, schedule, model defaults | Booters and providers | `Booters/`, `Providers/` | [laravel-providers](../laravel-providers/SKILL.md) |
 | Self-contained infrastructure worth reusing | Package | its own repository | [laravel-packages](../laravel-packages/SKILL.md) |
 
-A multi-step process that needs per-step retries or progress tracking is a workflow, not a chain of actions; this skill doesn't cover workflows.
+A multi-step process is actions composed in one call, or a chain or batch of jobs when its steps need their own retries or progress ([laravel-jobs](../laravel-jobs/SKILL.md)). Which fits depends on the project.
 
 Read [structure.md](references/structure.md) when creating a directory, placing a class whose home isn't in the table, or working in a project on the `src/{App,Domain,Support}` layout.
 

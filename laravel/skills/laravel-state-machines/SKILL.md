@@ -159,7 +159,7 @@ class Order extends Model
 
 **A transition runs inside the action's transaction.** Its event should wait for the commit; use the Laravel built-ins in [laravel-actions](../laravel-actions/SKILL.md).
 
-A state driven by the outcome of a multi-step process is transitioned from that workflow's outcome callbacks, through the same `updateTo{State}()` helpers.
+A state driven by the outcome of a multi-step process is transitioned when that process ends, such as in a chain's last job or a batch's `then()` callback, through the same `updateTo{State}()` helpers.
 
 ## Testing
 
