@@ -36,7 +36,7 @@ class MoneyFactory
 
         return $minor
             ? new Money($amount, $currency)
-            : (new DecimalMoneyParser(new ISOCurrencies()))->parse((string) $amount, $currency);
+            : (new DecimalMoneyParser(new ISOCurrencies))->parse((string) $amount, $currency);
     }
 }
 ```

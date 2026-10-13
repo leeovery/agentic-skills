@@ -87,7 +87,7 @@ class CreateOrderRequest extends FormRequest
 | It belongs to this one request, usually comparing fields | A closure in the rules array, `function (string $attribute, mixed $value, Closure $fail): void`, reading the other field with `$this->input()` |
 | It's reused across requests, or its logic deserves its own unit test | A `{Concept}Rule` class in `app/Rules/` implementing `ValidationRule` |
 
-A rule class checks the value's type before using it, and fails cleanly when the type is wrong. Under `strict_types`, passing a non-string into a `string` parameter throws a `TypeError`, which is a 500 rather than a 422. Instantiate it without parentheses (`new PostcodeRule`), as Pint's `new_with_parentheses` setting enforces (see [laravel-quality](../laravel-quality/SKILL.md)).
+A rule class checks the value's type before using it, and fails cleanly when the type is wrong. Under `strict_types`, passing a non-string into a `string` parameter throws a `TypeError`, which is a 500 rather than a 422. Instantiate it without parentheses (`new PostcodeRule`), as the Laravel Pint preset's `new_with_parentheses` rule enforces (see [laravel-quality](../laravel-quality/SKILL.md)).
 
 ```php
 <?php
