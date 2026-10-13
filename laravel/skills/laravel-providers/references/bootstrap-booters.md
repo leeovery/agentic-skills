@@ -1,55 +1,16 @@
-# Bootstrap & Booters
+# Booters
 
-Application bootstrapping uses **invokable booter classes** instead of service providers.
+A booter replaces one closure in `bootstrap/app.php`. It's a plain class in `app/Booters/` (or the project's support namespace) with a single `__invoke()` that takes what the `with*` method passes it.
 
-**Related guides:**
-- [routing-permissions.md](../../laravel-routing/references/routing-permissions.md) - Route configuration
-- [structure.md](../../laravel-architecture/references/structure.md) - Project organization
+| `bootstrap/app.php` | Booter | `__invoke` receives |
+|---|---|---|
+| `->withMiddleware(new MiddlewareBooter)` | `MiddlewareBooter` | `Illuminate\Foundation\Configuration\Middleware` |
+| `->withSchedule(new ScheduleBooter)` | `ScheduleBooter` | `Illuminate\Console\Scheduling\Schedule` |
+| `->withExceptions(new ExceptionBooter)` | `ExceptionBooter` | `Illuminate\Foundation\Configuration\Exceptions` |
 
-## Philosophy
+Route registration stays in `withRouting()`. See [laravel-routing](../../laravel-routing/SKILL.md).
 
-Booters provide:
-- Clean, organized configuration
-- Testable bootstrap logic
-- Single responsibility classes
-- Clear separation of concerns
-
-## Bootstrap File
-
-`bootstrap/app.php`:
-
-```php
-<?php
-
-declare(strict_types=1);
-
-use App\Booters\ExceptionBooter;
-use App\Booters\MiddlewareBooter;
-use App\Booters\ScheduleBooter;
-use Illuminate\Foundation\Application;
-use Illuminate\Support\Facades\Route;
-
-return Application::configure(basePath: dirname(__DIR__))
-    ->withRouting(function () {
-        // Web layer (private API or Blade)
-        Route::middleware('api')
-            ->group(base_path('routes/web.php'));
-
-        // Public API v1
-        Route::middleware(['api', 'throttle:api'])
-            ->prefix('api/v1')
-            ->name('api.v1.')
-            ->group(base_path('routes/api/v1.php'));
-    })
-    ->withMiddleware(new MiddlewareBooter)
-    ->withSchedule(new ScheduleBooter)
-    ->withExceptions(new ExceptionBooter)
-    ->create();
-```
-
-## Middleware Booter
-
-`app/Booters/MiddlewareBooter.php`:
+## MiddlewareBooter
 
 ```php
 <?php
@@ -58,8 +19,11 @@ declare(strict_types=1);
 
 namespace App\Booters;
 
+use App\Http\Middleware\LogApiRequest;
+use App\Http\Middleware\VerifySdkSignature;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Middleware\HandleCors;
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 
 class MiddlewareBooter
 {
@@ -67,20 +31,28 @@ class MiddlewareBooter
     {
         $middleware
             ->trustProxies('*')
-            ->api(append: [
-                HandleCors::class,
-            ])
             ->throttleApi(redis: true)
-            ->validateCsrfTokens(except: [
-                'api/*',
+            ->api(append: [
+                LogApiRequest::class,
+            ])
+            ->group('partner_v1', [
+                ThrottleRequests::class.':partner',
+                SubstituteBindings::class,
+                LogApiRequest::class,
+            ])
+            ->alias([
+                'sdk-signed' => VerifySdkSignature::class,
             ]);
     }
 }
 ```
 
-## Schedule Booter
+- Add to the stock `web` and `api` groups with `append:`. Don't redefine them.
+- A route surface that needs a different stack gets its own named group (`->group('partner_v1', [...])`), which the routes apply by name.
+- `trustProxies('*')` belongs here when the app runs behind a load balancer. `throttleApi(redis: true)` belongs here when Redis backs the cache.
+- Don't re-add what Laravel already runs: `HandleCors` is global middleware, and the `api` group has no CSRF check to exclude routes from.
 
-`app/Booters/ScheduleBooter.php`:
+## ScheduleBooter
 
 ```php
 <?php
@@ -89,8 +61,9 @@ declare(strict_types=1);
 
 namespace App\Booters;
 
-use App\Actions\Order\ProcessPendingOrdersAction;
-use App\Actions\System\CleanupExpiredSessionsAction;
+use App\Actions\Invoice\SendInvoiceRemindersAction;
+use App\Actions\Order\ExpireStaleOrdersAction;
+use App\Models\Order;
 use Illuminate\Console\Scheduling\Schedule;
 
 class ScheduleBooter
@@ -98,23 +71,23 @@ class ScheduleBooter
     public function __invoke(Schedule $schedule): void
     {
         $schedule
-            ->call(ProcessPendingOrdersAction::class)
-            ->name('Process pending orders')
-            ->everyMinute();
+            ->call(ExpireStaleOrdersAction::class)
+            ->name('Expire stale orders')
+            ->everyFiveMinutes();
 
         $schedule
-            ->call(CleanupExpiredSessionsAction::class)
-            ->name('Cleanup expired sessions')
-            ->daily();
+            ->call(SendInvoiceRemindersAction::class)
+            ->name('Send invoice reminders')
+            ->dailyAt('09:30');
 
         $schedule
-            ->command('model:prune')
+            ->command('model:prune', ['--model' => [Order::class]])
             ->daily();
 
-        $this->configureAllEvents($schedule);
+        $this->preventOverlaps($schedule);
     }
 
-    private function configureAllEvents(Schedule $schedule): void
+    private function preventOverlaps(Schedule $schedule): void
     {
         foreach ($schedule->events() as $event) {
             $event->withoutOverlapping();
@@ -123,9 +96,13 @@ class ScheduleBooter
 }
 ```
 
-## Exception Booter
+- The schedule calls an action, or a command that calls one. It never contains logic.
+- Name every `->call()` before anything that needs the name. `CallbackEvent::withoutOverlapping()` and `onOneServer()` throw a `LogicException` without one. Follow the project's naming style.
+- Schedule the housekeeping commands of the packages you install: `model:prune` for prunable models, `sanctum:prune-expired`, `horizon:snapshot` for Horizon metrics, and `telescope:prune` wherever Telescope runs.
+- `preventOverlaps()` applies only when a task can outlast its interval. Drop it when none can.
+- When the booter grows, split it into private methods by concern. Follow the project's existing shape.
 
-`app/Booters/ExceptionBooter.php`:
+## ExceptionBooter
 
 ```php
 <?php
@@ -142,77 +119,8 @@ class ExceptionBooter
     public function __invoke(Exceptions $exceptions): void
     {
         Integration::handles($exceptions);
-
-        $exceptions->report(function (Throwable $e) {
-            // Custom reporting logic
-        });
     }
 }
 ```
 
-## Key Patterns
-
-### 1. Invokable Classes
-
-All booters implement `__invoke()`:
-
-```php
-public function __invoke(Middleware $middleware): void
-{
-    // Configuration logic
-}
-```
-
-### 2. Single Responsibility
-
-Each booter handles one concern:
-- **MiddlewareBooter** - Middleware configuration
-- **ScheduleBooter** - Task scheduling
-- **ExceptionBooter** - Exception handling
-
-### 3. Call Actions Directly
-
-Schedule booter can call actions:
-
-```php
-$schedule->call(ProcessPendingOrdersAction::class);
-```
-
-### 4. Configuration Methods
-
-Booters can have private helper methods:
-
-```php
-private function configureAllEvents(Schedule $schedule): void
-{
-    foreach ($schedule->events() as $event) {
-        $event->withoutOverlapping();
-    }
-}
-```
-
-## Directory Structure
-
-```
-app/Booters/
-├── ExceptionBooter.php
-├── MiddlewareBooter.php
-└── ScheduleBooter.php
-```
-
-## Benefits
-
-1. **Organized** - Each concern in its own class
-2. **Testable** - Booters easy to test in isolation
-3. **Clean** - Minimal bootstrap file
-4. **Type-safe** - Full type hints
-5. **Discoverable** - Clear where config lives
-
-## Summary
-
-**Booters replace service providers** for:
-- Middleware configuration
-- Task scheduling
-- Exception handling
-
-Keep `bootstrap/app.php` minimal and delegate to booters.
+The error tracker's hook goes here, Sentry in this case. How exceptions report and render is [laravel-exceptions](../../laravel-exceptions/SKILL.md)' concern.
