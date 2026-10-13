@@ -90,6 +90,7 @@ declare(strict_types=1);
 
 use App\Actions\Central\Order\ExpireStaleOrdersForAllTenantsAction;
 use App\Jobs\ExpireStaleOrdersJob;
+use App\Models\Tenant;
 use Illuminate\Support\Facades\Queue;
 
 test('will dispatch one job per tenant', function (): void {
@@ -99,8 +100,8 @@ test('will dispatch one job per tenant', function (): void {
 
     resolve(ExpireStaleOrdersForAllTenantsAction::class)();
 
-    Queue::assertPushed(ExpireStaleOrdersJob::class, 2);
+    Queue::assertPushed(ExpireStaleOrdersJob::class, Tenant::query()->count());
 });
 ```
 
-`createTenant()` provisions a real tenant database, so create only as many as the test needs. Fake the queue after creating them: if the project queues its provisioning pipeline, faking first would stop the databases being created. Under `Queue::fake()` stancl adds no tenant key to the payload, so the test asserts the count, not which tenant each job belongs to.
+The expected count is read from the database, never written as a number: the testing tenant's row is committed, so a central test sees it whenever a tenanted test has run before it. `createTenant()` provisions a real tenant database, so create only as many as the test needs. Fake the queue after creating them: if the project queues its provisioning pipeline, faking first would stop the databases being created. Under `Queue::fake()` stancl adds no tenant key to the payload, so the test asserts the count, not which tenant each job belongs to.
