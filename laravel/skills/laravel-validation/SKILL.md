@@ -44,11 +44,19 @@ class CreateOrderRequest extends FormRequest
                 'max:255',
                 'email',
             ],
+            'delivery_date' => [
+                'nullable',
+                'date',
+                'after:today',
+            ],
             'priority' => [
                 'nullable',
                 'string',
                 'bail',
                 new Enum(OrderPriority::class),
+            ],
+            'is_gift' => [
+                'boolean',
             ],
             'items' => [
                 'required',
