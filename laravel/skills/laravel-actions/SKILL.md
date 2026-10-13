@@ -85,7 +85,7 @@ Actions call other actions. How they get them depends on the call:
 
 Services are usually called through their facade (`Payments::refund($order)`), which reads cleanly and lets a test mock it with `shouldReceive`. Injecting the service is fine when it reads better.
 
-Composing actions runs synchronously in one process. A multi-step process that needs per-step retries or progress tracking is a workflow, not a chain of actions; its tasks delegate to actions.
+Composing actions runs synchronously in one process, and many multi-step processes need nothing more. When a step should retry on its own or the process must report progress, a chain or batch of jobs, each calling its action, usually covers it ([laravel-jobs](../laravel-jobs/SKILL.md)). A project that runs long-lived processes on a workflow engine has that engine's steps call the actions too.
 
 ## Reach for these when the situation calls for it
 

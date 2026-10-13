@@ -168,7 +168,7 @@ class PurgeOrderFilesJob implements ShouldQueue
 
 **An operation over many records.** One sweep action dispatches one job per record; see [laravel-actions](../laravel-actions/SKILL.md).
 
-A multi-step process that needs per-step retries or progress tracking is a workflow, not a chain of jobs.
+**Steps that each need their own retries, or a process whose progress matters.** Chain the jobs, one action each, with `Bus::chain([...])->catch(...)->dispatch()`: a step runs only once the one before it succeeds, and each retries on its own terms. When the steps can run side by side and something must happen once all are done, batch them: `Bus::batch([...])->then(...)->catch(...)->dispatch()`, with the jobs using `Batchable` and the `job_batches` table in place; `Bus::findBatch($id)->progress()` reports how far along it is. Between them these cover most multi-step processes. A project that runs long-lived processes on a workflow engine uses that instead.
 
 ## Testing
 
