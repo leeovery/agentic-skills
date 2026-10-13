@@ -1,0 +1,7 @@
+# .mint.toml — mint configuration. Only keys that differ from mint's compiled
+# defaults are set; everything else rides on the defaults. Full key reference and
+# defaults: run `mint setup`.
+
+# CLAUDE.md is guidance for agents working on the repo, not something a release
+# ships, so it stays out of the release-notes and commit diffs.
+diff_exclude = ['CLAUDE.md']
