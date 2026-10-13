@@ -170,7 +170,7 @@ class PurgeOrderFilesJob implements ShouldQueue
 }
 ```
 
-**The action relies on context a request would set.** A job runs without the request. The acting user is an argument to the action; anything a package reads ambiently (an activity-log causer, the current tenant) goes into the job and is restored in `handle()` before the action is called.
+**The action relies on context a request would set.** A job runs without the request. The acting user is an argument to the action; anything a package reads ambiently (an activity-log causer, say) goes into the job and is restored in `handle()` before the action is called. The current tenant is the exception: stancl's queue bootstrapper carries it ([laravel-multi-tenancy](../laravel-multi-tenancy/SKILL.md)).
 
 **The frontend needs to hear about an event.** Implement `ShouldBroadcast` and add `InteractsWithSockets`. `broadcastAs()` returns a stable dotted name (`order.paid`) and `broadcastWith()` sends the public id only (`['orderId' => $this->order->ulid]`), so the model's attributes never reach the socket.
 
