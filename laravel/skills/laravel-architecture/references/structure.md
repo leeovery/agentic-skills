@@ -1,114 +1,81 @@
-# Directory Structure
+# Directory structure
 
-Complete project organization following action-oriented architecture.
+Follow the layout the project already has. New projects use flat `app/`; projects on the older `src/{App,Domain,Support}` layout keep it.
 
-**Related guides:**
-- [Actions](../../laravel-actions/SKILL.md) - Action pattern and organization
-- [DTOs](../../laravel-dtos/SKILL.md) - DTO structure and transformers
-- [Controllers](../../laravel-controllers/SKILL.md) - HTTP layer organization
-- [Models](../../laravel-models/SKILL.md) - Model structure and custom builders
-- [Multi-tenancy](../../laravel-multi-tenancy/SKILL.md) - Multi-tenant directory organization
-- [validation-testing.md](../../laravel-validation/references/validation-testing.md) - Test datasets for validation testing
+## Flat `app/`
 
-## Full Structure Created
+Directories appear when their first class does; this is the full set, not a scaffold.
 
 ```
 app/
-├── Actions/              # Business logic (invokable classes) - See actions.md
-│   ├── Auth/
-│   ├── User/
-│   └── Order/
-├── Booters/              # Bootstrap configuration classes
-├── Builders/             # Custom Eloquent query builders - See laravel-models skill
-│   └── Concerns/         # Reusable builder traits
-├── Data/                 # Data Transfer Objects (Spatie Data) - See laravel-dtos SKILL.md
-│   ├── Concerns/         # DTO traits (e.g., HasTestFactory)
-│   ├── Factories/        # DTO test factories
-│   ├── Formatters/       # Value formatting utilities
-│   └── Transformers/     # Request-to-DTO converters
-│       ├── Web/
-│       └── Api/V1/
-├── Enums/                # Backed enums with attributes
-│   ├── Attributes/
-│   └── Concerns/
+├── Actions/{Entity}/
+├── Booters/
+├── Builders/
+├── Console/Commands/
+├── Data/
+│   ├── Data.php                  # base DTO class
+│   ├── Concerns/
+│   └── Transformers/{Surface}/
+├── Enums/
+├── Events/
 ├── Exceptions/
-│   └── Concerns/
 ├── Http/
-│   ├── Web/              # Private API/Blade layer (not versioned) - See laravel-controllers skill
+│   ├── Controllers/Controller.php  # base controller for every surface
+│   ├── Middleware/               # shared by more than one surface
+│   ├── Web/                      # the app's own frontend, unversioned
 │   │   ├── Controllers/
+│   │   ├── Middleware/
 │   │   ├── Queries/
-│   │   ├── Requests/    # Form Requests - See form-requests.md
+│   │   ├── Requests/
 │   │   └── Resources/
-│   ├── Api/V1/           # Public API v1 (optional) - See laravel-controllers skill
-│   │   ├── Controllers/
-│   │   ├── Queries/
-│   │   ├── Requests/    # Form Requests - See form-requests.md
-│   │   └── Resources/
-│   ├── Middleware/
-│   └── Controllers/      # Base controller classes
+│   └── Api/V1/                   # a public API, versioned
+│       ├── Controllers/
+│       ├── Queries/
+│       ├── Requests/
+│       └── Resources/
 ├── Jobs/
 ├── Listeners/
 ├── Models/
-│   ├── Concerns/
-│   └── Contracts/
+│   └── Concerns/
 ├── Policies/
+├── Providers/
 ├── Rules/
-├── Services/             # External service integrations
-│   └── [ServiceName]/
-│       ├── [ServiceName]Manager.php
-│       ├── Connectors/   # Saloon connectors
-│       ├── Contracts/
-│       ├── Drivers/
-│       ├── Exceptions/
-│       └── Requests/
-├── States/               # State machines (Spatie Model States)
-│   └── [Model]/
-│       └── Transitions/
-├── Support/
-├── Values/               # Value objects
+├── Services/{Name}/
+├── States/{Model}/
+│   └── Transitions/
+├── Values/
 └── helpers.php
-
-tests/
-├── Architecture/         # Pest architecture tests
-├── Concerns/             # Reusable test traits (Makeable, etc.)
-├── Datasets/             # Pest datasets for validation testing - See validation-testing.md
-├── Feature/
-│   ├── Api/
-│   └── Web/
-└── Unit/
-    ├── Actions/
-    ├── Data/
-    └── Models/
-```
-
-## Minimal Structure
-
-For minimal setup, only create:
-- `Actions/`
-- `Data/` (with Concerns, Formatters, Transformers/Web)
-- `Http/Web/` (Controllers, Requests, Resources)
-- Base `Data` class
-- Helper functions
-
-## Bootstrap Structure
-
-```
-bootstrap/
-└── app.php              # Updated with Booters
-
-app/Booters/
-├── ExceptionBooter.php
-├── MiddlewareBooter.php
-└── ScheduleBooter.php
-```
-
-## Routes Structure
-
-```
+database/factories/Data/          # DTO test factories, beside the model factories
 routes/
-├── web.php              # Always created (Web layer)
-├── console.php
-└── api/                 # Optional (Public API)
-    ├── v1.php
-    └── v2.php
+├── web.php
+└── api_v1.php                    # one file per surface
+tests/
+├── Architecture/
+├── Concerns/                     # test traits and helpers
+├── Datasets/
+├── Feature/{Surface}/            # mirrors Http/{Surface}
+└── Unit/{Kind}/                  # mirrors app/: Unit/Actions/Order/, Unit/Models/, …
 ```
+
+- **Actions group by entity and states by model.** The other kinds stay flat.
+- **A surface holds only the kinds it uses.** One with no listings has no `Queries/`. A second public API is a sibling surface (`Http/Partner/V1/`) with its own route file, transformers and feature-test folder.
+- **Services keep their internals in their own folder.** Their inner shape is in [laravel-services](../../laravel-services/SKILL.md).
+- **Tenancy.** A tenant-aware app's layout follows [laravel-multi-tenancy](../../laravel-multi-tenancy/SKILL.md).
+
+## Older `src/{App,Domain,Support}` layout
+
+Three PSR-4 roots in `composer.json`: `App\` → `src/App/`, `Domain\` → `src/Domain/`, `Support\` → `src/Support/`. A custom `App\Application` points the app path at `src/App`, so `make:` commands generate into `src/App` with an `App\` namespace. Move anything that isn't HTTP or console to its home below and fix its namespace.
+
+| Kind of class | Flat `app/` | `src/{App,Domain,Support}` |
+|---|---|---|
+| Actions, builders, data, enums, events, exceptions, jobs, listeners, models, policies, states | `app/{Kind}/` | `src/Domain/{Context}/{Kind}/` |
+| Value objects | `app/Values/` | `src/Domain/{Context}/ValueObjects/` |
+| Controllers, requests, resources, queries | `app/Http/{Surface}/{Kind}/` | `src/App/Http/{Context}/{Kind}/` |
+| Commands | `app/Console/Commands/` | `src/App/Console/Commands/` |
+| Providers and booters | `app/Providers/`, `app/Booters/` | `src/Support/Providers/`, `src/Support/Booters/` |
+| Services | `app/Services/{Name}/` | `src/Support/Services/{Name}/` |
+| Base classes (`Data`, `Controller`, models) and classes shared across contexts | `app/{Kind}/` | `src/Support/{Kind}/` |
+| Helpers | `app/helpers.php` | `src/Support/helpers.php` |
+| Tests | `tests/Unit/{Kind}/`, `tests/Feature/{Surface}/` | `tests/Unit/{Context}/{Kind}/`, `tests/Feature/Http/{Context}/` |
+
+A context is a slice of the domain (`Order`, `Billing`); its namespace reads `Domain\Order\Actions\CancelOrderAction`. A class that belongs to no single context lives in `Support`.
