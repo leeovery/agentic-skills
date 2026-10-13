@@ -18,7 +18,7 @@ When a model needs query constraints that more than one caller uses, they go on 
 - **Methods compose.** A constraint built from others calls them (`whereOverdue()` calls `wherePaid()`), so each rule is written once.
 - **Type parameters as the domain types they are.** Models, enums, contracts. A related model goes through `whereBelongsTo($customer)`; never accept `Customer|int` and branch on `instanceof`.
 - **Dates are `CarbonInterface`, never `Carbon`.** The app runs on `CarbonImmutable` (see [laravel-providers](../laravel-providers/SKILL.md)), so a `Carbon` parameter throws a `TypeError` when passed `now()`.
-- **Type every query closure.** A `whereHas()` closure receives the related model's builder, `function (OrderLineBuilder $query): void`; a nested `where()` closure receives this one, `function (OrderBuilder $query): void`. Eager-load constraints receive the relation, which forwards to the builder: type them as the union, `HasMany|OrderLineBuilder`. The type is what makes the builder's methods autocomplete inside the closure.
+- **Type every query closure.** A `whereHas()` closure receives the related model's builder, `function (OrderLineBuilder $query): void`; a nested `where()` closure receives this one, `function (OrderBuilder $query): void`. Eager-load constraints receive the relation itself: type them as what they are, `HasMany`; it forwards builder calls. The type is what makes the builder's methods autocomplete inside the closure.
 - **`withRelations()` is the model's eager-load set.** When a model is usually loaded with the same relations, they're listed once, in `withRelations()`, and reused by query classes, route binding and other builders' eager-load constraints. One name on every builder; never `withRelated()`, `withAll()` or `withFullRelations()`.
 
 ## Example
@@ -70,7 +70,7 @@ class OrderBuilder extends Builder
     {
         return $this->with([
             'customer',
-            'lines' => function (HasMany|OrderLineBuilder $query): void {
+            'lines' => function (HasMany $query): void {
                 $query->withRelations();
             },
         ]);
