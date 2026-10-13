@@ -1,17 +1,27 @@
 ---
 name: laravel-policies
-description: Authorization policies for resource access control. Use when creating or modifying policies, permissions, or ability checks.
+description: Policies answer whether a user may act on a kind of record, from permissions and ownership only; state rules belong to action guards. Use when writing or changing a policy, a permission, an ability check, or how a policy is wired to its model.
 ---
 
 # Laravel Policies
 
-Policies encapsulate authorization logic and delegate to permission systems.
+A policy answers one question: may this user do this to this kind of record? It answers from the user's permissions and, where it matters, whether they own the record. Whether the record is in a state that allows the operation is a different question. An order can't be cancelled once it has shipped, whoever asks; the action's guard enforces that and throws a domain exception that says why. Routes call policies, and a policy never does anything but answer.
 
-**Related guides:**
-- [routing-permissions.md](../laravel-routing/references/routing-permissions.md) - Route-level authorization
-- [Enums](../laravel-enums/SKILL.md) - Permission enums
+## Rules
 
-## Structure
+- **Permission and ownership only.** No state checks (`$order->isShipped()`, `canTransitionTo()`): they belong in the action's guard ([laravel-actions](../laravel-actions/SKILL.md)). A state rule in a policy fails with a bare "This action is unauthorized." and duplicates the guard the action needs anyway.
+- **Ask the project's permission system, by enum.** `$user->can(Permission::CancelOrders)`, never a string. Laravel's Gate accepts enum abilities, and a permission system that hooks the Gate (spatie/laravel-permission does) answers them.
+- **Permissions, never role names.** Roles are data an admin re-grants. `hasRole('manager')` in a policy hard-codes a grant that belongs in the role's permissions.
+- **Ownership is a model method.** `$order->notOwnedBy($user)`, never `$order->user_id !== $user->id` in the policy. The model knows how it's owned, and every policy reads the same.
+- **Early returns, ending on the permission.** A check with more than one condition is a run of `if (…) { return false; }`, closing on `return $user->can(...)`; not one long `&&` chain.
+- **Return `bool`.** A denial needs no message: it's a 403. A rule that needs explaining is a state rule, and its exception explains it.
+- **Abilities are named after what they protect.** Resource abilities keep Laravel's names (`viewAny`, `view`, `create`, `update`, `delete`). Any other ability is the verb of the action it guards: `cancel` for `CancelOrderAction`.
+- **`viewAny` doesn't filter.** It says whether the user may list orders at all. Which orders they see is a constraint on the listing's query ([laravel-query-builders](../laravel-query-builders/SKILL.md)).
+- **Permission cases are `{Verb}{Subject}`; values are `'{verb} {subject}'`,** subject kebab-cased: `CancelOrders = 'cancel orders'`, `ViewAllOrders = 'view all-orders'`. The space is the one departure from [laravel-enums](../laravel-enums/SKILL.md)' kebab-case values. A value is a stored permission name that roles are granted by, so it never changes once deployed.
+- **Wire the policy with `#[UsePolicy]` on the model** (Laravel 12.18+; [laravel-models](../laravel-models/SKILL.md) owns the attribute). Below 12.18, auto-discovery finds `App\Policies\OrderPolicy` by name; a policy outside that convention is registered with `Gate::policy()` in a provider's `boot()`.
+- **Routes call policies.** Every route on a surface with a permission model carries `->can()`, and nothing calls `authorize()`. [laravel-routing](../laravel-routing/SKILL.md) owns the rule.
+
+## Example
 
 ```php
 <?php
@@ -28,13 +38,16 @@ class OrderPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->can(Permission::ListOrders);
+        return $user->can(Permission::ViewOrders);
     }
 
     public function view(User $user, Order $order): bool
     {
-        return $user->can(Permission::ViewOrders)
-            && $order->customer_id === $user->customer_id;
+        if ($order->notOwnedBy($user)) {
+            return false;
+        }
+
+        return $user->can(Permission::ViewOrders);
     }
 
     public function create(User $user): bool
@@ -42,123 +55,83 @@ class OrderPolicy
         return $user->can(Permission::CreateOrders);
     }
 
-    public function update(User $user, Order $order): bool
-    {
-        return $user->can(Permission::UpdateOrders)
-            && $order->canBeModified()
-            && $order->customer_id === $user->customer_id;
-    }
-
-    public function delete(User $user, Order $order): bool
-    {
-        return $user->can(Permission::DeleteOrders)
-            && $order->isPending();
-    }
-
     public function cancel(User $user, Order $order): bool
     {
-        return $this->update($user, $order)
-            && $order->canBeCancelled();
+        if ($order->notOwnedBy($user)) {
+            return false;
+        }
+
+        return $user->can(Permission::CancelOrders);
     }
 }
 ```
 
-## Permission Enum
+`cancel()` doesn't ask whether the order has shipped: `CancelOrderAction`'s guard does. The ownership helpers on `Order` compare through the relation, which needs no query:
 
 ```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Enums;
-
-use Henzeb\Enumhancer\Concerns\Comparison;
-use Henzeb\Enumhancer\Concerns\Dropdown;
-
-enum Permission: string
+public function notOwnedBy(User $user): bool
 {
-    use Comparison, Dropdown;
-
-    case ListOrders = 'list orders';
-    case ViewOrders = 'view orders';
-    case CreateOrders = 'create orders';
-    case UpdateOrders = 'update orders';
-    case DeleteOrders = 'delete orders';
-    case CancelOrders = 'cancel orders';
+    return ! $this->user()->is($user);
 }
 ```
 
-## Standard Policy Methods
+## Adding a permission
 
-Laravel conventions for policy methods:
+A new permission touches several places. Miss one and it works on a fresh database but fails where roles already exist.
 
-- `viewAny()` - List/index
-- `view()` - Show single resource
-- `create()` - Create new resource
-- `update()` - Update resource
-- `delete()` - Delete resource
-- `restore()` - Restore soft-deleted
-- `forceDelete()` - Permanently delete
+1. The enum case.
+2. The policy method or gate that asks for it.
+3. The route's `->can()`.
+4. The grant: the seeder that builds roles for a fresh database, and a migration or deploy step that creates the permission and grants it to roles in environments already running.
+5. Anything the project generates from the enum, such as test fixtures or frontend constants.
 
-**Custom methods** for non-standard actions:
-- `cancel()`
-- `approve()`
-- `ship()`
-- etc.
+## Reach for these when the situation calls for it
 
-## Key Patterns
-
-### 1. Delegate to Permission System
+**When some users may act only on their own records and others on everyone's,** give the ability a pair of permissions, `UpdateOrders` and `UpdateAllOrders`, and let ownership pick which applies:
 
 ```php
-return $user->can(Permission::CreateOrders);
-```
-
-### 2. Ownership Checks
-
-```php
-return $user->can(Permission::ViewOrders)
-    && $order->customer_id === $user->customer_id;
-```
-
-### 3. State Checks
-
-```php
-return $user->can(Permission::DeleteOrders)
-    && $order->isPending();
-```
-
-### 4. Combine Existing Methods
-
-```php
-public function cancel(User $user, Order $order): bool
+public function update(User $user, Order $order): bool
 {
-    return $this->update($user, $order)
-        && $order->canBeCancelled();
+    if ($order->notOwnedBy($user)) {
+        return $user->can(Permission::UpdateAllOrders);
+    }
+
+    return $user->can(Permission::UpdateOrders);
 }
 ```
 
-## Usage in Routes
+**When an ability has no model behind it** (opening a reports area, exporting data), define it with `Gate::define()` in a service provider's `boot()` ([laravel-providers](../laravel-providers/SKILL.md)), named by an enum case and making the same kind of check a policy method makes.
+
+## Testing
+
+Resolve the policy and call the method, one test per outcome. Grant permissions however the project's factories or test helpers do.
 
 ```php
-Route::get('/orders', [OrderController::class, 'index'])
-    ->can('viewAny', Order::class);
+test('will deny viewing an order the user does not own', function (): void {
+    $user = User::factory()->withPermissions(Permission::ViewOrders)->create();
 
-Route::get('/orders/{order}', [OrderController::class, 'show'])
-    ->can('view', 'order');
-
-Route::post('/orders', [OrderController::class, 'store'])
-    ->can('create', Order::class);
+    expect(resolve(OrderPolicy::class)->view($user, Order::factory()->create()))->toBeFalse();
+});
 ```
 
-See [routing-permissions.md](../laravel-routing/references/routing-permissions.md) for route authorization.
+That the route enforces the policy is an HTTP test (`cannot view another user's order`, asserting `assertForbidden()`); see [laravel-testing](../laravel-testing/SKILL.md).
 
-## Summary
+## Anti-patterns
 
-**Policies should:**
-- Use permission enums (not strings)
-- Check ownership when needed
-- Check state when needed
-- Delegate to permission system
-- Follow Laravel naming conventions
-- Stay simple and focused
+- ❌ A state check in a policy: `&& $order->isPending()`.
+- ❌ A string ability or permission: `$user->can('cancel orders')`.
+- ❌ `$user->hasRole(...)` in a policy.
+- ❌ Raw key comparison for ownership: `$order->user_id === $user->id`.
+- ❌ `$this->authorize()` in a controller, or an `authorize()` method on a Form Request.
+- ❌ `use HandlesAuthorization`: a leftover from the old `make:policy` stub, needed only for `allow()`/`deny()`.
+- ❌ Relying on `viewAny` to hide other users' records from a listing.
+- ❌ Renaming a deployed permission's value without migrating its grants.
+
+## Related
+
+- [laravel-routing](../laravel-routing/SKILL.md) — `->can()` on routes, the only place policies are called
+- [laravel-actions](../laravel-actions/SKILL.md) — guards that enforce state rules
+- [laravel-models](../laravel-models/SKILL.md) — `#[UsePolicy]` and model helpers
+- [laravel-enums](../laravel-enums/SKILL.md) — enums, including `Permission`
+- [laravel-exceptions](../laravel-exceptions/SKILL.md) — the exceptions guards throw
+- [laravel-testing](../laravel-testing/SKILL.md) — testing style and HTTP authorization tests
