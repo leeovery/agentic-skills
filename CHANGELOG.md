@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-13
+
+🔧 Changed
+- Multi-step processes in the Laravel skills now point to chains and batches of jobs, rather than a separate "workflow" concept, for per-step retries and progress tracking.
+- The laravel-jobs skill covers `Bus::chain` and `Bus::batch`, including `Batchable` jobs, the `job_batches` table, and `Bus::findBatch($id)->progress()` — chain jobs for sequential steps, batch them when they can run side by side.
+- The laravel-state-machines skill says to transition state when a process ends, such as in a chain's last job or a batch's `then()` callback.
+- The laravel-actions and laravel-architecture skills link to laravel-jobs for multi-step processes, and note that projects running a workflow engine can have its steps call actions instead.
+
 ## [0.2.0] - 2026-10-13
 
 ✨ Added
