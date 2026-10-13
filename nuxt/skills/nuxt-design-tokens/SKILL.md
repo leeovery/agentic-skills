@@ -78,8 +78,8 @@ the work.
 
 ## Related skills
 
-- **[nuxt-ui](../nuxt-ui/SKILL.md)** — component API, the `ui` prop, slot
-  overrides
+- **[Nuxt UI docs](https://ui.nuxt.com/docs)** — component API, the `ui`
+  prop, slot overrides
 - **[nuxt-components](../nuxt-components/SKILL.md)** — `tailwind-variants`
   for component-level variant APIs; consumes the tokens defined here
 - **[nuxt-config](../nuxt-config/SKILL.md)** — `app.config.ts` placement

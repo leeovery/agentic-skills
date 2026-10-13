@@ -1,0 +1,161 @@
+# golangci-lint v2. Copy to .golangci.yml at the module's root, then name your
+# domain packages under depguard's domain rule.
+#
+# Each linter carries its reason. A new one joins with its reason, once its
+# findings are fixed or excluded here with theirs. Never loosen a setting to get
+# a run green: fix the code, or nolint the one line and say why.
+version: "2"
+
+run:
+  # Exclusion paths below are from the module's root, wherever lint runs from.
+  relative-path-mode: gomod
+
+issues:
+  # Report every finding. By default a repeat past the third, a linter's
+  # findings past fifty, and a second finding on one line are hidden.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+formatters:
+  enable:
+    - gofmt      # one format, reported by `golangci-lint run` as well as `gofmt -l`
+    - goimports  # imports grouped standard library first, none unused
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused. errcheck reports a call
+  # that drops an error; `_ = f()` is the visible, deliberate discard and
+  # passes. A file only read closes with `defer func() { _ = f.Close() }()`; a
+  # written file's Close error is joined into the error returned.
+  default: standard
+  enable:
+    # Errors
+    - errorlint       # %w, errors.Is and errors.AsType; never == or a type switch
+    - errname         # sentinels are ErrX, types are XError
+    - nilerr          # `if err != nil { return nil }`
+    # Context and concurrency
+    - containedctx    # a context kept in a struct
+    - contextcheck    # a fresh context where the caller's should flow
+    - fatcontext      # contexts nested in a loop or a closure
+    - noctx           # an outside call made without a context, so without a deadline
+    # Types and interfaces
+    - exhaustive      # a switch on an enum that misses a member
+    - forcetypeassert # x.(T) without ok panics
+    - interfacebloat  # an interface past five methods
+    - iface           # interfaces unused, duplicated, wider than their use, or hiding one implementation
+    - musttag         # a struct marshalled with untagged fields
+    - bodyclose       # an HTTP response body never closed
+    # Package shape
+    - gochecknoinits  # init(): side effects in an order no caller sees
+    - depguard        # banned modules, and imports that point outward
+    - forbidigo       # exits, environment reads and process output outside main
+    # Logging and tests
+    - sloglint        # an injected logger, key-value pairs, constant messages
+    - usetesting      # t.Context, t.TempDir, t.Setenv and t.Chdir over their os versions
+    - thelper         # a helper calls t.Helper first
+    # Hygiene
+    - revive          # bool flags, long parameter lists, undocumented exports, ctx first
+    - nolintlint      # a nolint names its linter and says why
+    - modernize       # the go fix suite as a lint: the idioms the go line allows
+    - misspell        # typos in comments and strings
+    - unconvert       # a conversion to the type a value already has
+    - usestdlibvars   # http.MethodPost and http.StatusOK over literals
+    - exptostd        # x/exp functions the standard library now has
+
+  settings:
+    staticcheck:
+      # The default set, plus ST1000 (a package doc), ST1003 (initialisms,
+      # no underscores) and ST1016 (one receiver name per type). revive's
+      # exported rule checks a doc comment's form, so ST1020 to ST1022 are off.
+      checks: ["all", "-ST1020", "-ST1021", "-ST1022"]
+
+    revive:
+      rules:
+        - name: flag-parameter       # Send(m, true) says nothing at the call
+        - name: argument-limit       # past five, take a struct
+          arguments: [5]
+        - name: exported             # every exported name documented, and none stutters
+        - name: context-as-argument  # ctx comes first
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    sloglint:
+      no-global: all    # take a *slog.Logger: reports a package-level logger and slog.Info-style calls
+      kv-only: true     # "order", id: one style of attribute
+      static-msg: true  # the message is a constant; the values are attributes
+
+    interfacebloat:
+      max: 5
+
+    iface:
+      # unusedmethod: a method its own package never calls, so the
+      # interface asks for more than its consumer uses.
+      enable: [identical, unused, opaque, unusedmethod]
+
+    depguard:
+      rules:
+        modules:
+          deny:
+            - pkg: github.com/stretchr/testify
+              desc: "the testing package: if got != want { t.Errorf(...) }"
+            - pkg: github.com/google/go-cmp
+              desc: "==, slices.Equal, maps.Equal, or reflect.DeepEqual with a printed diff"
+            - pkg: go.uber.org/mock
+              desc: "a hand-written fake of your own interface"
+            - pkg: github.com/golang/mock
+              desc: "a hand-written fake of your own interface"
+            - pkg: github.com/vektra/mockery
+              desc: "a hand-written fake of your own interface"
+            - pkg: github.com/samber/lo
+              desc: "slices, maps and a loop"
+            - pkg: github.com/pkg/errors
+              desc: "errors, and fmt.Errorf with %w"
+        domain:
+          # Name your domain packages. They never see a transport, a process or
+          # a terminal: the edges import them, never the reverse.
+          files:
+            - "**/internal/order/**"
+            - "**/internal/customer/**"
+            - "!$test"
+          deny:
+            - pkg: net/http
+              desc: "return a domain error; the edge maps it to a status"
+            - pkg: github.com/spf13/cobra
+              desc: "commands live at the edge and call the domain"
+            - pkg: os/exec
+              desc: "run processes behind an interface main supplies"
+            # A terminal UI is an edge. Matched by prefix, so every module under each.
+            - pkg: github.com/charmbracelet
+              desc: "the domain returns values; the terminal UI draws them"
+            - pkg: charm.land
+              desc: "the domain returns values; the terminal UI draws them"
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.Exit$
+          msg: "return an error; main alone exits (a TestMain returns instead)"
+        - pattern: ^log\.(Fatal|Panic)
+          msg: "return an error; main alone exits"
+        - pattern: ^os\.(Args|Getenv|LookupEnv|Environ|UserHomeDir|UserConfigDir|UserCacheDir)$
+          msg: "read the process in main and pass it in"
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: "write to an io.Writer you were given"
+        - pattern: ^os\.(Stdin|Stdout|Stderr)$
+          msg: "take an io.Reader or io.Writer"
+
+  exclusions:
+    rules:
+      # main reads the process and exits.
+      - path: ^cmd/
+        linters: [forbidigo]
+      # The test guard reads the real process its tests run in, and fails a
+      # run whose tests passed (go-testing's isolation.md).
+      - path: ^internal/testguard/
+        linters: [forbidigo]
+      # An example prints to stdout for its // Output: line.
+      - path: _test\.go$
+        text: 'fmt\.Print'
+        linters: [forbidigo]

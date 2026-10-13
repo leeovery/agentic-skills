@@ -21,7 +21,8 @@ These skills work with any AI coding agent that supports the SKILL.md format —
 | Plugin | Description | Skills |
 |--------|-------------|--------|
 | [**laravel**](laravel/) | Laravel development — action-oriented architecture, strict typing, DTOs, and maintainability | 20 skills |
-| [**nuxt**](nuxt/) | Nuxt 4 + Vue 3 — domain-driven, type-safe, composable-first architecture | 15 skills |
+| [**nuxt**](nuxt/) | Nuxt 4 + Vue 3 — domain-driven, type-safe, composable-first architecture | 18 skills |
+| [**go**](go/) | Go — standard library first, small packages by concern, named types, errors handled once | 8 skills |
 
 ## Installation
 
@@ -38,6 +39,7 @@ You'll be prompted to select which plugins to install. Or install a specific one
 ```bash
 npx agntc@latest add leeovery/agentic-skills/laravel
 npx agntc@latest add leeovery/agentic-skills/nuxt
+npx agntc@latest add leeovery/agentic-skills/go
 ```
 
 Update anytime:
@@ -61,6 +63,7 @@ Also compatible with the [Vercel skills](https://github.com/vercel-labs/skills) 
 ```bash
 npx skills add leeovery/agentic-skills/laravel
 npx skills add leeovery/agentic-skills/nuxt
+npx skills add leeovery/agentic-skills/go
 ```
 
 ## Contributing
