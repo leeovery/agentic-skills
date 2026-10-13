@@ -153,7 +153,7 @@ class PermissionCacheBootstrapper implements TenancyBootstrapper
 
 ## Testing
 
-Tests that run in a tenant live in a `Tenanted/` folder (`tests/Feature/Tenanted/Api/V1/OrderTest.php`) and extend `TenantTestCase`, which creates one testing tenant per run, initialises it, and wraps both databases in a transaction per test. A test there reads like any other: it never creates or mentions the tenant, and HTTP calls carry the tenant automatically. Every other test extends `TestCase` and runs central. Read [references/tenancy-testing.md](references/tenancy-testing.md) when setting up or changing that harness, or writing a central test that creates tenants. Test style is [laravel-testing](../laravel-testing/SKILL.md)'s.
+Tests that run in a tenant live in a `Tenanted/` folder (`tests/Feature/Tenanted/Api/V1/OrderTest.php`) and run in one testing tenant, kept between runs, with both databases wrapped in a transaction per test. A test there reads like any other: it never creates or mentions the tenant, and HTTP calls carry the tenant automatically. Every other test runs central. The project keeps laravel-testing's one `TestCase`, but swaps `FastRefreshDatabase` for a tenancy-aware wrapper of it. Read [references/tenancy-testing.md](references/tenancy-testing.md) when setting up or changing that harness, or writing a central test that creates tenants. Test style is [laravel-testing](../laravel-testing/SKILL.md)'s.
 
 ## Anti-patterns
 
