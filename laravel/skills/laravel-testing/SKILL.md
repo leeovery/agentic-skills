@@ -30,7 +30,9 @@ Every test reads the same way: a Pest `test()` named as a sentence, built from f
 
 declare(strict_types=1);
 
+use App\Enums\Permission;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\User;
 use Illuminate\Testing\Fluent\AssertableJson;
 
@@ -47,7 +49,7 @@ putJson('/api/v1/orders/01jbx3vq7rk9z2m4n6p8s0t1w3')->assertUnauthorized();
 deleteJson('/api/v1/orders/01jbx3vq7rk9z2m4n6p8s0t1w3')->assertUnauthorized();
 
 test('can show an order', function (): void {
-    $user = User::factory()->create();
+    $user = User::factory()->withPermissions(Permission::ViewOrders)->create();
     $order = Order::factory()->for($user)->paid()->create();
 
     actingAs($user)
@@ -63,16 +65,20 @@ test('can show an order', function (): void {
 test("cannot show another user's order", function (): void {
     $order = Order::factory()->create();
 
-    actingAs(User::factory()->create())
+    actingAs(User::factory()->withPermissions(Permission::ViewOrders)->create())
         ->getJson("/api/v1/orders/{$order->ulid}")
         ->assertForbidden();
 });
 
 test('can create an order', function (): void {
-    $user = User::factory()->create();
+    $user = User::factory()->withPermissions(Permission::CreateOrders)->create();
+    $product = Product::factory()->create();
 
     actingAs($user)
-        ->postJson('/api/v1/orders', ['customer_email' => 'customer@example.com'])
+        ->postJson('/api/v1/orders', [
+            'customer_email' => 'customer@example.com',
+            'items' => [['product_ulid' => $product->ulid, 'quantity' => 2]],
+        ])
         ->assertCreated();
 
     expect(Order::query()->sole())
@@ -80,6 +86,8 @@ test('can create an order', function (): void {
         ->customer_email->toBe('customer@example.com');
 });
 ```
+
+`withPermissions()` stands for however the project's factories grant a permission. Each test signs in a user the route's `->can()` lets through, so it reaches the code it's testing; the `cannot …` test differs from its `can …` twin in one thing only (here, ownership).
 
 ## HTTP tests
 

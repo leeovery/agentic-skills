@@ -155,7 +155,7 @@ In the endpoint's feature test:
 use function Pest\Laravel\actingAs;
 
 test('cannot create an order with invalid data', function (RequestDataProviderItem $dataProviderItem): void {
-    actingAs(User::factory()->create())
+    actingAs(User::factory()->withPermissions(Permission::CreateOrders)->create())
         ->postJson('/api/v1/orders', $dataProviderItem->buildRequest())
         ->assertValidationErrors($dataProviderItem);
 })->with('order create');
