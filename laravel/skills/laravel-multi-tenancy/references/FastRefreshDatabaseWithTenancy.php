@@ -33,6 +33,22 @@ trait FastRefreshDatabaseWithTenancy
 
     private function testingTenant(): Tenant
     {
-        return Tenant::query()->find('testing') ?? $this->createTenant(['id' => 'testing']);
+        $tenant = Tenant::query()->find('testing');
+
+        if ($tenant && $this->databaseExists($tenant)) {
+            return $tenant;
+        }
+
+        // Its database is gone: drop the stale row quietly, since deleting it would try to drop the database too.
+        $tenant?->deleteQuietly();
+
+        return $this->createTenant(['id' => 'testing']);
+    }
+
+    private function databaseExists(Tenant $tenant): bool
+    {
+        $database = $tenant->database();
+
+        return $database->manager()->databaseExists($database->getName());
     }
 }

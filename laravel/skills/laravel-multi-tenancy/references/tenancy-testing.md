@@ -4,7 +4,8 @@ The harness gives every tenanted test an initialised tenant without the test men
 
 - **One testing tenant, kept between tests and runs.** The first tenanted test creates it, with the key `testing`, through the real `TenantCreated` pipeline, so its database is created, migrated and seeded exactly as in production. It's created before the test's transactions open, so its row commits and every later tenanted test reuses it.
 - **Two transactions per tenanted test.** Tenancy is initialised first, then one transaction opens on the central connection and one on the tenant connection, under one transactions manager, so after-commit callbacks behave as in any other test. Both roll back after the test.
-- **Extra tenants are cleaned up.** A tenant a test creates is deleted after it, dropping its database; its row would roll back anyway, but the database was created outside the transaction. If a test deletes the testing tenant, the next test creates a fresh one.
+- **Extra tenants are cleaned up.** A tenant a test creates is deleted after it, dropping its database; its row would roll back anyway, but the database was created outside the transaction.
+- **The testing tenant is rebuilt if its database goes.** Each tenanted test checks the database exists before reusing the row; if it was dropped by hand or by a run cut short, the stale row is removed and the tenant provisioned again. A test never deletes the testing tenant itself: the row's deletion would roll back, and the drop can't proceed while the test's own tenant connection holds that database open. A test about deleting a tenant creates one with `createTenant()` in a central test.
 - **Parallel-safe.** Tenant databases get a `_test` suffix, or `_test_{token}` per parallel process.
 
 ## Files
