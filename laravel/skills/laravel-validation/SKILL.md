@@ -148,7 +148,7 @@ use function Pest\Laravel\actingAs;
 
 test('cannot create an order with invalid data', function (RequestDataProviderItem $dataProviderItem): void {
     actingAs(User::factory()->create())
-        ->postJson(route('order.store'), $dataProviderItem->buildRequest())
+        ->postJson('/api/v1/orders', $dataProviderItem->buildRequest())
         ->assertValidationErrors($dataProviderItem);
 })->with('order create');
 ```
