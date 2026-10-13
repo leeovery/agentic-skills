@@ -51,6 +51,7 @@ npx skills add leeovery/agentic-skills/nuxt
 | [**nuxt-composables**](skills/nuxt-composables/) | Core composables — useWait, useFlash, useReactiveFilters, and more |
 | [**nuxt-forms**](skills/nuxt-forms/) | Form handling with XForm component and validation |
 | [**nuxt-tables**](skills/nuxt-tables/) | Column builder pattern and XTable component |
+| [**nuxt-design-tokens**](skills/nuxt-design-tokens/) | Design tokens and theming with Tailwind 4 `@theme static` and Nuxt UI semantic classes |
 
 ### Infrastructure
 
@@ -60,6 +61,7 @@ npx skills add leeovery/agentic-skills/nuxt
 | [**nuxt-auth**](skills/nuxt-auth/) | Laravel Sanctum authentication and permission-based authorization |
 | [**nuxt-realtime**](skills/nuxt-realtime/) | Real-time features with Laravel Echo and WebSockets |
 | [**nuxt-errors**](skills/nuxt-errors/) | Error handling with typed error classes and interceptors |
+| [**nuxt-server-data**](skills/nuxt-server-data/) | Server-side data layer with Drizzle ORM, Cloudflare D1 and NuxtHub |
 
 ### Quality
 
