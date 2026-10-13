@@ -20,20 +20,20 @@ class MacroServiceProvider extends ServiceProvider
         TestResponse::macro(
             'assertValidationErrors',
             function (RequestDataProviderItem $dataProviderItem): TestResponse {
-                /* @var TestResponse $this */
+                /** @var TestResponse $this */
                 return $this
                     ->assertUnprocessable()
                     ->when(
                         filled($dataProviderItem->expectedError),
                         fn (TestResponse $test) => $test->assertInvalid([
                             $dataProviderItem->attribute => $dataProviderItem->expectedError,
-                        ])
+                        ]),
                     )
                     ->when(
                         filled($dataProviderItem->notExpectedError),
-                        fn (TestResponse $test) => $test->assertValid($dataProviderItem->attribute)
+                        fn (TestResponse $test) => $test->assertValid($dataProviderItem->attribute),
                     );
-            }
+            },
         );
     }
 }

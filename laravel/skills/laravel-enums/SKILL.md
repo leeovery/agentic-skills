@@ -10,7 +10,7 @@ An enum is the one definition of a fixed set of values: a status, a type, a queu
 ## Rules
 
 - **Backed, whenever the value leaves PHP.** An enum that's persisted, validated, serialised or sent to a frontend is backed (`enum ShippingMethod: string`), so its stored form is explicit and stable. A pure enum is fine only for an internal discriminator that never leaves the process, such as the outcome type inside a result object.
-- **PascalCase cases, kebab-case string values.** `case NextDay = 'next-day'`. When an external system dictates the values, use its values verbatim and keep the case names PascalCase.
+- **PascalCase cases, kebab-case string values.** `case NextDay = 'next-day'`. When an external system dictates the values, use its values verbatim and keep the case names PascalCase. Permission values are the one exception, `'{verb} {subject}'` ([laravel-policies](../laravel-policies/SKILL.md)).
 - **Every fixed identifier is an enum.** Queue names, permissions, flash message types, rate-limiter names. Pass `->value` where an API wants a string. A typo becomes an error, and every use is one "find usages" away.
 - **Named for what it is, in `app/Enums/`.** `OrderStatus`, `ShippingMethod`; no `Enum` suffix.
 - **Behaviour lives on the enum.** A method on the enum answers a question about a case (`$method->requiresAddress()`), never a `match` or `switch` at the call site. Otherwise every caller repeats the mapping, and a new case has to be hunted down in all of them.
