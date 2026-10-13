@@ -11,7 +11,7 @@ This skill is the map. Every kind of class has one job and one home, and the ski
 
 - **Follow the project's existing layout.** Put a new class where its kind already lives. New projects use flat `app/`; projects on `src/{App,Domain,Support}` keep it (see [structure.md](references/structure.md)). Two layouts in one codebase means every class has two possible homes.
 - **Business logic lives in actions.** Controllers, jobs, listeners, commands and the scheduler gather input and call one action. The operation then has one home whatever triggers it, and can be tested without its trigger.
-- **Group by entity, never by verb.** `Actions/Order/CancelOrderAction`, `States/Order/`. Everything about orders is in one place.
+- **Group by entity or subsystem, never by verb.** `Actions/Order/CancelOrderAction`, `States/Order/`. Everything about orders is in one place.
 - **Mirror each HTTP surface wherever it appears.** A surface is the app's own frontend (`Web`, unversioned) or a public API (`Api/V1`, versioned). Each has its own `Http/{Surface}/` and route file, and its transformers and feature tests sit under the same name (`Data/Transformers/{Surface}/`, `tests/Feature/{Surface}/`), so a surface can change, or gain a new version, without touching another.
 - **Typed data between layers.** Models, DTOs, enums and value objects cross boundaries. Request arrays never leave the HTTP layer.
 - **Declarative code.** Short methods named in the domain's language. When a block needs a comment to say what it does, extract it into a method whose name says it. Comments are for why.
@@ -83,7 +83,7 @@ The controller, request, resource, transformer, route file and feature test belo
 - ❌ Grouping by verb: `Actions/Create/`, `Actions/Update/`.
 - ❌ Business logic in a controller, job, listener, command or model.
 - ❌ One controller serving two surfaces.
-- ❌ A public API with no version in its namespace or route file.
+- ❌ A public API with no version.
 - ❌ An array of request data passed beyond the controller.
 - ❌ `app(CancelOrderAction::class)`.
 
