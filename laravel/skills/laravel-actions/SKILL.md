@@ -108,7 +108,9 @@ class ExpireStaleOrdersAction
         Order::query()
             ->whereStale()
             ->lazyById()
-            ->each(ExpireOrderJob::dispatch(...));
+            ->each(function (Order $order): void {
+                ExpireOrderJob::dispatch($order);
+            });
     }
 }
 ```

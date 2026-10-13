@@ -133,7 +133,7 @@ class SmsFake implements SmsDriver, Fake
 
 ## Testing
 
-Tests run from the package's own directory against its own `vendor/`, never through an app, so a test that reaches an `App\` class fails.
+Tests run from the package's own directory against its own `vendor/`, never through an app, so a test that reaches an `App\` class fails. `Http::preventStrayRequests()` in `setUp()` makes a driver test with no `Http::fake()` fail instead of calling the real API.
 
 ```php
 <?php
@@ -143,10 +143,18 @@ declare(strict_types=1);
 namespace Acme\Sms\Tests;
 
 use Acme\Sms\SmsServiceProvider;
+use Illuminate\Support\Facades\Http;
 use Orchestra\Testbench\TestCase as Orchestra;
 
 class TestCase extends Orchestra
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Http::preventStrayRequests();
+    }
+
     protected function getPackageProviders($app): array
     {
         return [SmsServiceProvider::class];
