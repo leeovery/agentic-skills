@@ -4,16 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models\Concerns;
 
-use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
 trait HasUuid
 {
-    protected static function bootHasUuid(): void
+    use HasUuids;
+
+    public function uniqueIds(): array
     {
-        static::creating(function ($model) {
-            if (! $model->uuid) {
-                $model->uuid = Str::uuid();
-            }
-        });
+        return ['uuid'];
     }
 }
