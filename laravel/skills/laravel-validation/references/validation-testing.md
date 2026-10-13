@@ -59,7 +59,7 @@ A closure never receives the item. `value()` and `tap()` closures receive the ar
 ```php
 $customer = Customer::factory()->create();
 
-postJson(route('customer.order.store', $customer), $dataProviderItem->buildRequest($customer))
+postJson(route('customer-order.store', $customer), $dataProviderItem->buildRequest($customer))
     ->assertValidationErrors($dataProviderItem);
 ```
 
