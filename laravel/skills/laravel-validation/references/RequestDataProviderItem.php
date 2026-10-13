@@ -90,7 +90,7 @@ class RequestDataProviderItem implements Arrayable
         return $this;
     }
 
-    public function email(bool $valid = true): static
+    public function email(bool $valid = true): self
     {
         $this->value = $valid
             ? fake()->unique()->safeEmail()
@@ -106,7 +106,7 @@ class RequestDataProviderItem implements Arrayable
         return $this;
     }
 
-    public function array(int $count, mixed $item = []): static
+    public function array(int $count, mixed $item = []): self
     {
         $this->value = static::buildArray($count, $item);
 
@@ -145,7 +145,7 @@ class RequestDataProviderItem implements Arrayable
         ];
     }
 
-    public function buildRequest(...$args): array
+    public function buildRequest(mixed ...$args): array
     {
         $requestData = [];
 
@@ -159,7 +159,7 @@ class RequestDataProviderItem implements Arrayable
 
         return array_replace_recursive(
             $requestData,
-            Arr::undot(value($this->extraRequestData, $requestData, ...$args))
+            Arr::undot(value($this->extraRequestData, $requestData, ...$args)),
         );
     }
 }
