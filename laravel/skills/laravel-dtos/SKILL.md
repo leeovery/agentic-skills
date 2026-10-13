@@ -70,8 +70,8 @@ class CreateOrderDataTransformer
             deliveryDate: $request->date('delivery_date'),
             priority: $request->enum('priority', OrderPriority::class, OrderPriority::Standard),
             isGift: $request->boolean('is_gift'),
-            items: $request->collect('items')->map(
-                fn (array $item, int $index): OrderItemData => new OrderItemData(
+            items: $request->collect('items')->keys()->map(
+                fn (int $index): OrderItemData => new OrderItemData(
                     productId: $request->integer("items.{$index}.product_id"),
                     quantity: $request->integer("items.{$index}.quantity"),
                 ),
@@ -99,8 +99,8 @@ class CreateOrderData extends Data
             deliveryDate: $request->date('delivery_date'),
             priority: $request->enum('priority', OrderPriority::class, OrderPriority::Standard),
             isGift: $request->boolean('is_gift'),
-            items: $request->collect('items')->map(
-                fn (array $item, int $index): OrderItemData => new OrderItemData(
+            items: $request->collect('items')->keys()->map(
+                fn (int $index): OrderItemData => new OrderItemData(
                     productId: $request->integer("items.{$index}.product_id"),
                     quantity: $request->integer("items.{$index}.quantity"),
                 ),

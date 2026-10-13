@@ -23,8 +23,8 @@ class OrderItemDataCollectionTransformer
      */
     public static function fromRequest(CreateOrderRequest|UpdateOrderRequest $request): Collection
     {
-        return $request->collect('items')->map(
-            fn (array $item, int $index): OrderItemData => new OrderItemData(
+        return $request->collect('items')->keys()->map(
+            fn (int $index): OrderItemData => new OrderItemData(
                 productId: $request->integer("items.{$index}.product_id"),
                 quantity: $request->integer("items.{$index}.quantity"),
             ),
