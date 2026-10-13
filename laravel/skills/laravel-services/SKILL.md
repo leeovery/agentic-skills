@@ -139,7 +139,7 @@ An internal single-class service gets the same facade with its class as the acce
 | Code that calls the service | `Shipping::shouldReceive('cancelShipment')->once()` |
 
 - **Fixtures are real responses.** `MockResponse::fixture()` records the response when its file is missing; record each one once against the API and commit it under `tests/Fixtures/Saloon/{name}/`. Call `MockConfig::throwOnMissingFixtures()` in the driver test so a missing fixture fails instead of reaching the API.
-- **No stray requests.** Call `Saloon\Config::preventStrayRequests()` in the base `TestCase::setUp()`, so a Saloon request with no fake throws. `Http::preventStrayRequests()` doesn't catch it, even through Saloon's Laravel HTTP sender, which builds its request outside the factory's stray-request check.
+- **No stray requests.** Call `Saloon\Config::preventStrayRequests()` once, at the top of `tests/Pest.php`, so a Saloon request with no fake throws. It registers a global check each time it's called, so calling it per test in `setUp()` piles them up. `Http::preventStrayRequests()` doesn't catch it, even through Saloon's Laravel HTTP sender, which builds its request outside the factory's stray-request check.
 - **`.env-testing` keeps the real driver**, with placeholder credentials, because the driver tests build it from that config. Nothing else reaches it: callers mock the facade.
 
 More in [laravel-testing](../laravel-testing/SKILL.md).

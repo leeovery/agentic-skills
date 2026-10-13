@@ -126,7 +126,7 @@ Read [references/factories.md](references/factories.md) when writing or extendin
 
 - **A real database on the production engine**: a separate test database, configured in `.env-testing` ([laravel-providers](../laravel-providers/SKILL.md) owns the env templates). `phpunit.xml` sets only `APP_ENV=testing`. SQLite in memory hides the engine's differences in JSON, dates and constraints.
 - **Reset with `FastRefreshDatabase`** (plannr/laravel-fast-refresh-database), applied in `tests/Pest.php`. Like `RefreshDatabase`, it wraps each test in a transaction; it re-migrates only when a migration file has changed.
-- **No real outbound requests.** `TestCase::setUp()` calls `Http::preventStrayRequests()` and, once the app has a Saloon connector, `Saloon\Config::preventStrayRequests()`, because the first doesn't catch Saloon's requests. A request with no fake then throws.
+- **No real outbound requests.** `TestCase::setUp()` calls `Http::preventStrayRequests()`; once the app has a Saloon connector, `tests/Pest.php` calls `Saloon\Config::preventStrayRequests()` once, at the top, because the first doesn't catch Saloon's requests. A request with no fake then throws.
 - **The queue is `sync` in `.env-testing`**, so a dispatched job runs inline unless the test fakes the queue.
 - **Run the suite through the composer scripts**, `composer pest` or `composer pest-dirty` ([laravel-quality](../laravel-quality/SKILL.md) owns them, and the architecture test).
 

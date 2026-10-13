@@ -14,10 +14,15 @@ composer require --dev pestphp/pest pestphp/pest-plugin-laravel plannr/laravel-f
 declare(strict_types=1);
 
 use Plannr\Laravel\FastRefreshDatabase\Traits\FastRefreshDatabase;
+use Saloon\Config as SaloonConfig;
 use Tests\TestCase;
+
+SaloonConfig::preventStrayRequests();
 
 uses(TestCase::class, FastRefreshDatabase::class)->in('Feature', 'Unit', 'Architecture');
 ```
+
+Saloon's guard is global and adds a check each time it's called, so it runs once here rather than per test. Leave it out until the app has a Saloon connector.
 
 Below the `uses()` call go the project's own test helpers, as plain functions: one per way a test signs in, when the app has more than one kind of user or guard, and any custom expectation added with `expect()->extend()`. Every test file then shares them, and the next agent finds them in one place.
 
@@ -32,7 +37,6 @@ namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\Http;
-use Saloon\Config as SaloonConfig;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -41,12 +45,11 @@ abstract class TestCase extends BaseTestCase
         parent::setUp();
 
         Http::preventStrayRequests();
-        SaloonConfig::preventStrayRequests();
     }
 }
 ```
 
-Leave out the Saloon line until the app has a Saloon connector. Add `protected bool $seed = true;` when the app needs reference data to run.
+Add `protected bool $seed = true;` when the app needs reference data to run.
 
 `phpunit.xml` sets the environment and nothing else, so every test setting lives in one place:
 
