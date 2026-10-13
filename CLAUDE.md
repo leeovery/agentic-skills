@@ -12,11 +12,11 @@ Agentic Skills — a collection of opinionated development skills for AI coding 
 laravel/                   # Laravel skills plugin
   agntc.json              # Plugin config — declares supported agents
   README.md               # Plugin-specific documentation
-  skills/                 # 20 Laravel skills (each has SKILL.md + references/)
+  skills/                 # 20 Laravel skills (SKILL.md, plus references/ where needed)
 nuxt/                      # Nuxt skills plugin
   agntc.json
   README.md
-  skills/                 # 15 Nuxt skills (each has SKILL.md + references/)
+  skills/                 # 18 Nuxt skills (SKILL.md, plus references/ where needed)
 release                   # Bash script for semver releases with AI-generated notes
 ```
 
@@ -38,6 +38,6 @@ This is an agntc **collection** — no root `agntc.json`. Each subdirectory with
 
 - No source code — this is a documentation-only collection
 - Skills are markdown files with YAML frontmatter (`name`, `description`)
-- Each skill directory has a `SKILL.md` entry point and `references/` subdirectory
+- Each skill directory has a `SKILL.md` entry point and an optional `references/` subdirectory
 - Version is tag-only (no version file) — release script reads from git tags
 - All plugins in the collection share a single version (monorepo model)

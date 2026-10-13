@@ -21,7 +21,7 @@ These skills work with any AI coding agent that supports the SKILL.md format —
 | Plugin | Description | Skills |
 |--------|-------------|--------|
 | [**laravel**](laravel/) | Laravel development — action-oriented architecture, strict typing, DTOs, and maintainability | 20 skills |
-| [**nuxt**](nuxt/) | Nuxt 4 + Vue 3 — domain-driven, type-safe, composable-first architecture | 15 skills |
+| [**nuxt**](nuxt/) | Nuxt 4 + Vue 3 — domain-driven, type-safe, composable-first architecture | 18 skills |
 
 ## Installation
 
