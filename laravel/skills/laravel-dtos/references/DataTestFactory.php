@@ -5,55 +5,35 @@ declare(strict_types=1);
 namespace Database\Factories\Data;
 
 use App\Data\Data;
-use Illuminate\Foundation\Testing\WithFaker;
 use Illuminate\Support\Collection;
 
 /**
- * Base factory class for all Data object test factories.
- *
- * Provides:
- * - Definition pattern via abstract definition() method
- * - Factory creation: new()
- * - Single instance: make()
- * - Collections: collect()
- * - State pattern: state()
- *
- * @template TData
+ * @template TData of Data
  */
 abstract class DataTestFactory
 {
-    use WithFaker;
+    /**
+     * @var class-string<TData>
+     */
+    protected string $dataClassName;
 
     /**
-     * @var null|class-string<Data|TData>
+     * @var array<int, array<string, mixed>>
      */
-    protected ?string $dataClassName = null;
-
     private array $states = [];
 
     /**
-     * Define the default state for the Data object.
-     *
-     * Return an array that will be passed to Data::from()
+     * @return array<string, mixed>
      */
     abstract public function definition(): array;
 
-    /**
-     * Create a new factory instance.
-     *
-     * @return static
-     */
-    public static function new()
+    public static function new(): static
     {
-        return tap(new static, function ($factory) {
-            $factory->setUpFaker();
-        });
+        return new static;
     }
 
     /**
-     * Set the Data class this factory creates.
-     *
-     * Called automatically by HasTestFactory trait.
+     * @param  class-string<TData>  $className
      */
     public function setDataClass(string $className): void
     {
@@ -61,46 +41,34 @@ abstract class DataTestFactory
     }
 
     /**
-     * Create a collection of Data objects.
-     *
-     * @param  array  $attributes  Override attributes
-     * @param  int|null  $count  Number of items to create
-     * @return Collection<int, TData>
-     */
-    public function collect($attributes = [], ?int $count = 1): Collection
-    {
-        return $this->dataClassName::collect(
-            collect(range(1, $count))->map(fn () => $this->make($attributes))
-        );
-    }
-
-    /**
-     * Create a single Data object instance.
-     *
-     * @param  array  $attributes  Override attributes
+     * @param  array<string, mixed>  $attributes
      * @return TData
      */
-    public function make($attributes = [])
+    public function make(array $attributes = []): Data
     {
         return $this->dataClassName::from(
             array_replace(
                 array_replace($this->definition(), ...$this->states),
-                $attributes
-            )
+                $attributes,
+            ),
         );
     }
 
     /**
-     * Apply a state to the factory.
-     *
-     * States are merged with definition() before creating the Data object.
-     *
-     * @param  callable|array  $array  State array or callable returning array
-     * @return static
+     * @param  array<string, mixed>  $attributes
+     * @return Collection<int, TData>
      */
-    protected function state(callable|array $array): static
+    public function collect(array $attributes = [], int $count = 1): Collection
     {
-        $this->states[] = value($array);
+        return Collection::times($count, fn (): Data => $this->make($attributes));
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    protected function state(array $attributes): static
+    {
+        $this->states[] = $attributes;
 
         return $this;
     }

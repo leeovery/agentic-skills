@@ -1,116 +1,26 @@
 ---
 name: laravel-dtos
-description: Data Transfer Objects using Spatie Laravel Data. Use when creating or modifying DTOs, data objects, formatters, transformers, or structured data handling.
+description: DTOs are spatie/laravel-data classes filled by explicit, typed mapping, usually a transformer per surface; Form Requests validate. Use when creating or changing a Data class, mapping a request or model into one, or writing DTO test factories.
 ---
 
 # Laravel DTOs
 
-**Never pass multiple primitive values.** Always wrap data in Data objects.
+Structured data that crosses a layer boundary, such as an operation's input, travels as a DTO: a spatie/laravel-data class extending the app's own base `Data`. Filling one is explicit. Every input key is read with a typed request helper and handed to a named property, so the mapping reads top to bottom and nothing depends on laravel-data guessing names or casting raw strings. The Form Request validates; the DTO only carries.
 
-**Related guides:**
-- [dto-transformers.md](references/dto-transformers.md) - Transform external data into DTOs
-- [test-factories.md](references/test-factories.md) - Create hydrated DTOs for tests
+## Rules
 
-## Philosophy
+- **Extend `App\Data\Data`, never Spatie's class.** The base adds `testFactory()` and `has('prop')`, which is false for null, `Optional` or an empty Collection. Copy [Data.php](references/Data.php).
+- **Name for what it carries.** `{Verb}{Entity}Data` for an operation's input (`CreateOrderData`), `{Entity}Data` for an entity's shape, `{Descriptor}{Entity}Data` for a part (`ShippingAddressData`). They live in `app/Data/`; a DTO only one service uses lives in `app/Services/{Name}/Data/`.
+- **Promoted, typed constructor properties.** A list is a `Collection` with `/** @var Collection<int, OrderItemData> */` above the parameter: laravel-data reads that to build the children. Dates are `CarbonImmutable`.
+- **Map with typed request helpers.** `$request->date()`, `->enum()`, `->boolean()`, `->integer()`, `->collect()`, `->input('tags', [])`. Values arrive already typed, so laravel-data never has to cast a raw request string.
+- **Map names by hand.** snake_case input goes to camelCase properties key by key. No `#[MapInputName]` or mapper attributes on a DTO filled from a request: the transformer is the one place a reader sees which key lands where.
+- **Validation is the Form Request's; laravel-data's is off.** Set `validation_strategy` to `disabled` (see Configuration). Left at the default, `CreateOrderData::from($request)` runs laravel-data's pipeline over the raw request before calling your creation method: rules inferred from camelCase properties meet snake_case input, and a request the Form Request passed fails with a 422.
+- **Usually, a transformer per surface.** `App\Data\Transformers\{Surface}\{Dto}Transformer`, the surface mirroring `App\Http\{Surface}` (`Api\V1`, `Web`), with one `fromRequest()` that type-hints the surface's Form Request. Each surface's mapping stays separate and explicit: a V2 API maps into the same DTO without touching V1. A transformer that returns a list is `{Item}DataCollectionTransformer`, returning `Collection<int, ItemData>`. This is the usual choice, not an absolute one; the alternative follows.
+- **A model is mapped explicitly too.** Write a `fromModel()` (or a transformer), never a bare `OrderData::from($order)`. The model normaliser matches attributes by name, so snake_case columns miss camelCase properties and nullable ones arrive as null without complaint.
+- **Transformers only map.** No writes, events or business rules. Those belong in the action that takes the DTO.
+- **Test data comes from `testFactory()`**, never `factory()`, which laravel-data already uses for its creation-context builder.
 
-DTOs provide:
-- **Type safety** and IDE autocomplete
-- **Clear contracts** between layers
-- **Test factories** for easy test data generation
-- **Validation** integration
-- **Transformation** from requests to domain objects
-
-## Spatie Laravel Data Package
-
-Uses [Spatie Laravel Data](https://spatie.be/docs/laravel-data). Refer to official docs for package features. This guide covers project-specific patterns and preferences.
-
-### Use `::from()` with Arrays
-
-**Always prefer `::from()`** with arrays where keys match constructor property names. Let the package handle casting based on property types.
-
-```php
-// ✅ PREFERRED - Let package cast automatically
-$data = CreateOrderData::from([
-    'customerEmail' => $request->input('customer_email'),
-    'deliveryDate' => $request->input('delivery_date'),  // String → CarbonImmutable
-    'status' => $request->input('status'),               // String → OrderStatus enum
-    'items' => $request->collect('items'),               // Array → Collection<OrderItemData>
-]);
-
-// ❌ AVOID - Manual casting in calling code
-$data = new CreateOrderData(
-    customerEmail: $request->input('customer_email'),
-    deliveryDate: CarbonImmutable::parse($request->input('delivery_date')),
-    status: $request->enum('status', OrderStatus::class),
-    items: OrderItemData::collect($request->input('items')),
-);
-```
-
-**Why prefer `::from()`:**
-- Package handles type casting automatically based on constructor property types
-- Cleaner calling code without manual casting
-- Consistent transformation behavior
-- Leverages the full power of the package
-
-**When `new` is acceptable:**
-- In test factories where you control all values
-- When values are already the correct type
-- In formatters inside the DTO constructor
-
-### Avoid Case Mapper Attributes
-
-**Don't use `#[MapInputName]` or case mapper attributes.** Map field names explicitly in calling code.
-
-```php
-// ❌ AVOID - Case mapper attributes on the class
-#[MapInputName(SnakeCaseMapper::class)]
-class CreateOrderData extends Data
-{
-    public function __construct(
-        public string $customerEmail,    // Auto-maps from 'customer_email'
-    ) {}
-}
-
-// ✅ PREFERRED - Explicit mapping in calling code
-CreateOrderData::from([
-    'customerEmail' => $request->input('customer_email'),
-]);
-```
-
-**Why avoid case mappers:**
-- Explicit mapping is clearer and more maintainable
-- Different API versions may have different field names
-- Transformers provide a single place to see all mappings
-- Avoids magic behavior that's hard to trace
-
-### Date Casting is Automatic
-
-The package automatically casts date strings to `Carbon` or `CarbonImmutable` based on property types. Configure the expected date format in the package config.
-
-```php
-// config/data.php
-return [
-    'date_format' => 'Y-m-d H:i:s',  // Or ISO 8601: 'Y-m-d\TH:i:s.u\Z'
-];
-```
-
-```php
-class OrderData extends Data
-{
-    public function __construct(
-        public CarbonImmutable $createdAt,   // Automatically cast from string
-        public ?CarbonImmutable $shippedAt,  // Nullable dates work too
-    ) {}
-}
-
-// ✅ Just pass the string - package handles casting
-$data = OrderData::from([
-    'createdAt' => '2024-01-15 10:30:00',
-    'shippedAt' => null,
-]);
-```
-
-## Basic Structure
+## Example
 
 ```php
 <?php
@@ -119,7 +29,7 @@ declare(strict_types=1);
 
 namespace App\Data;
 
-use App\Enums\OrderStatus;
+use App\Enums\OrderPriority;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -130,350 +40,138 @@ class CreateOrderData extends Data
 {
     public function __construct(
         public string $customerEmail,
-        public ?string $notes,
         public ?CarbonImmutable $deliveryDate,
-        public OrderStatus $status,
-        /** @var Collection<int, OrderItemData> */
-        public Collection $items,
-        public ShippingAddressData $shippingAddress,
-        public BillingAddressData $billingAddress,
-    ) {
-        // Apply formatters in constructor
-        $this->customerEmail = EmailFormatter::format($this->customerEmail);
-    }
-}
-```
-
-## Key Patterns
-
-### Constructor Property Promotion
-
-**Always use promoted properties:**
-
-```php
-public function __construct(
-    public string $name,
-    public ?string $description,
-    public bool $active = true,
-) {}
-```
-
-**Not:**
-```php
-public string $name;
-public ?string $description;
-
-public function __construct(string $name, ?string $description)
-{
-    $this->name = $name;
-    $this->description = $description;
-}
-```
-
-### Type Everything
-
-```php
-public string $email;                          // Required string
-public ?string $phone;                         // Nullable string
-public CarbonImmutable $createdAt;             // DateTime (immutable)
-public OrderStatus $status;                    // Enum
-public Collection $items;                      // Collection
-public AddressData $address;                   // Nested DTO
-```
-
-### Collections with PHPDoc
-
-```php
-/** @var int[] */
-public array $productIds;
-
-/** @var Collection<int, OrderItemData> */
-public Collection $items;
-```
-
-### Nested Data Objects
-
-```php
-class OrderData extends Data
-{
-    public function __construct(
-        public CustomerData $customer,
-        public ShippingAddressData $shipping,
-        public BillingAddressData $billing,
+        public OrderPriority $priority,
+        public bool $isGift,
         /** @var Collection<int, OrderItemData> */
         public Collection $items,
     ) {}
 }
 ```
 
-### Formatters
-
-**Apply formatting in the constructor:**
-
-```php
-public function __construct(
-    public string $email,
-    public ?string $phone,
-    public ?string $postcode,
-) {
-    $this->email = EmailFormatter::format($this->email);
-    $this->phone = $this->phone ? PhoneFormatter::format($this->phone) : null;
-    $this->postcode = $this->postcode ? PostcodeFormatter::format($this->postcode) : null;
-}
-```
-
-**Example formatter** (`app/Data/Formatters/EmailFormatter.php`):
-
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace App\Data\Formatters;
+namespace App\Data\Transformers\Api\V1;
 
-class EmailFormatter
+use App\Data\CreateOrderData;
+use App\Data\OrderItemData;
+use App\Enums\OrderPriority;
+use App\Http\Api\V1\Requests\CreateOrderRequest;
+
+class CreateOrderDataTransformer
 {
-    public static function format(string $email): string
+    public static function fromRequest(CreateOrderRequest $request): CreateOrderData
     {
-        return strtolower(trim($email));
-    }
-}
-```
-
-### Static Factory Methods on DTOs
-
-For smaller applications or when starting out, add static `from*` methods directly on the DTO class. This provides factory-like behavior before complexity warrants separate transformers.
-
-**Method naming:** `from{SourceType}` - e.g., `fromArray`, `fromRequest`, `fromModel`
-
-```php
-class OrderData extends Data
-{
-    public function __construct(
-        public string $customerEmail,
-        public ?string $notes,
-        public OrderStatus $status,
-        /** @var Collection<int, OrderItemData> */
-        public Collection $items,
-    ) {}
-
-    public static function fromRequest(CreateOrderRequest $request): self
-    {
-        return self::from([
-            'customerEmail' => $request->input('customer_email'),
-            'notes' => $request->input('notes'),
-            'status' => $request->input('status'),
-            'items' => $request->input('items'),
-        ]);
-    }
-
-    public static function fromModel(Order $order): self
-    {
-        return self::from([
-            'customerEmail' => $order->customer_email,
-            'notes' => $order->notes,
-            'status' => $order->status,
-            'items' => $order->items->toArray(),
-        ]);
-    }
-}
-```
-
-**When to use static methods on DTO:**
-- Smaller applications with fewer DTOs
-- Simple transformations that don't need dedicated testing
-- When mapping is tightly coupled to a single DTO
-
-**When to use separate transformers:**
-- Multiple external sources map to the same DTO
-- Complex transformation logic requiring extensive testing
-- Larger applications with clear separation of concerns
-
-### Model Casts
-
-**Cast model JSON columns to DTOs:**
-
-```php
-class Order extends Model
-{
-    protected function casts(): array
-    {
-        return [
-            'metadata' => OrderMetadataData::class,
-            'status' => OrderStatus::class,
-        ];
-    }
-}
-```
-
-**Usage:**
-
-```php
-// Store
-$order = Order::create([
-    'metadata' => $metadataData,  // OrderMetadataData instance
-]);
-
-// Retrieve
-$metadata = $order->metadata;  // Returns OrderMetadataData instance
-```
-
-## Naming Conventions
-
-| Type | Pattern | Examples |
-|------|---------|----------|
-| Response DTOs | `{Entity}Data` | `OrderData`, `UserData`, `ProductData` |
-| Request DTOs | `{Action}{Entity}Data` | `CreateOrderData`, `UpdateUserData` |
-| Nested DTOs | `{Descriptor}{Entity}Data` | `ShippingAddressData`, `OrderMetadataData` |
-
-## Directory Structure
-
-```
-app/Data/
-├── CreateOrderData.php
-├── UpdateOrderData.php
-├── OrderData.php
-├── Concerns/
-│   └── HasTestFactory.php
-├── Formatters/
-│   ├── EmailFormatter.php
-│   ├── PhoneFormatter.php
-│   └── PostcodeFormatter.php
-└── Transformers/
-    ├── PaymentDataTransformer.php
-    ├── Web/
-    │   └── OrderDataTransformer.php
-    └── Api/
-        └── V1/
-            └── OrderDataTransformer.php
-```
-
-## Usage in Controllers
-
-**Controllers transform requests to DTOs via transformers:**
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Http\Web\Controllers;
-
-use App\Actions\Order\CreateOrderAction;
-use App\Data\Transformers\Web\OrderDataTransformer;
-use App\Http\Web\Requests\CreateOrderRequest;
-use App\Http\Web\Resources\OrderResource;
-
-class OrderController extends Controller
-{
-    public function store(
-        CreateOrderRequest $request,
-        CreateOrderAction $action
-    ): OrderResource {
-        $order = $action(
-            user(),
-            OrderDataTransformer::fromRequest($request)
+        return new CreateOrderData(
+            customerEmail: $request->input('customer_email'),
+            deliveryDate: $request->date('delivery_date'),
+            priority: $request->enum('priority', OrderPriority::class, OrderPriority::Standard),
+            isGift: $request->boolean('is_gift'),
+            items: $request->collect('items')->map(
+                fn (array $item, int $index): OrderItemData => new OrderItemData(
+                    productId: $request->integer("items.{$index}.product_id"),
+                    quantity: $request->integer("items.{$index}.quantity"),
+                ),
+            ),
         );
-
-        return OrderResource::make($order);
     }
 }
 ```
 
-## Usage in Actions
+The controller hands `CreateOrderDataTransformer::fromRequest($request)` to the action. Read [dto-transformers.md](references/dto-transformers.md) when mapping nested lists, writing a collection transformer, mapping an external payload, or testing a transformer.
 
-**Actions accept DTOs as parameters:**
+## The alternative: a creation method on the DTO
 
-```php
-class CreateOrderAction
-{
-    public function __invoke(User $user, CreateOrderData $data): Order
-    {
-        return DB::transaction(function () use ($user, $data) {
-            return $user->orders()->create([
-                'customer_email' => $data->customerEmail,
-                'notes' => $data->notes,
-                'status' => $data->status,
-            ]);
-        });
-    }
-}
-```
-
-## Transformers
-
-For complex transformations (external APIs, webhooks, field mappings), use dedicated transformer classes.
-
-**[→ Complete guide: dto-transformers.md](references/dto-transformers.md)**
+laravel-data sends `CreateOrderData::from($x)` to any public static `from…` method whose parameter accepts `$x`. Build inside it with `new self(...)` and the same typed helpers:
 
 ```php
-// External system data
-$data = PaymentDataTransformer::fromStripePaymentIntent($webhook['data']);
-
-// Request with version-specific field names
-$data = OrderDataTransformer::fromRequest($request);
-```
-
-**Hierarchy of preference:**
-1. `Data::from($array)` - Simple cases, direct mapping
-2. `Data::fromRequest()` - Static method on DTO for smaller apps
-3. `Transformer::from*()` - Complex transformations, multiple sources
-
-## Test Factories
-
-Create hydrated DTOs for tests using the `HasTestFactory` trait.
-
-**[→ Complete guide: test-factories.md](references/test-factories.md)**
-
-**Link DTOs to factories with PHPDoc:**
-
-```php
-/**
- * @see \Database\Factories\Data\CreateOrderDataFactory
- * @method static CreateOrderDataFactory testFactory()
- */
 class CreateOrderData extends Data
 {
-    // ...
+    // constructor as in the example above
+
+    public static function fromCreateOrderRequest(CreateOrderRequest $request): self
+    {
+        return new self(
+            customerEmail: $request->input('customer_email'),
+            deliveryDate: $request->date('delivery_date'),
+            priority: $request->enum('priority', OrderPriority::class, OrderPriority::Standard),
+            isGift: $request->boolean('is_gift'),
+            items: $request->collect('items')->map(
+                fn (array $item, int $index): OrderItemData => new OrderItemData(
+                    productId: $request->integer("items.{$index}.product_id"),
+                    quantity: $request->integer("items.{$index}.quantity"),
+                ),
+            ),
+        );
+    }
 }
 ```
 
-**Usage:**
+- **Name the method after its source and type-hint that exact class**: `fromCreateOrderRequest(CreateOrderRequest $request)`, `fromModel(Order $order)`. The first method whose parameter accepts the value wins, so a `fromRequest(Request $request)` would swallow every request.
+- **Call it through `from()`.** `CreateOrderData::from($request)`, `OrderData::from($order)`.
+
+## Configuration
 
 ```php
-$data = CreateOrderData::testFactory()->make();
-$collection = OrderItemData::testFactory()->collect(count: 5);
+<?php
 
-// With overrides
-$data = CreateOrderData::testFactory()->make([
-    'customerEmail' => 'test@example.com',
-]);
+declare(strict_types=1);
+
+use Spatie\LaravelData\Support\Creation\ValidationStrategy;
+
+// config/data.php, the two keys that differ from the published file
+return [
+    'date_format' => DATE_ATOM,
+    'validation_strategy' => ValidationStrategy::Disabled->value,
+];
 ```
 
-## Testing DTOs
+- **`validation_strategy` is the switch**, not an override of `pipeline()` on the base class. One config line covers every creation path, and a hand-copied pipe list silently drops any pipe the package adds in an upgrade.
+- **`date_format` is what DTOs write dates as**, in `toArray()`, JSON and Data-cast model columns, and what they parse back. Request dates never reach it, because `$request->date()` has already parsed them, and test factories pass date objects so they don't depend on it either.
+
+## Test factories
 
 ```php
-use App\Data\CreateOrderData;
-
-it('can create DTO from array', function () {
-    $data = CreateOrderData::from([
-        'customerEmail' => 'test@example.com',
-        'notes' => 'Test notes',
-        'status' => 'pending',
-    ]);
-
-    expect($data)
-        ->customerEmail->toBe('test@example.com')
-        ->notes->toBe('Test notes');
-});
-
-it('formats email in constructor', function () {
-    $data = new CreateOrderData(
-        customerEmail: '  TEST@EXAMPLE.COM  ',
-        notes: null,
-        status: OrderStatus::Pending,
-    );
-
-    expect($data->customerEmail)->toBe('test@example.com');
-});
+$data = CreateOrderData::testFactory()->make(['isGift' => true]);
+$items = OrderItemData::testFactory()->collect(count: 3);
+$data = CreateOrderData::testFactory()->express()->make();
 ```
+
+- **One factory per DTO** in `database/factories/Data/{Dto}Factory.php`, linked from the DTO with an `@see` docblock.
+- **Definitions use property names**, compose child DTOs through their own factories, and pass dates as objects.
+- **Call `collect()` with named arguments**, `collect(count: 3, attributes: [...])`, so the call reads the same whatever the parameter order.
+
+Read [test-factories.md](references/test-factories.md) when the project has no DTO test factories yet, or when writing a factory.
+
+## Reach for these when the situation calls for it
+
+**A service's API returns uniformly cased payloads.** The response DTO, in `app/Services/{Name}/Data/`, may take a class-level `#[MapInputName(SnakeCaseMapper::class)]` and fill with `ProductData::collect($response->collect('data'))`. Nothing is renamed by hand, so there's no mapping for a transformer to make explicit.
+
+**Dates arrive as strings in a format other than `date_format`**, such as an external payload filled with `from()`. Make `date_format` a list: `[DATE_ATOM, 'd/m/Y']`. The first entry stays the output format; every entry is tried on input.
+
+**A value must be normalised the same way however the DTO is built**, such as a trimmed, lower-cased email. Put it in a formatter, `App\Data\Formatters\EmailFormatter::format(string $email): string`, and apply it in the constructor body: `$this->customerEmail = EmailFormatter::format($this->customerEmail);`. The property can't then be `readonly`.
+
+## Anti-patterns
+
+- ❌ `CreateOrderData::from($request->validated())`, `::from($request->all())`, or `OrderData::from($order)` with no `fromModel()`.
+- ❌ `'deliveryDate' => $request->input('delivery_date')`, leaving laravel-data to cast a raw string.
+- ❌ `#[MapInputName(SnakeCaseMapper::class)]` on a DTO filled from a request.
+- ❌ Validation attributes or a `rules()` method on a Data class.
+- ❌ `OrderItemData::collect($request->input('items'))` into a `Collection` property. `collect()` returns the container it's given, so an array in is an array out and the constructor throws a `TypeError`. Pass `$request->collect('items')`.
+- ❌ `class CreateOrderData extends \Spatie\LaravelData\Data`.
+- ❌ `public static function fromRequest(Request $request)` as a creation method on the DTO.
+- ❌ A write, event or business rule inside a transformer.
+- ❌ `CreateOrderData::factory()` for test data.
+
+## Related
+
+- [laravel-actions](../laravel-actions/SKILL.md): the actions DTOs are passed to
+- [laravel-validation](../laravel-validation/SKILL.md): the Form Requests that validate before mapping
+- [laravel-controllers](../laravel-controllers/SKILL.md): where the transformer is called
+- [laravel-models](../laravel-models/SKILL.md): casting a JSON column to a Data class
+- [laravel-providers](../laravel-providers/SKILL.md): `Date::use(CarbonImmutable::class)`, and the provider that registers the DTO factory resolver
+- [laravel-services](../laravel-services/SKILL.md): the services that own their DTOs
+- [laravel-testing](../laravel-testing/SKILL.md): testing style
