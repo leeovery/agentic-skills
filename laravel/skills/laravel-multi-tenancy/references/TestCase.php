@@ -4,28 +4,27 @@ declare(strict_types=1);
 
 namespace Tests;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 use Stancl\Tenancy\Resolvers\RequestDataTenantResolver;
 use Tests\Concerns\ManagesTenants;
 
 abstract class TestCase extends BaseTestCase
 {
-    use ManagesTenants, RefreshDatabase;
+    use ManagesTenants;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        static::setUpTenancyConfiguration();
-        static::setUpTenantCreationListener();
+        Http::preventStrayRequests();
+        $this->trackTenantsCreatedInTest();
     }
 
     protected function tearDown(): void
     {
-        tenancy()->end();
-        static::deleteTenantDatabases();
+        $this->deleteTenantsCreatedInTest();
 
         parent::tearDown();
     }
