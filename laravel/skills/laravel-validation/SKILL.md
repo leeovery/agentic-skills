@@ -16,7 +16,7 @@ Every input an endpoint accepts is validated by a Form Request, and the Form Req
 - **Order: presence, type, bounds, then the expensive checks.** `required` or `nullable` first, then the type (`string`, `integer`, `array`), then size and format, then database lookups and rule objects.
 - **`bail` sits just before the rule it protects.** It applies to the whole attribute wherever it appears; Laravel treats it as a flag, not a position. Placing it before the lookup or rule object tells the reader what the type checks guard, and that check never runs on input that already failed.
 - **Enums use `new Enum(OrderPriority::class)`**, after `'string'` and `'bail'`. Never an `in:` list of case values: the list goes stale when a case is added.
-- **Name fields in `attributes()`, not `messages()`.** Laravel builds every message from the attribute's name, so mapping `items.*.product_id` to `product` fixes all of that field's messages at once. Use `messages()` only for wording the attribute name can't produce. A rule object writes its own message.
+- **Name fields in `attributes()`, not `messages()`.** Laravel builds every message from the attribute's name, so mapping `items.*.product_ulid` to `product` fixes all of that field's messages at once. Use `messages()` only for wording the attribute name can't produce. A rule object writes its own message.
 
 ## Example
 
@@ -55,11 +55,11 @@ class CreateOrderRequest extends FormRequest
                 'array',
                 'max:100',
             ],
-            'items.*.product_id' => [
+            'items.*.product_ulid' => [
                 'required',
-                'integer',
+                'string',
                 'bail',
-                Rule::exists(Product::class, 'id')->where('active', true),
+                Rule::exists(Product::class, 'ulid')->where('active', true),
             ],
             'items.*.quantity' => [
                 'required',
@@ -72,7 +72,7 @@ class CreateOrderRequest extends FormRequest
     public function attributes(): array
     {
         return [
-            'items.*.product_id' => 'product',
+            'items.*.product_ulid' => 'product',
             'items.*.quantity' => 'quantity',
         ];
     }
@@ -83,7 +83,7 @@ class CreateOrderRequest extends FormRequest
 
 | The check | Write |
 |---|---|
-| A built-in rule or a `Rule::` / `File::` builder expresses it | That builder: `Rule::exists(Product::class, 'id')->where('active', true)`, `Rule::requiredIf(fn (): bool => $this->boolean('is_gift'))` |
+| A built-in rule or a `Rule::` / `File::` builder expresses it | That builder: `Rule::exists(Product::class, 'ulid')->where('active', true)`, `Rule::requiredIf(fn (): bool => $this->boolean('is_gift'))` |
 | It belongs to this one request, usually comparing fields | A closure in the rules array, `function (string $attribute, mixed $value, Closure $fail): void`, reading the other field with `$this->input()` |
 | It's reused across requests, or its logic deserves its own unit test | A `{Concept}Rule` class in `app/Rules/` implementing `ValidationRule` |
 
@@ -134,8 +134,8 @@ dataset('order create', [
     ],
     'Product must be active' => [
         (new RequestDataProviderItem)
-            ->attribute('items.0.product_id')
-            ->value(fn (): int => Product::factory()->inactive()->create()->id)
+            ->attribute('items.0.product_ulid')
+            ->value(fn (): string => Product::factory()->inactive()->create()->ulid)
             ->assertError('The selected product is invalid.'),
     ],
 ]);

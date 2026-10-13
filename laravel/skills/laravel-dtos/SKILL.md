@@ -72,7 +72,7 @@ class CreateOrderDataTransformer
             isGift: $request->boolean('is_gift'),
             items: $request->collect('items')->keys()->map(
                 fn (int $index): OrderItemData => new OrderItemData(
-                    productId: $request->integer("items.{$index}.product_id"),
+                    productUlid: $request->string("items.{$index}.product_ulid")->value(),
                     quantity: $request->integer("items.{$index}.quantity"),
                 ),
             ),
@@ -101,7 +101,7 @@ class CreateOrderData extends Data
             isGift: $request->boolean('is_gift'),
             items: $request->collect('items')->keys()->map(
                 fn (int $index): OrderItemData => new OrderItemData(
-                    productId: $request->integer("items.{$index}.product_id"),
+                    productUlid: $request->string("items.{$index}.product_ulid")->value(),
                     quantity: $request->integer("items.{$index}.quantity"),
                 ),
             ),

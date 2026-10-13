@@ -31,8 +31,8 @@ Pest loads dataset files before the application boots, so a factory, config or d
 ```php
 'Product must be active' => [
     (new RequestDataProviderItem)
-        ->attribute('items.0.product_id')
-        ->value(fn (): int => Product::factory()->inactive()->create()->id)
+        ->attribute('items.0.product_ulid')
+        ->value(fn (): string => Product::factory()->inactive()->create()->ulid)
         ->assertError('The selected product is invalid.'),
 ],
 'Reference must be unique' => [
