@@ -1,6 +1,6 @@
 ---
 name: laravel-services
-description: Third-party integrations are services in app/Services/{Name}: a manager, drivers behind a contract, Saloon for HTTP, a facade and a deferred provider. Use when integrating an external API, adding a driver, connector or request, or writing a facade-backed service.
+description: Third-party integrations are services in app/Services/{Name}, built from a manager, drivers behind a contract, Saloon for HTTP, a facade and a deferred provider. Use when integrating an external API, adding a driver, connector or request, or writing a facade-backed service.
 ---
 
 # Laravel Services

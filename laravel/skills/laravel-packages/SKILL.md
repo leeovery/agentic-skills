@@ -1,6 +1,6 @@
 ---
 name: laravel-packages
-description: A package holds self-contained infrastructure that knows nothing of the app installing it: a package-tools provider, a manager with drivers, a facade that ships a fake, Testbench tests. Use when extracting code into a composer package or writing or changing one.
+description: A package holds self-contained infrastructure that knows nothing of the app installing it, built from a package-tools provider, a manager with drivers, a facade that ships a fake, and Testbench tests. Use when extracting code into a composer package or writing or changing one.
 ---
 
 # Laravel Packages
