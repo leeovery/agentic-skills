@@ -1,6 +1,6 @@
 ---
 name: laravel-services
-description: Third-party integrations are services in app/Services/{Name}: a manager, drivers behind a contract, Saloon for HTTP, a facade and a deferred provider. Use when integrating an external API, adding a driver, connector or request, or writing a facade-backed service.
+description: Third-party integrations are services in app/Services/{Name}, built from a manager, drivers behind a contract, Saloon for HTTP, a facade and a deferred provider. Use when integrating an external API, adding a driver, connector or request, or writing a facade-backed service.
 ---
 
 # Laravel Services
@@ -32,8 +32,8 @@ tests/Fixtures/Saloon/shipping/
 - **Drivers implement the service's contract.** `Contracts/{Name}Driver`. Methods take and return typed values and DTOs, never a Saloon `Response` or a raw payload array, so callers can't tell one driver from another.
 - **One driver per API version.** `ShippingV1Driver`, config key `shipping_v1`, requests in `Requests/V1/`. A new API version is a new driver beside the old one, switched by config.
 - **Config in `config/{name}.php`.** A `default` read from `{NAME}_DRIVER` and one `drivers` entry per driver. The manager passes the values into the driver's constructor as named arguments; a driver never calls `config()`, so a test can build it directly.
-- **Every integration has a `NullDriver`.** It returns empty but valid results and does nothing else. Local work that shouldn't reach the API sets `SHIPPING_DRIVER=null`. It isn't the test driver: see Testing.
-- **One deferred provider per service, and it only binds.** Bind the manager, alias it to `'{name}-manager'`, and list both in `provides()`. Its `boot()` stays empty: a deferred provider boots only when the manager is first resolved, so the service's rate limiter goes in `AppServiceProvider::bootRateLimiters()` with the rest ([laravel-providers](../laravel-providers/SKILL.md)).
+- **Every integration has a `NullDriver`.** It returns empty but valid results and does nothing else. Local work that shouldn't reach the API sets `SHIPPING_DRIVER=null`. `env()` reads that value as PHP `null`, so `getDefaultDriver()` falls back to `'null'`. It isn't the test driver: see Testing.
+- **One deferred provider per service, and it only registers.** `scoped()` the manager, alias it to `'{name}-manager'`, and list both in `provides()`. Scoped gives one manager per request or job, shared by the facade and anything that injects it, so a driver keeps its connector for that request or job; the queue worker forgets it before the next. Its `boot()` stays empty: a deferred provider boots only when the manager is first resolved, so the service's rate limiter goes in `AppServiceProvider::bootRateLimiters()` with the rest ([laravel-providers](../laravel-providers/SKILL.md)).
 - **The facade resolves the alias and mixes in the contract.** `getFacadeAccessor()` returns `'shipping-manager'`, and `@mixin ShippingDriver` gives every driver method to the IDE with no `@method` list to keep in step. Actions call it, `Shipping::cancelShipment(...)`, or inject the service where that reads better ([laravel-actions](../laravel-actions/SKILL.md)).
 - **Saloon for HTTP.** One connector per API in `Connector/`, one request class per endpoint in `Requests/`. Never `Http::` or a hand-built Guzzle client in a driver.
 - **The connector throws on failure.** `use AlwaysThrowOnErrors`, so every 4xx and 5xx raises Saloon's `RequestException`. Never check `$response->failed()` by hand.
@@ -57,7 +57,7 @@ class ShippingManager extends Manager
 {
     public function getDefaultDriver(): string
     {
-        return $this->config->get('shipping.default');
+        return $this->config->get('shipping.default') ?? 'null';
     }
 
     public function createShippingV1Driver(): ShippingV1Driver
@@ -90,7 +90,7 @@ class ShippingServiceProvider extends ServiceProvider implements DeferrableProvi
 {
     public function register(): void
     {
-        $this->app->bind(ShippingManager::class);
+        $this->app->scoped(ShippingManager::class);
         $this->app->alias(ShippingManager::class, 'shipping-manager');
     }
 
@@ -136,10 +136,11 @@ An internal single-class service gets the same facade with its class as the acce
 |---|---|
 | A driver | Build it with the testing config, then `Saloon::fake([GetShipmentRequest::class => MockResponse::fixture('shipping/get_shipment')])` |
 | A failure | `MockResponse::make(body: '', status: 404)` and `->throws(NotFoundException::class)` |
-| Code that calls the service | `Shipping::shouldReceive('cancelShipment')->once()` |
+| Code that calls the facade | `Shipping::shouldReceive('cancelShipment')->once()` |
+| Code that injects the manager | `mock(ShippingManager::class)->shouldReceive('cancelShipment')->once()`: a facade mock replaces only the `'shipping-manager'` alias, so an injected manager would still be the real one |
 
 - **Fixtures are real responses.** `MockResponse::fixture()` records the response when its file is missing; record each one once against the API and commit it under `tests/Fixtures/Saloon/{name}/`. Call `MockConfig::throwOnMissingFixtures()` in the driver test so a missing fixture fails instead of reaching the API.
-- **No stray requests.** Call `Saloon\Config::preventStrayRequests()` in the base `TestCase::setUp()`, so a Saloon request with no fake throws. `Http::preventStrayRequests()` doesn't catch it, even through Saloon's Laravel HTTP sender, which builds its request outside the factory's stray-request check.
+- **No stray requests.** Call `Saloon\Config::preventStrayRequests()` once, at the top of `tests/Pest.php`, so a Saloon request with no fake throws. It registers a global check each time it's called, so calling it per test in `setUp()` piles them up. `Http::preventStrayRequests()` doesn't catch it, even through Saloon's Laravel HTTP sender, which builds its request outside the factory's stray-request check.
 - **`.env-testing` keeps the real driver**, with placeholder credentials, because the driver tests build it from that config. Nothing else reaches it: callers mock the facade.
 
 More in [laravel-testing](../laravel-testing/SKILL.md).
@@ -148,7 +149,7 @@ More in [laravel-testing](../laravel-testing/SKILL.md).
 
 **Callers that handle the failure.** When an action catches a failed call to fall back, mark a record failed or retry later, the driver catches `RequestException|FatalRequestException` and throws the service's own exception with the original as `previous`. Callers then catch one type and the cause still reaches the log. `FatalRequestException`, a request that got no response at all, is not a `RequestException`.
 
-**An API that issues short-lived tokens.** Fetch the token in the connector's `boot()` and keep it and its expiry on the connector. Return early for the token request itself, which boots too. The driver holds one connector for its lifetime, so the token is reused until it expires.
+**An API that issues short-lived tokens.** Fetch the token in the connector's `boot()` and keep it and its expiry on the connector. Return early for the token request itself, which boots too. The scoped driver holds one connector for the request or job, so every call in it reuses the token; a token that must outlive that goes in the cache, keyed by its expiry.
 
 **A slow endpoint.** `use HasTimeout` on the connector, set `$connectTimeout` and `$requestTimeout` (seconds), and add a comment saying why those numbers.
 

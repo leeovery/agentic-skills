@@ -1,642 +1,197 @@
 ---
 name: laravel-testing
-description: Comprehensive testing patterns with Pest. Use when writing or modifying tests, mocking, factories, or test patterns.
+description: Pest tests read one way, with test() and will/can names, container mocks, scoped fakes, factory states and endpoint feature tests on a real database. Use when writing or changing tests, model factories, fakes, mocks or the test setup.
 ---
 
 # Laravel Testing
 
-Testing patterns with Pest: Arrange-Act-Assert, proper mocking, null drivers, declarative factories.
+Every test reads the same way: a Pest `test()` named as a sentence, built from factories, run against a real database, with only its collaborators mocked and only the side effects it asserts faked. A unit test covers one class, built through the container; a feature test covers one controller's endpoints through HTTP. How to test each kind of class lives with the skill that owns it. This one owns the style they share, HTTP tests, models, builders and factories, fakes, and the test environment.
 
-**Related guides:**
-- [testing-conventions.md](references/testing-conventions.md) - Test file structure and RESTful ordering
-- [testing-factories.md](references/testing-factories.md) - Declarative factory methods for readable tests
-- [validation-testing.md](../laravel-validation/references/validation-testing.md) - Form request validation testing
-- [Actions](../laravel-actions/SKILL.md) - Action pattern for unit testing
-- [Controllers](../laravel-controllers/SKILL.md) - Controller patterns for feature testing
-- [DTOs](../laravel-dtos/SKILL.md) - DTO test factories
-- [Services](../laravel-services/SKILL.md) - Service layer with null drivers
+## Rules
 
-## Philosophy
+- **Read the project's tests first.** `tests/Pest.php`, `tests/TestCase.php` and a neighbouring test. Sign in, compare dates and build URLs with the helpers and expectations they define; this skill gives the shape, the project gives the helpers.
+- **`test()`, never `it()`.** Names are lowercase sentences: unit tests say what will happen (`'will cancel a paid order'`, `'will not …'`), HTTP tests what an actor can do (`'can create an order'`, `'cannot …'`).
+- **No `// Arrange`, `// Act`, `// Assert` comments.** A blank line separates the setup, the call and the assertions.
+- **Pest's Laravel functions, imported.** `getJson()`, `mock()`, `freezeTime()` and `assertDatabaseHas()` come from `use function Pest\Laravel\…;`, never `$this->`.
+- **A failure is `->throws()`.** `test(...)->throws(OrderException::class, OrderException::cannotCancel()->getMessage())` ([laravel-exceptions](../laravel-exceptions/SKILL.md)). `expect(fn () => …)->toThrow()` only when the test asserts something after the throw, such as a rolled-back write.
+- **Mock collaborators with `mock()`.** `Pest\Laravel\mock(X::class)` binds the mock into the container, so the class under test, built with `resolve()`, receives it; there's nothing to `swap()`. `Mockery::mock()` is only for an object the test hands over itself. [laravel-actions](../laravel-actions/SKILL.md) has the recipe.
+- **Real data, from factories.** Models from `Order::factory()` and its states, DTOs from `testFactory()` ([laravel-dtos](../laravel-dtos/SKILL.md)). Never mock a model or DTO, or build one from an inline array. Unit tests hit the database too: they create real rows and assert what was written.
+- **`->refresh()` to re-read a model.** It reloads the instance the test holds; `fresh()` returns a second copy and leaves the first stale.
+- **`config([...])` to change config**, never `Config::set()`.
+- **Freeze what you assert.** `freezeTime()` before asserting a time, `freezeSecond()` when comparing with a stored timestamp (the database drops microseconds), `travelTo()` to move the clock. `Str::freezeUlids()` or `Str::freezeUuids()` before asserting a generated id. Never `Carbon::setTestNow()`.
+- **Fake only the events you assert.** `Event::fake([OrderShipped::class])`. A bare `Event::fake()` swallows every event, model events included, so listeners the code depends on stop running and the test can't tell.
 
-Testing should be:
-- **Isolated** - Test one thing at a time
-- **Reliable** - Consistent results every time
-- **Maintainable** - Easy to update when code changes
-- **Fast** - Quick feedback loop
-- **Realistic** - Use factories, not hardcoded values
+## Example
 
-## The Triple-A Pattern
-
-Every test should follow the **Arrange-Act-Assert** pattern:
-
-### 1. Arrange the World
-
-Set up all the data and dependencies needed using **factories**:
+`tests/Feature/Api/V1/OrderTest.php`, for `OrderController` on the `Api/V1` surface:
 
 ```php
-it('creates an order with items', function () {
-    // Arrange: Create the world state
-    $user = User::factory()->create();
-    $product = Product::factory()->active()->create(['price' => 1000]);
+<?php
 
-    $data = CreateOrderData::from([
-        'customer_email' => 'customer@example.com',
-        'items' => [
-            ['product_id' => $product->id, 'quantity' => 2],
-        ],
-    ]);
+declare(strict_types=1);
 
-    // Act: Perform the operation
-    $order = resolve(CreateOrderAction::class)($user, $data);
-
-    // Assert: Verify the results
-    expect($order)
-        ->toBeInstanceOf(Order::class)
-        ->and($order->items)->toHaveCount(1)
-        ->and($order->total)->toBe(2000);
-});
-```
-
-### 2. Act on the World
-
-Perform the **single operation** you're testing:
-
-```php
-// ✅ Good - Single, clear action
-$order = resolve(CreateOrderAction::class)($user, $data);
-
-// ❌ Bad - Multiple actions mixed with assertions
-$order = resolve(CreateOrderAction::class)($user, $data);
-expect($order)->toBeInstanceOf(Order::class);
-$order->refresh();
-expect($order->total)->toBe(2000);
-```
-
-### 3. Assert on the Results
-
-Verify the **outcomes** of your action:
-
-```php
-// ✅ Good - Clear, focused assertions
-expect($order)
-    ->toBeInstanceOf(Order::class)
-    ->and($order->status)->toBe(OrderStatus::Pending)
-    ->and($order->items)->toHaveCount(2);
-
-assertDatabaseHas('orders', [
-    'id' => $order->id,
-    'user_id' => $user->id,
-]);
-
-// ❌ Bad - Testing implementation details
-expect($order->getAttribute('status'))->toBe('pending');
-```
-
-## Testing Actions
-
-Actions are the **heart of your domain logic** and should be thoroughly tested in isolation.
-
-### Basic Action Test
-
-```php
-use App\Actions\Order\CreateOrderAction;
-use App\Data\CreateOrderData;
-use App\Enums\OrderStatus;
+use App\Enums\Permission;
+use App\Models\Order;
+use App\Models\Product;
 use App\Models\User;
-use function Pest\Laravel\assertDatabaseHas;
+use Illuminate\Testing\Fluent\AssertableJson;
 
-it('creates an order', function () {
-    // Arrange
-    $user = User::factory()->create();
-    $data = CreateOrderData::testFactory()->make([
-        'status' => OrderStatus::Pending,
-    ]);
-
-    // Act
-    $order = resolve(CreateOrderAction::class)($user, $data);
-
-    // Assert
-    expect($order)->toBeInstanceOf(Order::class);
-    assertDatabaseHas('orders', [
-        'id' => $order->id,
-        'user_id' => $user->id,
-        'status' => OrderStatus::Pending->value,
-    ]);
-});
-```
-
-### Testing Action Guard Methods
-
-```php
-it('throws exception when user has too many pending orders', function () {
-    // Arrange
-    $user = User::factory()
-        ->has(Order::factory()->pending()->count(5))
-        ->create();
-
-    $data = CreateOrderData::testFactory()->make();
-
-    // Act & Assert
-    expect(fn () => resolve(CreateOrderAction::class)($user, $data))
-        ->toThrow(OrderException::class, 'Too many pending orders');
-});
-```
-
-### Testing Action Composition
-
-**Critical pattern:** Always resolve actions from the container using `resolve()` so dependencies are recursively resolved. Use `swap()` to replace dependencies with mocked versions.
-
-```php
-use function Pest\Laravel\mock;
-use function Pest\Laravel\swap;
-
-it('processes order and sends notification', function () {
-    // Arrange
-    $user = User::factory()->create();
-    $order = Order::factory()->for($user)->create();
-
-    // Mock the dependency actions and swap them into the container
-    $calculateTotal = mock(CalculateOrderTotalAction::class);
-    $calculateTotal->shouldReceive('__invoke')
-        ->once()
-        ->with($order)
-        ->andReturn(10000);
-    swap(CalculateOrderTotalAction::class, $calculateTotal);
-
-    $notifyOrder = mock(NotifyOrderCreatedAction::class);
-    $notifyOrder->shouldReceive('__invoke')
-        ->once()
-        ->with($order);
-    swap(NotifyOrderCreatedAction::class, $notifyOrder);
-
-    // Act - resolve() from container so mocked dependencies are injected
-    $result = resolve(ProcessOrderAction::class)($order);
-
-    // Assert
-    expect($result->total)->toBe(10000);
-});
-```
-
-**Why this pattern:**
-- `resolve()` ensures the action is pulled from the container with all dependencies
-- `swap()` replaces the dependency in the container with your mock
-- Container handles recursive dependency resolution automatically
-- If a dependency adds a new dependency, your tests don't break
-
-## Mocking Guidelines
-
-### Only Mock What You Own
-
-**Critical principle:** Only mock code that you control. Never mock external services directly.
-
-#### ✅ Good - Mock Your Own Actions
-
-```php
-use function Pest\Laravel\mock;
-use function Pest\Laravel\swap;
-
-// Mock an action you own and swap it into the container
-$sendEmail = mock(SendWelcomeEmailAction::class);
-$sendEmail->shouldReceive('__invoke')
-    ->once()
-    ->with(Mockery::type(User::class));
-swap(SendWelcomeEmailAction::class, $sendEmail);
-
-// Then resolve the action under test - it will receive the mocked dependency
-$result = resolve(RegisterUserAction::class)($data);
-```
-
-#### ✅ Advanced - Verify Mock Arguments with Assertions
-
-Use `withArgs()` with a closure to verify the **exact instances and values** being passed:
-
-```php
-it('processes match with correct arguments', function () {
-    $matchAttempt = MatchAttempt::factory()->create();
-    $data = MatchData::testFactory()->make();
-
-    // Mock and verify exact arguments using expect() assertions
-    $mockAction = mock(CreateMatchResultAction::class);
-    $mockAction->shouldReceive('__invoke')
-        ->once()
-        ->withArgs(function (MatchAttempt $_matchAttempt, MatchData $_data) use ($data, $matchAttempt) {
-            // Verify the exact model instance is passed
-            expect($_matchAttempt->is($matchAttempt))->toBeTrue()
-                // Verify the exact DTO value is passed
-                ->and($_data)->toBe($data->matches->first());
-
-            return true; // Return true to pass the assertion
-        });
-    swap(CreateMatchResultAction::class, $mockAction);
-
-    // Act
-    resolve(ProcessMatchAction::class)($matchAttempt, $data);
-});
-```
-
-#### ✅ Good - Mock Your Own Services (via Facade)
-
-```php
-// Mock your own service through its facade
-Payment::shouldReceive('createPaymentIntent')
-    ->once()
-    ->with(10000, 'usd')
-    ->andReturn(PaymentIntentData::from([
-        'id' => 'pi_test_123',
-        'status' => 'succeeded',
-    ]));
-```
-
-#### ❌ Bad - Mocking External Libraries Directly
-
-```php
-// ❌ DON'T DO THIS - Mocking Stripe SDK directly
-$stripe = Mockery::mock(\Stripe\StripeClient::class);
-$stripe->shouldReceive('paymentIntents->create')
-    ->andReturn(/* ... */);
-
-// This is brittle and breaks when Stripe updates their SDK
-```
-
-### When You Need to Mock Something You Don't Own
-
-If you find yourself needing to mock an external service, **create an abstraction**:
-
-1. **Create a Service Layer** with the Manager pattern
-2. **Define a Driver Contract** (interface)
-3. **Implement the Real Driver** (wraps external API)
-4. **Create a Null Driver** for testing
-5. **Add a Facade** for convenience
-
-See [Services](../laravel-services/SKILL.md) for complete implementation examples.
-
-## Using Null Drivers
-
-The null driver pattern provides **deterministic, fast tests** without external dependencies:
-
-```php
-it('processes payment successfully', function () {
-    // Arrange - Use null driver (configured in phpunit.xml or .env.testing)
-    Config::set('payment.default', 'null');
-
-    $order = Order::factory()->create(['total' => 10000]);
-    $data = PaymentData::from(['amount' => 10000, 'currency' => 'usd']);
-
-    // Act - No mocking needed, null driver returns test data
-    $payment = resolve(ProcessPaymentAction::class)($order, $data);
-
-    // Assert
-    expect($payment)
-        ->toBeInstanceOf(Payment::class)
-        ->and($payment->status)->toBe(PaymentStatus::Completed);
-});
-```
-
-**Benefits of null drivers:**
-- No mocking required
-- Fast execution (no network calls)
-- Deterministic results
-- Can test error scenarios by extending null driver
-- Matches real driver interface exactly
-
-### Testing Error Scenarios
-
-Extend the null driver for specific test scenarios:
-
-```php
-// tests/Fakes/FailingPaymentDriver.php
-class FailingPaymentDriver implements PaymentDriver
-{
-    public function createPaymentIntent(int $amount, string $currency): PaymentIntentData
-    {
-        throw PaymentException::failedToCharge('Card declined');
-    }
-}
-
-// In test
-it('handles payment failure gracefully', function () {
-    $this->app->bind(PaymentManager::class, function () {
-        $manager = new PaymentManager($this->app);
-        $manager->extend('failing', fn () => new FailingPaymentDriver);
-        return $manager;
-    });
-
-    Config::set('payment.default', 'failing');
-
-    $order = Order::factory()->create();
-    $data = PaymentData::testFactory()->make();
-
-    expect(fn () => resolve(ProcessPaymentAction::class)($order, $data))
-        ->toThrow(PaymentException::class, 'Card declined');
-});
-```
-
-## Using Factories
-
-Factories create **realistic, randomized test data** that makes tests more robust.
-
-### Model Factories
-
-```php
-// Arrange with factories
-$user = User::factory()->create();
-$product = Product::factory()->active()->create();
-$order = Order::factory()->for($user)->create();
-
-// Factory with state
-$pendingOrder = Order::factory()->pending()->create();
-$paidOrder = Order::factory()->paid()->create();
-
-// Factory with relationships
-$user = User::factory()
-    ->has(Order::factory()->count(3))
-    ->create();
-```
-
-### Declarative Factory Methods
-
-**Critical principle:** Make tests **declarative and readable** by hiding database implementation details behind factory methods.
-
-```php
-// ❌ Bad - Database schema leaks into test
-$calendar = Calendar::factory()->create([
-    'status' => 'accepted',
-    'reminder_sent_at' => null,
-    'approved_by' => User::factory()->create()->id,
-    'approved_at' => now(),
-]);
-
-// ✅ Good - Declarative and readable
-$calendar = Calendar::factory()->accepted()->create();
-```
-
-**[→ Complete declarative factory patterns: testing-factories.md](references/testing-factories.md)**
-
-### DTO Test Factories
-
-DTOs use the `HasTestFactory` trait with `DataTestFactory` base class — mirroring Laravel's model factory API for Data objects.
-
-```php
-// Create DTO with defaults
-$data = CreateOrderData::testFactory()->make();
-
-// Create DTO with overrides
-$data = CreateOrderData::testFactory()->make([
-    'status' => OrderStatus::Pending,
-]);
-
-// Create collection
-$items = OrderItemData::testFactory()->collect(count: 3);
-```
-
-See [DTOs](../laravel-dtos/SKILL.md) for test factory setup and implementation.
-
-## Testing Strategy
-
-### Feature Tests (HTTP Layer)
-
-Test the **complete request/response cycle**:
-
-```php
 use function Pest\Laravel\actingAs;
+use function Pest\Laravel\deleteJson;
+use function Pest\Laravel\getJson;
 use function Pest\Laravel\postJson;
+use function Pest\Laravel\putJson;
 
-it('creates an order via API', function () {
-    $user = User::factory()->create();
+getJson('/api/v1/orders')->assertUnauthorized();
+getJson('/api/v1/orders/01jbx3vq7rk9z2m4n6p8s0t1w3')->assertUnauthorized();
+postJson('/api/v1/orders')->assertUnauthorized();
+putJson('/api/v1/orders/01jbx3vq7rk9z2m4n6p8s0t1w3')->assertUnauthorized();
+deleteJson('/api/v1/orders/01jbx3vq7rk9z2m4n6p8s0t1w3')->assertUnauthorized();
+
+test('can show an order', function (): void {
+    $user = User::factory()->withPermissions(Permission::ViewOrders)->create();
+    $order = Order::factory()->for($user)->paid()->create();
+
+    actingAs($user)
+        ->getJson("/api/v1/orders/{$order->ulid}")
+        ->assertOk()
+        ->assertJson(fn (AssertableJson $json): AssertableJson => $json
+            ->has('data', fn (AssertableJson $json): AssertableJson => $json
+                ->where('ulid', $order->ulid)
+                ->where('reference', $order->reference)
+                ->etc()));
+});
+
+test("cannot show another user's order", function (): void {
+    $order = Order::factory()->create();
+
+    actingAs(User::factory()->withPermissions(Permission::ViewOrders)->create())
+        ->getJson("/api/v1/orders/{$order->ulid}")
+        ->assertForbidden();
+});
+
+test('can create an order', function (): void {
+    $user = User::factory()->withPermissions(Permission::CreateOrders)->create();
     $product = Product::factory()->create();
 
-    $response = actingAs($user)
-        ->postJson('/api/orders', [
-            'customer_email' => 'test@example.com',
-            'items' => [
-                ['product_id' => $product->id, 'quantity' => 2],
-            ],
-        ]);
+    actingAs($user)
+        ->postJson('/api/v1/orders', [
+            'customer_email' => 'customer@example.com',
+            'items' => [['product_ulid' => $product->ulid, 'quantity' => 2]],
+        ])
+        ->assertCreated();
 
-    $response->assertCreated()
-        ->assertJsonStructure([
-            'data' => ['id', 'status', 'items'],
-        ]);
+    expect(Order::query()->sole())
+        ->user_id->toBe($user->id)
+        ->customer_email->toBe('customer@example.com');
 });
 ```
 
-### Unit Tests (Actions)
+`withPermissions()` stands for however the project's factories grant a permission. Each test signs in a user the route's `->can()` lets through, so it reaches the code it's testing; the `cannot …` test differs from its `can …` twin in one thing only (here, ownership).
 
-Test **domain logic in isolation**:
+## HTTP tests
+
+- **One file per controller**, in `tests/Feature/{Surface}/`, named after it without the suffix: `OrderController` → `OrderTest.php`, `CancelOrderController` → `CancelOrderTest.php`.
+- **Unauthenticated first.** The file opens with one top-level request per route, asserting `assertUnauthorized()`. Authentication runs before binding, so the id needn't exist.
+- **Then the endpoints in controller order**: index, show, store, update, destroy. Each gets its happy path, then its validation dataset test ([laravel-validation](../laravel-validation/SKILL.md)), then its failures.
+- **Request the literal URL**, `'/api/v1/orders'`, never `route()`. The URL is what clients call; a test that builds it from the route name follows a changed path instead of catching it.
+- **Sign in the way the project's tests already do.** Where the project has no helper, `actingAs($user)`.
+- **Every route's `->can()` gets a `cannot …` test** with a user who lacks the ability, asserting `assertForbidden()`. The policy's own logic is unit-tested ([laravel-policies](../laravel-policies/SKILL.md)).
+- **Assert the response and the change.** `assertJson()` with an `AssertableJson` closure for the fields the endpoint promises, then the database. A business-rule failure asserts its status and message ([laravel-exceptions](../laravel-exceptions/SKILL.md)).
+
+## Models, builders and factories
+
+- **A model test covers what the model computes**: accessors, `is{State}()` helpers and capabilities, casts that transform a value. Relationships and attributes Laravel provides need no test.
+- **A builder method is tested with rows on both sides of its condition**, asserting exactly the matching ones come back. A constraint that matches everything passes any test whose rows all match.
 
 ```php
-it('calculates order total correctly', function () {
-    $order = Order::factory()->create();
-    $order->items()->createMany([
-        ['price' => 1000, 'quantity' => 2],
-        ['price' => 1500, 'quantity' => 1],
-    ]);
+test('will only return paid orders', function (): void {
+    $paid = Order::factory()->paid()->create();
+    Order::factory()->pending()->create();
 
-    $total = resolve(CalculateOrderTotalAction::class)($order);
-
-    expect($total)->toBe(3500);
+    expect(Order::query()->wherePaid()->pluck('id')->all())->toBe([$paid->id]);
 });
 ```
 
-## Avoiding Brittle Tests
+- **Every model has a factory whose `definition()` makes a valid row**, with related models from their own factories: `'user_id' => User::factory()`.
+- **One state method per model state**, setting every column that state implies: `shipped()` sets `shipped_at` and `paid_at`, so a shipped order is shipped all the way through ([laravel-state-machines](../laravel-state-machines/SKILL.md)).
+- **Tests call states, never spell out columns.** `Order::factory()->shipped()->create()`. Named variants (`express()`) and `with{Relation}()` methods cover other common shapes; `for($user)` and `has()` cover a one-off relation.
 
-Brittle tests break when implementation changes, even if behavior is correct.
+Read [references/factories.md](references/factories.md) when writing or extending a model factory.
 
-### Signs of Brittle Tests
+## Fakes and mocks
 
-- Too many mocks
-- Testing implementation details
-- Hardcoded values everywhere
-- Complex setup with many steps
-- Tests break with refactoring
+| When the code under test … | The test |
+|---|---|
+| calls another action | `mock(ReleaseStockAction::class)->shouldReceive('__invoke')`, per [laravel-actions](../laravel-actions/SKILL.md) |
+| calls a service | `Shipping::shouldReceive('cancelShipment')` on its facade, or `mock(ShippingManager::class)` when it injects the manager; the driver's own test uses Saloon fixtures, per [laravel-services](../laravel-services/SKILL.md) |
+| dispatches an event | `Event::fake([OrderShipped::class])`, then `Event::assertDispatched(fn (OrderShipped $event): bool => $event->order->is($order))` |
+| queues a job | `Queue::fake()`, then `Queue::assertPushed(fn (ExpireOrderJob $job): bool => $job->order->is($order))`; the job's own test is in [laravel-jobs](../laravel-jobs/SKILL.md) |
+| writes files | `Storage::fake('documents')` |
+| calls a package facade that offers `fake()` | that fake, not a mock |
 
-### How to Avoid Brittleness
+## Test environment
 
-#### 1. Use Real Instances When Possible
+- **A real database on the production engine**: a separate test database, configured in `.env-testing` ([laravel-providers](../laravel-providers/SKILL.md) owns the env templates). `phpunit.xml` sets only `APP_ENV=testing`. SQLite in memory hides the engine's differences in JSON, dates and constraints.
+- **Reset with `FastRefreshDatabase`** (plannr/laravel-fast-refresh-database), applied in `tests/Pest.php`. Like `RefreshDatabase`, it wraps each test in a transaction; it re-migrates only when a migration file has changed.
+- **No real outbound requests.** `TestCase::setUp()` calls `Http::preventStrayRequests()`; once the app has a Saloon connector, `tests/Pest.php` calls `Saloon\Config::preventStrayRequests()` once, at the top, because the first doesn't catch Saloon's requests. A request with no fake then throws.
+- **The queue is `sync` in `.env-testing`**, so a dispatched job runs inline unless the test fakes the queue.
+- **Run the suite through the composer scripts**, `composer pest` or `composer pest-dirty` ([laravel-quality](../laravel-quality/SKILL.md) owns them, and the architecture test).
 
-```php
-// ✅ Good - Use real instances
-it('calculates order total', function () {
-    $order = Order::factory()->create();
-    $order->items()->createMany([
-        ['price' => 1000, 'quantity' => 2],
-        ['price' => 500, 'quantity' => 1],
-    ]);
+Read [references/test-setup.md](references/test-setup.md) when the project has no `tests/Pest.php` or `TestCase` setup yet.
 
-    $total = resolve(CalculateOrderTotalAction::class)($order);
+## Reach for these when the situation calls for it
 
-    expect($total)->toBe(2500);
-});
+**The app needs reference data to run**, such as roles, permissions or lookup rows. Set `protected bool $seed = true;` on the `TestCase` so every test starts with it, and never recreate it in a test. `DatabaseSeeder` then seeds reference data in every environment and demo data only in `local`. `FastRefreshDatabase` checksums migration files only, so after changing a seeder delete `storage/app/migration-checksum_*.txt`.
 
-// ❌ Bad - Mock everything
-it('calculates order total', function () {
-    $item1 = Mockery::mock(OrderItem::class);
-    $item1->shouldReceive('getPrice')->andReturn(1000);
-    // ... too much mocking
-});
-```
-
-#### 2. Test Behavior, Not Implementation
+**Roles get different answers from the same routes.** One `describe()` per role signs in with `beforeEach()` (granting the role however the project's factories do) and lists each route with that role's status:
 
 ```php
-// ✅ Good - Test the behavior
-it('sends welcome email when user registers', function () {
-    Mail::fake();
-
-    $data = RegisterUserData::testFactory()->make();
-    $user = resolve(RegisterUserAction::class)($data);
-
-    Mail::assertSent(WelcomeEmail::class, function ($mail) use ($user) {
-        return $mail->hasTo($user->email);
+describe('permissions: viewer', function (): void {
+    beforeEach(function (): void {
+        Order::factory()->create(['ulid' => '01jbx3vq7rk9z2m4n6p8s0t1w3']);
+        actingAs(User::factory()->viewer()->create());
     });
-});
 
-// ❌ Bad - Test implementation details
-it('sends welcome email when user registers', function () {
-    $mailer = Mockery::mock(Mailer::class);
-    $mailer->shouldReceive('send')
-        ->with(Mockery::on(function ($email) {
-            return $email->template === 'emails.welcome';
-        }));
-    // Too specific, breaks if template name changes
+    getJson('/api/v1/orders/01jbx3vq7rk9z2m4n6p8s0t1w3')->assertOk();
+    postJson('/api/v1/orders')->assertForbidden();
 });
 ```
 
-#### 3. Use Factories Instead of Hardcoded Data
+A role that may create asserts `assertUnprocessable()` on the same empty `POST`: it got past authorization, and the test needed no payload.
 
-```php
-// ✅ Good - Use factories
-$user = User::factory()->create();
-$data = ProfileData::testFactory()->make();
+**A large structure that should change only on purpose**, such as a full API response or a model's serialised attributes. `expect($response)->toMatchSnapshot()`, built from fixed values (ids, ulids, dates) so it's stable between runs. Regenerate with `--update-snapshots` only for an intended change.
 
-// ❌ Bad - Hardcoded data
-$data = new ProfileData(
-    firstName: 'John',
-    lastName: 'Doe',
-    phone: '555-1234',
-    bio: 'Test bio',
-);
-```
+**A test that is one expectation.** Write it higher-order: `test('will not let a shipped order be edited')->expect(fn (): bool => Order::factory()->shipped()->make()->isEditable())->toBeFalse();`
 
-#### 4. Minimize Mocking
+**Setup whose own model events would start work the test isn't about.** Create it with `createQuietly()`; otherwise `create()`.
 
-**Rule of thumb:** Mock collaborators, not data.
+## Anti-patterns
 
-```php
-// ✅ Good - Mock the notification service (collaborator)
-$notifier = mock(NotificationService::class);
-$notifier->shouldReceive('send')->once();
-swap(NotificationService::class, $notifier);
+- ❌ `it('creates an order', ...)`, or `// Arrange` / `// Act` / `// Assert` comments.
+- ❌ `swap(ReleaseStockAction::class, $mock)` after `mock()`, or `Mockery::mock(ReleaseStockAction::class)` for a class the container builds.
+- ❌ `Mockery::mock(Order::class)`, or `CreateOrderData::from([...])` in a test.
+- ❌ `expect(fn () => resolve(CancelOrderAction::class)($order))->toThrow(OrderException::class)` as the whole test.
+- ❌ `Event::fake();` with no list.
+- ❌ `Order::factory()->create(['state' => OrderShipped::class, 'shipped_at' => now()])`.
+- ❌ `$order->fresh()`, `Config::set(...)`, `Carbon::setTestNow(...)`.
+- ❌ `getJson(route('api-v1.order.show', $order))`.
+- ❌ `assertJsonStructure([...])` as the only check on a response.
+- ❌ Switching a service to its `NullDriver` to keep it out of a test. Mock its facade.
+- ❌ An in-memory SQLite test database for an app that runs on MySQL, MariaDB or Postgres.
 
-resolve(ShipOrderAction::class)($order);
+## Related
 
-// ❌ Bad - Mock the data (order, user)
-$order = Mockery::mock(Order::class);
-// ... mocking data objects makes test brittle
-```
-
-## Common Testing Patterns
-
-### Testing State Transitions
-
-```php
-it('transitions order from pending to paid', function () {
-    $order = Order::factory()->pending()->create();
-
-    resolve(MarkOrderAsPaidAction::class)($order);
-
-    expect($order->fresh()->status)->toBe(OrderStatus::Paid)
-        ->and($order->fresh()->paid_at)->not->toBeNull();
-});
-```
-
-### Testing Relationships
-
-```php
-it('creates order with items', function () {
-    $user = User::factory()->create();
-    $products = Product::factory()->count(3)->create();
-
-    $data = CreateOrderData::from([
-        'customer_email' => 'test@example.com',
-        'items' => $products->map(fn ($p) => [
-            'product_id' => $p->id,
-            'quantity' => 2,
-        ])->all(),
-    ]);
-
-    $order = resolve(CreateOrderAction::class)($user, $data);
-
-    expect($order->items)->toHaveCount(3);
-});
-```
-
-### Testing Transactions
-
-```php
-it('rolls back transaction on failure', function () {
-    $user = User::factory()->create();
-
-    $data = CreateOrderData::from([
-        'customer_email' => 'test@example.com',
-        'items' => [
-            ['product_id' => 99999, 'quantity' => 1], // Non-existent product
-        ],
-    ]);
-
-    expect(fn () => resolve(CreateOrderAction::class)($user, $data))
-        ->toThrow(Exception::class);
-
-    assertDatabaseCount('orders', 0);
-    assertDatabaseCount('order_items', 0);
-});
-```
-
-
-## Quick Reference
-
-### Test Structure
-
-```php
-it('does something', function () {
-    // Arrange - Set up the world with declarative factories
-    $model = Model::factory()->active()->create();
-    $data = Data::testFactory()->make();
-
-    // Act - Perform the operation
-    $result = resolve(Action::class)($model, $data);
-
-    // Assert - Verify the results
-    expect($result)->/* assertions */;
-});
-```
-
-### Mocking Pattern
-
-```php
-use function Pest\Laravel\mock;
-use function Pest\Laravel\swap;
-
-// Mock a dependency action
-$mockAction = mock(YourDependencyAction::class);
-$mockAction->shouldReceive('__invoke')
-    ->once()
-    ->with(/* expected params */)
-    ->andReturn(/* return value */);
-
-// Swap into container
-swap(YourDependencyAction::class, $mockAction);
-
-// Resolve action under test - container injects mocked dependencies
-$result = resolve(ActionUnderTest::class)(/* params */);
-```
-
-### Database Assertions
-
-```php
-use function Pest\Laravel\assertDatabaseHas;
-use function Pest\Laravel\assertDatabaseCount;
-
-assertDatabaseHas('orders', ['id' => $order->id]);
-assertDatabaseCount('orders', 1);
-```
+- [laravel-actions](../laravel-actions/SKILL.md) — testing an action and mocking the actions it composes
+- [laravel-jobs](../laravel-jobs/SKILL.md) — job and listener tests
+- [laravel-services](../laravel-services/SKILL.md) — driver tests with Saloon fixtures, facade mocks for callers
+- [laravel-validation](../laravel-validation/SKILL.md) — validation dataset tests and `RequestDataProviderItem`
+- [laravel-policies](../laravel-policies/SKILL.md) — policy unit tests
+- [laravel-state-machines](../laravel-state-machines/SKILL.md) — transition tests
+- [laravel-exceptions](../laravel-exceptions/SKILL.md) — asserting a domain exception and its message
+- [laravel-dtos](../laravel-dtos/SKILL.md) — DTO test factories
+- [laravel-models](../laravel-models/SKILL.md) — `#[UseFactory]` and model helpers
+- [laravel-query-builders](../laravel-query-builders/SKILL.md) — the builder methods under test
+- [laravel-quality](../laravel-quality/SKILL.md) — the architecture test, composer scripts and strict types
+- [laravel-multi-tenancy](../laravel-multi-tenancy/SKILL.md) — the harness a multi-tenant app uses in place of plain `FastRefreshDatabase`
+- [laravel-providers](../laravel-providers/SKILL.md) — `.env-testing` and the other env templates

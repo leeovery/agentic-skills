@@ -13,7 +13,6 @@
         },
         "mb_str_functions": true,
         "modernize_types_casting": true,
-        "new_with_parentheses": false,
         "no_superfluous_elseif": true,
         "no_useless_else": true,
         "ordered_class_elements": {

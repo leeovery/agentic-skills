@@ -19,11 +19,10 @@ declare(strict_types=1);
 
 namespace App\Booters;
 
+use App\Http\Middleware\EnsureClientVersion;
 use App\Http\Middleware\LogApiRequest;
-use App\Http\Middleware\VerifySdkSignature;
+use App\Http\Middleware\VerifyWebhookSignature;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Routing\Middleware\SubstituteBindings;
-use Illuminate\Routing\Middleware\ThrottleRequests;
 
 class MiddlewareBooter
 {
@@ -35,21 +34,19 @@ class MiddlewareBooter
             ->api(append: [
                 LogApiRequest::class,
             ])
-            ->group('partner_v1', [
-                ThrottleRequests::class.':partner',
-                SubstituteBindings::class,
-                LogApiRequest::class,
+            ->group('api_v1', [
+                EnsureClientVersion::class,
             ])
             ->alias([
-                'sdk-signed' => VerifySdkSignature::class,
+                'webhook-signed' => VerifyWebhookSignature::class,
             ]);
     }
 }
 ```
 
 - Add to the stock `web` and `api` groups with `append:`. Don't redefine them.
-- A route surface that needs a different stack gets its own named group (`->group('partner_v1', [...])`), which the routes apply by name.
-- `trustProxies('*')` belongs here when the app runs behind a load balancer. `throttleApi(redis: true)` belongs here when Redis backs the cache.
+- A route surface that needs more than the stock group gets its own named group, `->group('api_v1', [...])`, stacked after the stock one where [laravel-routing](../../laravel-routing/SKILL.md) registers the surface: `Route::middleware(['api', 'api_v1'])`. It lists only what it adds; bindings and the API throttle come from `api`.
+- `trustProxies('*')` belongs here when the app runs behind a load balancer. `throttleApi()` throttles the `api` group with the limiter named `api` (`RateLimiterName::Api`, defined in `AppServiceProvider`); pass `redis: true` when Redis backs the cache. A surface that needs its own limit adds `ThrottleRequests::using(RateLimiterName::Partner->value)` to its group instead.
 - Don't re-add what Laravel already runs: `HandleCors` is global middleware, and the `api` group has no CSRF check to exclude routes from.
 
 ## ScheduleBooter

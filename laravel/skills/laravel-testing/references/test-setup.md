@@ -1,0 +1,64 @@
+# Test setup
+
+What a project needs before its first test. A project that already has `tests/Pest.php` and `tests/TestCase.php` keeps them; add to them rather than replacing them.
+
+```bash
+composer require --dev pestphp/pest pestphp/pest-plugin-laravel plannr/laravel-fast-refresh-database
+```
+
+`tests/Pest.php`:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use Plannr\Laravel\FastRefreshDatabase\Traits\FastRefreshDatabase;
+use Saloon\Config as SaloonConfig;
+use Tests\TestCase;
+
+SaloonConfig::preventStrayRequests();
+
+uses(TestCase::class, FastRefreshDatabase::class)->in('Feature', 'Unit', 'Architecture');
+```
+
+Saloon's guard is global and adds a check each time it's called, so it runs once here rather than per test. Leave it out until the app has a Saloon connector.
+
+In a multi-tenant app, `Pest.php` applies [laravel-multi-tenancy](../../laravel-multi-tenancy/SKILL.md)'s `FastRefreshDatabaseWithTenancy` in place of `FastRefreshDatabase`, never beside it.
+
+Below the `uses()` call go the project's own test helpers, as plain functions: one per way a test signs in, when the app has more than one kind of user or guard, and any custom expectation added with `expect()->extend()`. Every test file then shares them, and the next agent finds them in one place.
+
+`tests/TestCase.php`:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Tests;
+
+use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\Http;
+
+abstract class TestCase extends BaseTestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Http::preventStrayRequests();
+    }
+}
+```
+
+Add `protected bool $seed = true;` when the app needs reference data to run.
+
+`phpunit.xml` sets the environment and nothing else, so every test setting lives in one place:
+
+```xml
+<php>
+    <env name="APP_ENV" value="testing"/>
+</php>
+```
+
+Laravel then loads `.env.testing`, copied from the committed `.env-testing` template ([laravel-providers](../../laravel-providers/SKILL.md)). That template points `DB_DATABASE` at a test database on the same engine as production, sets `QUEUE_CONNECTION=sync`, and keeps each service on its real driver with placeholder credentials ([laravel-services](../../laravel-services/SKILL.md)).

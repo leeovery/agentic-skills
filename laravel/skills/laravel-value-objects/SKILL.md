@@ -35,6 +35,9 @@ readonly class Coordinate implements Castable, Stringable
 {
     private const float EARTH_RADIUS_KM = 6371.0;
 
+    /** Decimal places stored, about 1cm: the precision two coordinates are compared at. */
+    private const int PRECISION = 7;
+
     public function __construct(
         public float $latitude,
         public float $longitude,
@@ -70,8 +73,8 @@ readonly class Coordinate implements Castable, Stringable
 
     public function equals(self $other): bool
     {
-        return $this->latitude === $other->latitude
-            && $this->longitude === $other->longitude;
+        return round($this->latitude, self::PRECISION) === round($other->latitude, self::PRECISION)
+            && round($this->longitude, self::PRECISION) === round($other->longitude, self::PRECISION);
     }
 
     public function distanceInKmTo(self $other): float

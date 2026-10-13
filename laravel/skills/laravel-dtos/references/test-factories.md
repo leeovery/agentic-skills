@@ -56,7 +56,7 @@ class CreateOrderDataFactory extends DataTestFactory
 
 - **Keys are property names**, camelCase. `make()` passes the merged array to `CreateOrderData::from()`.
 - **Child DTOs come from their own factories**, so a change to `OrderItemData` is made in one place.
-- **Dates are date objects**, never formatted strings. laravel-data turns a `DateTime` into the property's `CarbonImmutable`, so the factory doesn't depend on `date_format`.
+- **Dates are date objects**, never formatted strings, so the factory never has to know the format. `make()` goes through `from()`, which formats each date with `date_format` and parses it back into the property's `CarbonImmutable`: with `DATE_ATOM` that keeps the seconds and offset and drops microseconds, so compare factory dates to the second.
 - **A state takes an array.** Unlike an Eloquent factory state it receives no `$attributes`, so it can't derive one value from another.
 - **The DTO links back** with `/** @see \Database\Factories\Data\CreateOrderDataFactory */`.
 

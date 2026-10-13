@@ -147,13 +147,13 @@ class Order extends Model
 
 ```php
 ConditionalRouteBinder::bind('order')
-    ->forRoute('api-v1.*', fn (string $value): Order => Order::query()
-        ->where('ulid', $value)
+    ->forRoute('api-v1.*', fn (string $value): Order => (new Order)
+        ->resolveRouteBindingQuery(Order::query(), $value, 'ulid')
         ->withRelations()
         ->firstOrFail());
 ```
 
-A matched resolver replaces implicit binding entirely: it looks up by the column itself and fails with `firstOrFail()`, and the route's `->withTrashed()` and parent scoping don't apply to it.
+A matched resolver replaces implicit binding entirely. Build its query on `resolveRouteBindingQuery()`, as above, so the public-id concern still turns a malformed id into a 404 before the database sees it; the route's `->withTrashed()` and parent scoping don't apply to it.
 
 ## Anti-patterns
 

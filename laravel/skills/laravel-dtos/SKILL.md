@@ -72,7 +72,7 @@ class CreateOrderDataTransformer
             isGift: $request->boolean('is_gift'),
             items: $request->collect('items')->keys()->map(
                 fn (int $index): OrderItemData => new OrderItemData(
-                    productId: $request->integer("items.{$index}.product_id"),
+                    productUlid: $request->string("items.{$index}.product_ulid")->value(),
                     quantity: $request->integer("items.{$index}.quantity"),
                 ),
             ),
@@ -101,7 +101,7 @@ class CreateOrderData extends Data
             isGift: $request->boolean('is_gift'),
             items: $request->collect('items')->keys()->map(
                 fn (int $index): OrderItemData => new OrderItemData(
-                    productId: $request->integer("items.{$index}.product_id"),
+                    productUlid: $request->string("items.{$index}.product_ulid")->value(),
                     quantity: $request->integer("items.{$index}.quantity"),
                 ),
             ),
@@ -130,7 +130,7 @@ return [
 ```
 
 - **`validation_strategy` is the switch**, not an override of `pipeline()` on the base class. One config line covers every creation path, and a hand-copied pipe list silently drops any pipe the package adds in an upgrade.
-- **`date_format` is what DTOs write dates as**, in `toArray()`, JSON and Data-cast model columns, and what they parse back. Request dates never reach it, because `$request->date()` has already parsed them, and test factories pass date objects so they don't depend on it either.
+- **`date_format` is what DTOs write dates as**, in `toArray()`, JSON and Data-cast model columns, and what they parse back. A transformer's dates never reach it: it calls the constructor with what `$request->date()` parsed. Anything filled through `from()` does, test factories included: laravel-data formats a date object with the first entry and parses it back, so that entry must be a full date-time with its offset. `DATE_ATOM` keeps the seconds and timezone and drops microseconds.
 
 ## Test factories
 

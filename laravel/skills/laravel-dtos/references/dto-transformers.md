@@ -25,7 +25,7 @@ class OrderItemDataCollectionTransformer
     {
         return $request->collect('items')->keys()->map(
             fn (int $index): OrderItemData => new OrderItemData(
-                productId: $request->integer("items.{$index}.product_id"),
+                productUlid: $request->string("items.{$index}.product_ulid")->value(),
                 quantity: $request->integer("items.{$index}.quantity"),
             ),
         );
@@ -91,7 +91,7 @@ test('will map a create order request', function (): void {
         'delivery_date' => '2026-03-01',
         'priority' => 'express',
         'is_gift' => '1',
-        'items' => [['product_id' => '7', 'quantity' => '2']],
+        'items' => [['product_ulid' => '01JAB3K4M5N6P7Q8R9S0T1V2W3', 'quantity' => '2']],
     ]);
 
     $data = CreateOrderDataTransformer::fromRequest($request);
@@ -102,7 +102,7 @@ test('will map a create order request', function (): void {
         ->isGift->toBeTrue()
         ->and($data->deliveryDate->toDateString())->toBe('2026-03-01')
         ->and($data->items->sole())
-        ->productId->toBe(7)
+        ->productUlid->toBe('01JAB3K4M5N6P7Q8R9S0T1V2W3')
         ->quantity->toBe(2);
 });
 ```
