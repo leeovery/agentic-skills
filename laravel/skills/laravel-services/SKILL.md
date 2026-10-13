@@ -32,7 +32,7 @@ tests/Fixtures/Saloon/shipping/
 - **Drivers implement the service's contract.** `Contracts/{Name}Driver`. Methods take and return typed values and DTOs, never a Saloon `Response` or a raw payload array, so callers can't tell one driver from another.
 - **One driver per API version.** `ShippingV1Driver`, config key `shipping_v1`, requests in `Requests/V1/`. A new API version is a new driver beside the old one, switched by config.
 - **Config in `config/{name}.php`.** A `default` read from `{NAME}_DRIVER` and one `drivers` entry per driver. The manager passes the values into the driver's constructor as named arguments; a driver never calls `config()`, so a test can build it directly.
-- **Every integration has a `NullDriver`.** It returns empty but valid results and does nothing else. Local work that shouldn't reach the API sets `SHIPPING_DRIVER=null`. It isn't the test driver: see Testing.
+- **Every integration has a `NullDriver`.** It returns empty but valid results and does nothing else. Local work that shouldn't reach the API sets `SHIPPING_DRIVER=null`. `env()` reads that value as PHP `null`, so `getDefaultDriver()` falls back to `'null'`. It isn't the test driver: see Testing.
 - **One deferred provider per service, and it only binds.** Bind the manager, alias it to `'{name}-manager'`, and list both in `provides()`. Its `boot()` stays empty: a deferred provider boots only when the manager is first resolved, so the service's rate limiter goes in `AppServiceProvider::bootRateLimiters()` with the rest ([laravel-providers](../laravel-providers/SKILL.md)).
 - **The facade resolves the alias and mixes in the contract.** `getFacadeAccessor()` returns `'shipping-manager'`, and `@mixin ShippingDriver` gives every driver method to the IDE with no `@method` list to keep in step. Actions call it, `Shipping::cancelShipment(...)`, or inject the service where that reads better ([laravel-actions](../laravel-actions/SKILL.md)).
 - **Saloon for HTTP.** One connector per API in `Connector/`, one request class per endpoint in `Requests/`. Never `Http::` or a hand-built Guzzle client in a driver.
@@ -57,7 +57,7 @@ class ShippingManager extends Manager
 {
     public function getDefaultDriver(): string
     {
-        return $this->config->get('shipping.default');
+        return $this->config->get('shipping.default') ?? 'null';
     }
 
     public function createShippingV1Driver(): ShippingV1Driver
