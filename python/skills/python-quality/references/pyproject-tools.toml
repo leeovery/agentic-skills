@@ -1,12 +1,13 @@
-# The drop-in tool config. Copy these tables into pyproject.toml, then rename
-# the example project, shop, to yours: the per-file ignore on src/shop/cli.py
-# (the module that holds main), source_pkgs, root_package, and the packages in
-# the two import-linter contracts.
+# The drop-in tool config: the example shop's own tool tables. Copy them into
+# pyproject.toml, then rename the example project, shop, to yours: the per-file
+# ignores on src/shop/cli.py (the module that holds main) and src/shop/processes.py
+# (the one adapter that runs a process; delete its line if none does), source_pkgs,
+# root_package, and the packages in the two import-linter contracts.
 #
 # Each setting carries its reason. A rule family joins with its reason, once its
 # findings are fixed. Never loosen a setting to get a run green: fix the code, or
 # suppress the one line with its rule and why. The dependency groups that install
-# these tools are python-project's.
+# these tools, pytest-benchmark and mutmut among them, are python-project's.
 
 [tool.ruff.lint]
 # ruff's default set (correctness, suspicious, complexity, performance, style),
@@ -69,6 +70,8 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseS
 # main reads the environment and the clock: the one file the ban list allows them.
 # The ignore lifts the whole list, so it names the composition root and nothing else.
 "src/shop/cli.py" = ["TID251"]
+# The one adapter that runs a process. It reads neither the clock nor the environment.
+"src/shop/processes.py" = ["TID251"]
 # pytest rewrites assert into the failure message.
 "tests/**" = ["S101"]
 
@@ -85,6 +88,9 @@ enabled-ignores = ["pyrefly"]
 # A call to an API the stubs mark deprecated fails: it is only a hidden warning by
 # default, and pytest sees a deprecation only when the code runs.
 deprecated = "error"
+# A match that leaves out one of an enum's members fails: it is only a hidden warning
+# by default, so a member added later falls through every match that forgot it.
+non-exhaustive-match = "error"
 
 [tool.pytest]
 # Unknown markers and config keys, xfails that pass, and duplicate parametrize ids
@@ -100,6 +106,8 @@ addopts = [
     "--disable-socket",
     # asyncio's event loop wakes itself through a Unix socket pair.
     "--allow-unix-socket",
+    # The gate runs each benchmark once, as a test; measure with --benchmark-enable.
+    "--benchmark-disable",
 ]
 # A warning fails the test that raised it. A third-party warning you can't fix
 # yet gets an "ignore:<message>:<category>:<module>" line after "error", with
@@ -133,10 +141,13 @@ type = "layers"
 # joined by | are independent: none imports another.
 layers = [
     "shop.cli",
-    "shop.payments | shop.storage | shop.settings",
-    "shop.display",
+    # The other edges sit beside the settings, so only main can read them.
+    "shop.api | shop.consumers | shop.settings",
+    "shop.payments | shop.storage | shop.processes",
+    "shop.display | shop.shipping | shop.settlement",
     "shop.order",
-    "shop.money",
+    # The correlation id sits below everything, so any module may read it.
+    "shop.money | shop.secret | shop.correlation",
 ]
 # An ignore_imports entry that matches no import fails, so it's deleted once fixed.
 unmatched_ignore_imports_alerting = "error"
@@ -148,10 +159,22 @@ code that needs it and let main pass the implementation.
 [[tool.importlinter.contracts]]
 name = "The domain imports no framework, client or wire library"
 type = "forbidden"
-source_modules = ["shop.order", "shop.money"]
+source_modules = [
+    "shop.shipping",
+    "shop.settlement",
+    "shop.order",
+    "shop.money",
+    "shop.secret",
+]
 forbidden_modules = ["pydantic", "pydantic_settings", "httpx2", "typer"]
 unmatched_ignore_imports_alerting = "error"
 broken_contract_guidance = """
 Parse at the edge into the domain's own frozen dataclasses, and reach an outside
 service through a Protocol the domain declares and an adapter implements.
 """
+
+[tool.mutmut]
+# Mutation testing is an audit, run now and then: uv run --group mutation mutmut run.
+source_paths = ["src/"]
+# The guards read the source, which mutmut rewrites, so they sit the audit out.
+pytest_add_cli_args_test_selection = ["tests/", "--ignore=tests/guards"]

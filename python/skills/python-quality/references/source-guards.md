@@ -226,7 +226,7 @@ A module body declares: imports, constants, functions, classes and its logger. A
 
 - Decorators and default values run with the `def`; the body doesn't. A class body runs.
 - From 3.14 annotations are evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)), so a call inside one doesn't run at import, and nor does a `type` alias's value.
-- `DECLARATIONS` are calls that build a type, a logger, a context variable or a constant and touch nothing outside the process: `frozenset`, `tuple` and `re.compile` for constants, and `ContextVar` because the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for one at module level. A name joins only on that test, with the project's own: `SettingsConfigDict` is pydantic-settings' declaration of where settings come from. `TypeVar` stays out: on a 3.12 floor a type parameter replaces it (`UP046`, `UP047`).
+- `DECLARATIONS` are calls that build a type, a logger, a context variable or a constant and touch nothing outside the process: `frozenset`, `tuple` and `re.compile` for constants, and `ContextVar` because the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for one at module level. A name joins only on that test, with the project's own: `ConfigDict` and `SettingsConfigDict` are pydantic's declarations of how a boundary model parses and where settings come from. `TypeVar` stays out: on a 3.12 floor a type parameter replaces it (`UP046`, `UP047`).
 - A name matches as it's written, `re.compile` not `compile`, and a call among an allowed call's arguments is still checked, so `frozenset(open(path))` fails.
 - A `__main__.py` is run, never imported, so it's skipped.
 
@@ -261,6 +261,7 @@ DECLARATIONS = frozenset(
         "field",
         "logging.getLogger",
         "ContextVar",
+        "ConfigDict",
         "SettingsConfigDict",
         "frozenset",
         "re.compile",
@@ -363,6 +364,7 @@ def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
         from datetime import timedelta
         from typing import NewType
 
+        from pydantic import BaseModel, ConfigDict
         from pydantic_settings import BaseSettings, SettingsConfigDict
 
         logger = logging.getLogger(__name__)
@@ -380,6 +382,11 @@ def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
             grace: timedelta = timedelta(days=14)
 
 
+        class PriceRequest(BaseModel):
+            model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+            sku: Sku
+
+
         @dataclass(frozen=True, slots=True)
         class Basket:
             skus: list[Sku] = field(default_factory=list)
@@ -387,7 +394,7 @@ def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
     )
 
     assert report(calls_at_import(tmp_path)) == [
-        f"src/shop/prices.py:18: calls open at import: {FIX}",
+        f"src/shop/prices.py:19: calls open at import: {FIX}",
     ]
 ```
 
@@ -549,7 +556,7 @@ The [SKILL.md](../SKILL.md#pattern) pattern. A test that needs `monkeypatch.seta
 
 ## Guard 6: domain classes named for their job
 
-An operation is named by its verb, a value by what it is ([python-actions](../../python-actions/SKILL.md)). Only the domain packages are read: an adapter subclassing `logging.Handler` is rightly a Handler.
+An operation is named by its verb, a value by what it is ([python-actions](../../python-actions/SKILL.md)). Only the domain packages are read, the ones the import-linter `forbidden` contract names: an adapter subclassing `logging.Handler` is rightly a Handler.
 
 ```python
 # tests/guards/test_class_names.py
@@ -571,7 +578,13 @@ from tests.guards.source import (
 )
 
 # The domain packages. An adapter may need a suffix: a logging.Handler subclass is a Handler.
-DOMAIN = ("src/shop/order/", "src/shop/money.py")
+DOMAIN = (
+    "src/shop/shipping/",
+    "src/shop/settlement/",
+    "src/shop/order/",
+    "src/shop/money.py",
+    "src/shop/secret.py",
+)
 SUFFIXES = ("Service", "Manager", "Handler", "Processor")
 FIX = "name an operation by its verb (Canceller), a value by what it is"
 

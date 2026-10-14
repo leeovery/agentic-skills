@@ -114,7 +114,7 @@ A failing guard prints one line per breach, `tests/test_money.py:15: patches wit
 ## References
 
 - **[gates.md](references/gates.md)** — read when setting up a project or CI, or before reporting done: the five commands, what each catches, the run-fix-rerun loop, a CI script, and what the drop-in's rules expect.
-- **[pyproject-tools.toml](references/pyproject-tools.toml)** — the drop-in tool tables; read when creating or changing `[tool.ruff]`, `[tool.pyrefly]`, `[tool.pytest]`, `[tool.coverage]` or `[tool.importlinter]`.
+- **[pyproject-tools.toml](references/pyproject-tools.toml)** — the drop-in tool tables; read when creating or changing `[tool.ruff]`, `[tool.pyrefly]`, `[tool.pytest]`, `[tool.coverage]`, `[tool.importlinter]` or `[tool.mutmut]`.
 - **[source-guards.md](references/source-guards.md)** — read when a rule must hold everywhere and no linter can say it: the helpers, allowances, six worked guards, and proving a guard fails.
 - **[modern-python.md](references/modern-python.md)** — read when raising `requires-python`, or unsure an API exists: the idioms from 3.10 to 3.15 with their What's New and ruff rule, and what's deprecated or gone.
 
