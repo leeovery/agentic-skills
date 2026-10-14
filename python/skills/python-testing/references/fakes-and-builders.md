@@ -16,7 +16,9 @@ NOW = datetime(2026, 10, 14, 9, 30, tzinfo=UTC)
 def make_line(*, sku: str = "mug", quantity: int = 2, unit_minor: int = 1250) -> Line:
     """A line of two £12.50 mugs, unless told otherwise."""
     return Line(
-        sku=sku, quantity=quantity, unit_price=Money(minor=unit_minor, currency="GBP")
+        sku=sku,
+        quantity=quantity,
+        unit_price=Money(minor=unit_minor, currency=Currency.GBP),
     )
 
 
@@ -75,10 +77,14 @@ class FakeOrders:
         except KeyError:
             raise OrderNotFound(order_id) from None
 
+    ...
+
     def save(self, order: Order) -> None:
         """Hold the order and record that it was saved."""
         self.orders[order.id] = order
         self.saved.append(order)
+
+    ...
 
 
 @dataclass(slots=True)
@@ -95,9 +101,9 @@ class FakeRefunder:
             raise self.error
 ```
 
-- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, so the code under test meets the same exception in a test as in production.
+- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, so the code under test meets the same exception in a test as in production. The methods left out above, the other consumers' queries and the transaction, answer as the real store does too ([python-protocols](../../python-protocols/SKILL.md)).
 - **It doesn't inherit from the Protocol.** It matches it by shape, and pyrefly checks the match where the test passes it to `Canceller`. A Protocol method the fake lacks fails the type check, not a test run.
-- **Check what it recorded as a value:** `assert payments.refunded == [(PaymentId("pay-1"), Money(minor=2500, currency="GBP"))]`. Check the order or the number of calls only when they are the behaviour.
+- **Check what it recorded as a value:** `assert payments.refunded == [(PaymentId("pay-1"), Money(minor=2500, currency=Currency.GBP))]`. Check the order or the number of calls only when they are the behaviour.
 - **It holds no logic of its own.** Once a fake needs some, a memory implementation that lives beside the real one is the better tool ([python-protocols](../../python-protocols/SKILL.md)).
 - **It's mutable**, unlike the domain's values: a fake is test equipment that collects what happened.
 
@@ -143,22 +149,33 @@ The adapter is the one place that knows the provider's HTTP API, so it's tested 
 
 ```python
 # tests/payments/test_gateway.py
-def gateway(handler: Callable[[httpx2.Request], httpx2.Response]) -> Gateway:
-    """A Gateway whose client answers every request with handler."""
-    client = httpx2.Client(
-        base_url="https://pay.example", transport=httpx2.MockTransport(handler)
-    )
-    return Gateway(client=client)
+type Handler = Callable[[httpx2.Request], httpx2.Response]
+
+
+...
+
+
+def answers(
+    *responses: httpx2.Response | httpx2.HTTPError,
+) -> tuple[Handler, list[httpx2.Request]]:
+    """A handler giving each answer in turn, raising the errors, and the requests it saw."""
+    seen: list[httpx2.Request] = []
+    pending: Iterator[httpx2.Response | httpx2.HTTPError] = iter(responses)
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        answer = next(pending)
+        if isinstance(answer, httpx2.HTTPError):
+            raise answer
+        return answer
+
+    return handle, seen
 
 
 def test_refund_posts_the_amount_keyed_by_payment() -> None:
-    sent: list[httpx2.Request] = []
+    handler, sent = answers(httpx2.Response(201))
 
-    def accept(request: httpx2.Request) -> httpx2.Response:
-        sent.append(request)
-        return httpx2.Response(201)
-
-    gateway(accept).refund(PaymentId("pay-1"), TEN_POUNDS)
+    gateway(handler).refund(PaymentId("pay-1"), TEN_POUNDS)
 
     [request] = sent
     assert request.method == "POST"
@@ -167,7 +184,8 @@ def test_refund_posts_the_amount_keyed_by_payment() -> None:
     assert json.loads(request.content) == {"amount": 1000, "currency": "GBP"}
 ```
 
-- **The handler is the provider.** It records what was sent and answers as the provider would: a 201, a 402, a 503, or `raise httpx2.ConnectError(...)` for a provider that can't be reached.
+- **The handler is the provider.** `answers` gives each answer in turn, as the provider would: a 201, a 402, a 503, or an `httpx2.ConnectError` it raises for a provider that can't be reached. It keeps each request it was sent, for the test to read.
+- **`gateway(handler)` builds the adapter on a client over that transport,** its retry policy on a fake clock that never waits ([time.md](time.md)).
 - **Test the translation** as well as the happy path: a refused refund raises `PaymentFailed` with the payment's id, its `__cause__` the `httpx2.HTTPStatusError`.
 - **An `AsyncClient` takes the same transport,** and the test closes it with `async with`:
 
@@ -191,12 +209,17 @@ A store that writes files or a database runs for real on `tmp_path`, which pytes
 ```python
 # tests/storage/test_sqlite.py
 @pytest.fixture
-def orders(tmp_path: Path) -> Iterator[SqliteOrders]:
-    with closing(connect(tmp_path / "shop.db")) as db:
+def path(tmp_path: Path) -> Path:
+    return tmp_path / "shop.db"
+
+
+@pytest.fixture
+def orders(path: Path) -> Iterator[SqliteOrders]:
+    with closing(connect(path)) as db:
         yield SqliteOrders(db=db)
 ```
 
-This is what fixtures are for: a resource with a lifetime, opened before the test and closed after it. Pass the directory in; code that finds its own directory can't be pointed at `tmp_path`.
+This is what fixtures are for: a resource with a lifetime, opened before the test and closed after it. `path` is a fixture of its own so a test can open a second connection on the same file and see what was committed. Pass the directory in; code that finds its own directory can't be pointed at `tmp_path`.
 
 ## When a test seems to need a patch
 

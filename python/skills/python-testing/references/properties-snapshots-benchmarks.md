@@ -109,7 +109,7 @@ def test_a_500_line_order_totals(benchmark: BenchmarkFixture) -> None:
 
     total = benchmark(lambda: order.total)
 
-    assert total == Money(minor=500 * 2500, currency="GBP")
+    assert total == Money(minor=500 * 2500, currency=Currency.GBP)
 ```
 
 - **The gate runs it once, as a test.** `--benchmark-disable` in the `[tool.pytest]` `addopts` makes `benchmark(...)` call the function once and time nothing, so the assert still runs and the gate stays fast.

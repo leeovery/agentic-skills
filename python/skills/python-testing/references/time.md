@@ -34,72 +34,91 @@ def test_cancel_records_the_reason_and_the_time() -> None:
 
 ## An injected `sleep`
 
-A wait between retries, or a pause between polls, is a call to `sleep`, and the code takes it as a parameter: `sleep: Callable[[float], None]`, which `main` fills with `time.sleep`. A test passes `waits.append`, which returns at once and records what it was asked to wait. The suite never sleeps, and the test can check the back-off itself.
+A wait between retries, or a pause between polls, is a call to `sleep`, and the code takes it as a parameter: `sleep: Callable[[float], None]`, which `main` fills with `time.sleep`. Code that also keeps a deadline takes `clock: Callable[[], float]`, filled with `time.monotonic`. A test passes two bound methods of one fake, so the clock moves exactly as far as the code slept, and at once:
 
-The retry loop is the adapter's ([python-protocols](../../python-protocols/SKILL.md)). The tests below drive `Retry`, which takes `attempts`, `first_wait`, the `transient` exception types and `sleep`; whatever shape the project's loop has, the three tests keep theirs.
+```python
+# tests/payments/test_gateway.py
+@dataclass(slots=True)
+class FakeTime:
+    """A clock that moves only when something sleeps, and records each sleep."""
+
+    now: float = 0.0
+    slept: list[float] = field(default_factory=list)
+
+    def sleep(self, seconds: float) -> None:
+        """Record the wait, and move the clock past it at once."""
+        self.slept.append(seconds)
+        self.now += seconds
+
+    def clock(self) -> float:
+        """The seconds slept so far."""
+        return self.now
+
+
+def gateway(handler: Handler, time: FakeTime | None = None) -> Gateway:
+    """A Gateway whose client answers every request with handler, on a fake clock.
+
+    rand returns 1, so each backoff is its whole bound: 0.5s, 1s, 2s.
+    """
+    time = time or FakeTime()
+    client = httpx2.Client(
+        base_url="https://pay.example", transport=httpx2.MockTransport(handler)
+    )
+    retry = Retry(sleep=time.sleep, clock=time.clock, rand=lambda: 1.0)
+    return Gateway(client=client, retry=retry)
+```
+
+The suite never sleeps, and the test can check the back-off itself. The jitter's `rand` is a seam too: fixed at 1, every wait is its whole bound, so a test asserts each one exactly.
+
+The retry loop is the adapter's ([python-protocols](../../python-protocols/SKILL.md)), so its tests run the adapter on `httpx2.MockTransport`, never a copy of the loop.
 
 ## The three retry tests
 
-A retry policy has three behaviours, and each gets a test: it recovers from failures that pass, it stops at its cap, and it never retries a failure that won't pass.
+A retry policy has three behaviours, and each gets a test: it recovers from failures that pass, it stops at its cap, and it never retries a failure that won't pass. `answers(...)` is a handler that gives each answer in turn, raising the errors, with the list of requests it was sent ([fakes-and-builders.md](fakes-and-builders.md)):
 
 ```python
-# tests/payments/test_retry.py
-@dataclass(slots=True)
-class Flaky:
-    """A call that raises each of `failures` in turn, then returns "done"."""
-
-    failures: list[Exception]
-    calls: int = 0
-
-    def __call__(self) -> str:
-        self.calls += 1
-        if self.failures:
-            raise self.failures.pop(0)
-        return "done"
-
-
-def retry(waits: list[float]) -> Retry:
-    """Three attempts at transport errors, recording each wait in waits."""
-    return Retry(
-        attempts=3,
-        first_wait=0.5,
-        transient=(httpx2.TransportError,),
-        sleep=waits.append,
+# tests/payments/test_gateway.py
+def test_refund_recovers_after_passing_failures() -> None:
+    time = FakeTime()
+    handler, sent = answers(
+        httpx2.Response(503),
+        httpx2.ConnectError("connection refused"),
+        httpx2.Response(201),
     )
 
+    gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
 
-def test_retry_recovers_from_failures_that_pass() -> None:
-    waits: list[float] = []
-    call = Flaky([httpx2.ConnectError("refused"), httpx2.ReadTimeout("slow")])
-
-    assert retry(waits).call(call) == "done"
-    assert call.calls == 3
-    assert waits == [0.5, 1.0]
+    assert len(sent) == 3
+    assert time.slept == [0.5, 1.0]
 
 
-def test_retry_stops_at_its_last_attempt() -> None:
-    call = Flaky([httpx2.ConnectError("refused") for _ in range(3)])
+def test_refund_stops_at_the_attempt_cap() -> None:
+    time = FakeTime()
+    handler, sent = answers(*[httpx2.Response(503)] * 4)
 
-    with pytest.raises(httpx2.ConnectError):
-        retry([]).call(call)
+    with pytest.raises(PaymentFailed) as failed:
+        gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
 
-    assert call.calls == 3
+    assert len(sent) == 4
+    assert time.slept == [0.5, 1.0, 2.0]
+    assert failed.value.__cause__ is not None
+    assert failed.value.__cause__.__notes__ == ["gave up after 4 attempts"]
 
 
-def test_retry_never_retries_a_permanent_failure() -> None:
-    waits: list[float] = []
-    call = Flaky([PaymentFailed(PaymentId("pay-1"))])
+def test_refund_never_retries_a_permanent_failure() -> None:
+    time = FakeTime()
+    handler, sent = answers(httpx2.Response(400))
 
     with pytest.raises(PaymentFailed):
-        retry(waits).call(call)
+        gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
 
-    assert call.calls == 1
-    assert waits == []
+    assert len(sent) == 1
+    assert time.slept == []
 ```
 
-- **Count the calls.** "It recovered" is `calls == 3`; "it stopped" is `calls == 3` and the last error raised; "it didn't retry" is `calls == 1` and no wait.
-- **Check the waits** where the back-off is the behaviour: `[0.5, 1.0]` pins the doubling. With jitter, the policy takes its randomness as a parameter too, or the test checks each wait's bounds.
-- **Through the adapter,** the same three run against `httpx2.MockTransport`: a handler that answers 503 twice then 201, one that always answers 503, and one that answers 402. A `Retry-After` header gets a fourth: the wait recorded is the one the header asked for.
+- **Count the calls.** "It recovered" is three requests sent; "it stopped" is four sent, and `PaymentFailed` raised from the last error, which notes how many attempts it gave; "it didn't retry" is one sent and no wait.
+- **Check the waits** where the back-off is the behaviour: `[0.5, 1.0, 2.0]` pins the doubling. Were `rand` left real, the test could only check each wait's bounds.
+- **Each other limit the policy keeps gets a test of its own:** a `Retry-After` header, where the wait recorded is the one it asked for, and a wait that would pass the deadline, where the call stops without waiting.
 
 ## asyncio on a virtual clock
 

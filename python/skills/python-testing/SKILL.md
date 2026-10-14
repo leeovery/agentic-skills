@@ -32,7 +32,7 @@ Tests are pytest with plain asserts, a fake for each seam, and a failure that sa
         pytest.param(make_order(), [], id="cancels a pending order without a refund"),
         pytest.param(
             make_order(status=Status.PAID, payment_id="pay-1"),
-            [(PaymentId("pay-1"), Money(minor=2500, currency="GBP"))],
+            [(PaymentId("pay-1"), Money(minor=2500, currency=Currency.GBP))],
             id="refunds a paid order in full",
         ),
     ],

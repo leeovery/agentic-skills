@@ -11,7 +11,7 @@ Code that reaches for the machine can't be tested without touching it; code that
 | The code takes | `main` passes | A test passes |
 |---|---|---|
 | `now: Callable[[], datetime]` | `partial(datetime.now, UTC)` | `lambda: NOW` |
-| `sleep: Callable[[float], None]` | `time.sleep` | `waits.append` |
+| `sleep: Callable[[float], None]` | `time.sleep` | a fake clock's `sleep`, which records the wait and returns at once |
 | values from `Settings` | `Settings()`, reading the environment | the values themselves |
 | a directory | the configured path | `tmp_path` |
 | an `httpx2.Client` | one with the base URL, token and timeout | one over `httpx2.MockTransport` |
@@ -68,16 +68,19 @@ def _outside_world(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
 
 ```python
 # tests/test_settings.py
+# Every field, as the strings an environment holds. A field left out would be
+# read from the process's environment, even through model_validate.
+STRINGS = {
+    "database": "shop.db",
+    "gateway_url": "https://pay.example",
+    "gateway_token": "token-1",
+    "gateway_timeout": "PT2.5S",
+    "log_level": "DEBUG",
+}
+
+
 def test_settings_parse_the_strings_an_environment_holds() -> None:
-    settings = Settings.model_validate(
-        {
-            "database": "shop.db",
-            "gateway_url": "https://pay.example",
-            "gateway_token": "token-1",
-            "gateway_timeout": "PT2.5S",
-            "log_level": "DEBUG",
-        }
-    )
+    settings = Settings.model_validate(STRINGS)
 
     assert settings.database == Path("shop.db")
     assert settings.gateway_url == HttpUrl("https://pay.example")
