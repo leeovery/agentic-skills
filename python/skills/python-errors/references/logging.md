@@ -1,0 +1,160 @@
+# Logging
+
+**The standard library's `logging`, configured once in the wiring `main` supplies; every module names its own logger, and every line is a constant message with its values beside it.**
+
+Contents: configuring it · a logger per module · what a library adds · messages · levels · where to log · tracebacks · secrets · a correlation id · in tests.
+
+## Configuring it
+
+Once, in the wiring `main` supplies, from the settings:
+
+```python
+# src/shop/cli.py, in from_environment
+settings = Settings()
+stderr = logging.StreamHandler()
+stderr.addFilter(CorrelationFilter())
+logging.basicConfig(
+    level=settings.log_level,
+    format="%(levelname)s %(name)s [%(correlation_id)s]: %(message)s",
+    handlers=[stderr],
+)
+```
+
+- **The handler writes to stderr,** so log lines never mix with the data a command writes to stdout ([python-actions](../../python-actions/SKILL.md)).
+- **`basicConfig` does nothing when the root logger already has handlers,** unless given `force=True`. Configured twice, the second call is silently ignored; needing `force` means something configured logging before `main` did.
+- **A larger setup is one `logging.config.dictConfig(...)` call,** in the same place, under the same rule.
+- **Nowhere else.** A module that calls `basicConfig`, `dictConfig` or `addHandler` configures logging for every program that imports it, at import or at whatever moment it runs. The source guard in [python-quality](../../python-quality/SKILL.md) fails on each call outside the module that holds `main`.
+
+## A logger per module
+
+```python
+# src/shop/order/cancel.py
+logger = logging.getLogger(__name__)
+```
+
+- **At the top of each module that logs,** after the imports. It's a name, not configuration: the logger exists before `main` runs, and takes its handlers and level from the root once `main` configures it. The import-time guard counts `logging.getLogger` as a declaration.
+- **The name is the module's path,** so the configuration can reach a part of the program: `shop.payments` at DEBUG, the rest at INFO.
+- **Not injected.** logging's configuration is process-wide by design, and pytest's `caplog` captures each test's lines without anything passed in.
+- **Never the root logger:** `logging.info(...)` (ruff's `LOG015`), `logging.getLogger()` with no name, or `getLogger(__file__)` (`LOG002`). Never `logging.Logger(...)` built by hand (`LOG001`): it belongs to no hierarchy, so no configuration reaches it.
+
+## What a library adds
+
+The [Logging HOWTO](https://docs.python.org/3/howto/logging.html#configuring-logging-for-a-library) says it plainly:
+
+- **A library adds no handler other than a `NullHandler`.** Handlers are the application's choice, and one added under the hood gets in the way of its tests and its output.
+- **A `NullHandler` is optional.** With no configuration at all, logging prints WARNING and above to stderr through its handler of last resort, which the HOWTO calls the best default. A `NullHandler` on the library's top-level logger exists only to silence that.
+- **A library never logs to the root logger,** and documents the names of the loggers it uses.
+
+So a library here adds nothing: no handler, no level, only `logger = logging.getLogger(__name__)` in each module.
+
+## Messages
+
+- **The message is a constant naming the event; the values are `%`-style arguments,** formatted only if the line is emitted:
+
+```python
+# src/shop/order/cancel.py, in Canceller.cancel
+logger.info("order %s cancelled, reason %s", order_id, reason)
+```
+
+- **`extra` is for fields a structured formatter writes as keys of their own.** The text format above prints only the message, so a value passed in `extra` there never reaches the screen. Use `extra` once `main`'s formatter writes it, a JSON formatter for a log pipeline; until then, every value the line needs is an argument.
+- **ruff's `G` rules hold the shape:** `G004` an f-string, `G001` `str.format`, `G003` `+`, `G002` the `%` operator. `G101` flags an `extra` key that clashes with a record's own attributes; logging raises `KeyError` for `message` and the like.
+- **One name per thing, everywhere:** the order is `order_id` in every module.
+
+## Levels
+
+| Level | For | Such as |
+|---|---|---|
+| ERROR | a failure someone must act on | an unexpected exception at the edge, data that couldn't be saved |
+| WARNING | degraded, carrying on | a call retried, a fallback served |
+| INFO | what happened in normal running | an order cancelled, a sweep's skipped order |
+| DEBUG | detail for diagnosis, off by default | a request's timing |
+
+An order that can't be cancelled, a missing order, a validation failure are outcomes the user is told about, not failures of the program. Logged at ERROR, they bury the lines that need someone.
+
+## Where to log
+
+Where an exception stops, and nowhere it passes through ([exceptions.md](exceptions.md)):
+
+- **The edge's last resort:** `run` logs an unexpected exception once, with its traceback, before it returns 1.
+- **Code that absorbs a failure and carries on:** the gateway logs each retry at WARNING; a loop that skips an item logs the item it skipped.
+- **Not code that re-raises.** Its caller logs it, maps it or raises it in turn.
+- **Not an expected failure the edge already reports.** `run` prints an `OrderError` to the user and logs nothing.
+
+## Tracebacks
+
+- **`logger.exception(...)` inside the `except` where the exception stops.** It logs at ERROR with the traceback. ruff's `LOG004` flags it outside an `except`, where it has no exception to log, and `TRY400` flags `logger.error` inside one, which drops the traceback.
+- **Don't put the exception in the message as well:** `logger.exception("refund failed: %s", err)` prints it twice (`TRY401`).
+- **A traceback below ERROR** goes with `exc_info=True`: `logger.warning("served the cached rates", exc_info=True)`.
+- **Notes print with the traceback,** so context added with `add_note` reaches the log with no extra code.
+
+## Secrets
+
+- **Never log a whole request, header map, `Settings` object or the environment.** Log the fields you need. A secret is a type that redacts itself ([python-types](../../python-types/SKILL.md)): `SecretStr` prints as `**********`.
+- **httpx2's errors carry the URL, query and all.** The gateway logs each retry with its error, so credentials travel in a header, `Authorization: Bearer …`, never in the query string.
+
+## A correlation id
+
+One id for a piece of work, on every line it causes, so a log reader can pull out one run, request or message from many. It lives in a `ContextVar`, which a logging filter copies onto each record:
+
+```python
+# src/shop/correlation.py
+"""The correlation id: one id for a piece of work, stamped on every log line it causes."""
+
+import logging
+from contextvars import ContextVar
+from typing import override
+
+# Set where the work comes in, as `with CORRELATION_ID.set(an_id):`, which
+# resets it when the block ends; read by the filter main puts on its handler.
+CORRELATION_ID: ContextVar[str] = ContextVar("correlation_id", default="-")
+
+
+class CorrelationFilter(logging.Filter):
+    """Stamps each record with the correlation id of the work that logged it."""
+
+    @override
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlation_id = CORRELATION_ID.get()
+        return True
+```
+
+```python
+# src/shop/cli.py
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the command line on argv, or on the process's own arguments.
+
+    The run is one piece of work, so it has one correlation id.
+    """
+    with CORRELATION_ID.set(str(uuid.uuid7())):
+        return run(build_app(from_environment), argv)
+```
+
+- **The filter goes on the handler,** as the wiring above does. A filter on a logger sees only the records logged through that logger, not its children's, so one on the root would miss every module's lines.
+- **The token `set` returns resets the variable when its `with` ends** ([3.14](https://docs.python.org/3/whatsnew/3.14.html)), so no id outlives its work.
+- **The `ContextVar` is declared at module level,** as the `contextvars` docs require; the import-time guard counts `ContextVar` as a declaration.
+- **asyncio copies the context into each task it creates,** so a task logs with the id of the work that started it.
+- **A server or a worker sets it per request or message,** from the caller's header when there is one, minted with `uuid.uuid7()` when not, and sends it on in a header on outbound calls, so another system's logs can be matched to these.
+- A line logged with no id set shows the default, `-`.
+
+## In tests
+
+pytest's `caplog` holds the records each test logged. Check the level and the message, not the formatted line:
+
+```python
+# tests/payments/test_gateway.py
+def test_each_retry_is_logged_as_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    handler, _ = answers(httpx2.Response(502), httpx2.Response(201))
+
+    gateway(handler).refund(PaymentId("pay-1"), TEN_POUNDS)
+
+    [record] = caplog.records
+    assert record.levelname == "WARNING"
+    assert record.getMessage().startswith(
+        "retrying POST /payments/pay-1/refunds in 0.5s, after attempt 1:"
+    )
+```
+
+- **The root logger stops at WARNING** until something sets it lower. A test of an INFO line calls `caplog.set_level(logging.INFO)` first.
+- **A logged traceback is checked as `record.exc_info is not None`,** as the CLI's test of its last resort does.
+- **A filter is tested on `caplog.handler`,** and the record through a `logging.Formatter` that uses its field, as the correlation id's test does.
+- Most tests don't look at logs at all. A line is checked when logging it is the behaviour under test: a retry absorbed, a failure skipped.
