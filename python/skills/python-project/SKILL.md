@@ -51,17 +51,23 @@ lint = [
 test = [
     "coverage>=7.16.2",
     "hypothesis>=6.169.1",
+    "looptime>=0.9",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-benchmark>=5.3.0",
     "pytest-cov>=7.1.0",
     "pytest-socket>=0.8.1",
     "syrupy>=6.1.1",
     "time-machine>=3.5.1",
 ]
-# uv syncs dev by default, so `uv sync` installs every tool.
+# uv syncs dev by default, so `uv sync` installs every tool the gates run.
 dev = [
     { include-group = "lint" },
     { include-group = "test" },
+]
+# An audit run now and then, not a gate: `uv run --group mutation mutmut run`.
+mutation = [
+    "mutmut>=3.8.0",
 ]
 
 [tool.uv]
