@@ -139,11 +139,15 @@ class Retry:
 
 
 def passing(err: httpx2.HTTPError) -> bool:
-    """Whether the same request may succeed later: the connection failed, it timed out, or the provider asked to wait."""
+    """Whether the same request may succeed later: the connection failed or dropped, it timed out, or the provider asked to wait."""
     match err:
         case httpx2.HTTPStatusError(response=response):
             return response.status_code in PASSING_STATUSES
         case httpx2.NetworkError() | httpx2.TimeoutException():
+            return True
+        case httpx2.RemoteProtocolError():
+            # httpx2 raises it when the server closes the connection before its
+            # answer is whole. Its sibling LocalProtocolError is our own bug: no retry.
             return True
         case _:
             return False
@@ -155,7 +159,7 @@ def retry_after(response: httpx2.Response) -> float | None:
     return float(value) if value.isdecimal() else None
 ```
 
-- **An allow-list, never a deny-list.** The connection failed or dropped (`httpx2.NetworkError`), the call timed out (`httpx2.TimeoutException`), or the answer was 429, 502, 503 or 504. Anything else, a 400, a 401, a 404, a 500, a `ValueError`, fails at once: the same request will fail the same way, and a 500 may have done half its work.
+- **An allow-list, never a deny-list.** The connection failed or dropped (`httpx2.NetworkError`, and `httpx2.RemoteProtocolError` for a server that hangs up before its answer is whole), the call timed out (`httpx2.TimeoutException`), or the answer was 429, 502, 503 or 504. Anything else, a 400, a 401, a 404, a 500, a `LocalProtocolError` from a request we built wrong, a `ValueError`, fails at once: the same request will fail the same way, and a 500 may have done half its work.
 - **It stops on attempts or elapsed time,** whichever comes first, and never waits past its deadline: a `Retry-After` longer than the time left gives up now.
 - **The backoff doubles and is jittered:** a random fraction of `first_wait × 2ⁿ⁻¹`, capped at `longest_wait`. Without jitter, clients that failed together retry together, and the provider's recovery meets the same spike.
 - **`Retry-After` wins over the backoff** in its seconds form. Its HTTP-date form needs the wall clock, so it falls back to the backoff; an adapter whose provider sends dates takes `now` as well.
@@ -241,7 +245,7 @@ def test_refund_never_retries_a_permanent_failure() -> None:
     assert time.slept == []
 ```
 
-The adapter's tests add one each for honouring `Retry-After`, stopping when the wait would pass the deadline, and logging each retry. pytest-socket fails any test that opens a real socket, so a client built without the mock transport fails loudly.
+The adapter's tests add one each for retrying a dropped connection under the same idempotency key, never retrying a `LocalProtocolError`, honouring `Retry-After`, stopping when the wait would pass the deadline, and logging each retry. pytest-socket fails any test that opens a real socket, so a client built without the mock transport fails loudly.
 
 Code that refunds is tested against `FakeRefunder` instead (the [SKILL.md](../SKILL.md#pattern) pattern), and never sees HTTP, so a change in the provider's API breaks the gateway's tests alone.
 
