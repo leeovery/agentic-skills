@@ -135,6 +135,9 @@ class Retry:
         return self.rand() * backoff.total_seconds()
 
 
+...
+
+
 def passing(err: httpx2.HTTPError) -> bool:
     """Whether the same request may succeed later: the connection failed, it timed out, or the provider asked to wait."""
     match err:
@@ -238,7 +241,7 @@ def test_refund_never_retries_a_permanent_failure() -> None:
     assert time.slept == []
 ```
 
-The harness adds a test each for honouring `Retry-After`, stopping when the wait would pass the deadline, and logging each retry. pytest-socket fails any test that opens a real socket, so a client built without the mock transport fails loudly.
+The adapter's tests add one each for honouring `Retry-After`, stopping when the wait would pass the deadline, and logging each retry. pytest-socket fails any test that opens a real socket, so a client built without the mock transport fails loudly.
 
 Code that refunds is tested against `FakeRefunder` instead (the [SKILL.md](../SKILL.md#pattern) pattern), and never sees HTTP, so a change in the provider's API breaks the gateway's tests alone.
 

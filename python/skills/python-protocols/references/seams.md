@@ -96,12 +96,21 @@ No test sleeps, and each asserts the exact waits. Waits inside asyncio are [pyth
 - **Pass an `httpx2.Client` with its base URL, auth and timeout set,** built by the wiring `main` supplies and closed by its `with`:
 
 ```python
-# src/shop/cli.py, in from_environment
-httpx2.Client(
-    base_url=str(settings.gateway_url),
-    headers={"Authorization": f"Bearer {settings.gateway_token.get_secret_value()}"},
-    timeout=settings.gateway_timeout.total_seconds(),
-)
+# src/shop/cli.py: the client from_environment opens, and the headers it sends
+    with (
+        closing(connect(settings.database)) as db,
+        httpx2.Client(
+            base_url=str(settings.gateway_url),
+            headers=_authorised(settings),
+            timeout=settings.gateway_timeout.total_seconds(),
+        ) as http,
+    ):
+        ...
+
+
+def _authorised(settings: Settings) -> dict[str, str]:
+    """The headers that authorise a request to the payment gateway."""
+    return {"Authorization": f"Bearer {settings.gateway_token.get_secret_value()}"}
 ```
 
 - **Never `httpx2.post(...)`,** which opens a client per call with no shared settings, **and never a client built inside the adapter or at import.** The adapter then can't be pointed at a test transport, and nobody closes the client.

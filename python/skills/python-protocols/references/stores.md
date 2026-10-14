@@ -30,11 +30,7 @@ class OrderStore(Protocol):
         ...
 
     def save(self, order: Order) -> None:
-        """Store the order whole, replacing the one with its id, once the transaction commits."""
-        ...
-
-    def transaction(self) -> AbstractContextManager[None]:
-        """Keep every write made inside, or none of them if the block raises."""
+        """Store the order whole, replacing the one with its id."""
         ...
 ```
 
@@ -58,7 +54,27 @@ class Sweeper:
     canceller: Canceller
 ```
 
-`SqliteOrders` fills both without knowing either exists, and a fake of `CancellableOrders` needs one method, not the store's four.
+The restorer saves a batch of orders that must land together, so its slice is a transaction and the one write it makes inside:
+
+```python
+# src/shop/order/restore.py
+class OrderWrites(Protocol):
+    """Writes inside one transaction."""
+
+    def save(self, order: Order) -> None:
+        """Store the order whole, replacing the one with its id."""
+        ...
+
+
+class TransactionalOrders(Protocol):
+    """A store whose writes land together or not at all."""
+
+    def transaction(self) -> AbstractContextManager[OrderWrites]:
+        """Open a transaction: committed when the block ends, rolled back if it raises."""
+        ...
+```
+
+`SqliteOrders` fills all three without knowing any of them exists, and a fake of `CancellableOrders` needs one method, not the store's four.
 
 ## Rows stay inside
 
@@ -81,7 +97,7 @@ def _order(order_id: OrderId, row: OrderRow, lines: Sequence[LineRow]) -> Order:
             Line(
                 sku=sku,
                 quantity=quantity,
-                unit_price=Money(minor=price, currency=currency),
+                unit_price=Money(minor=price, currency=Currency(currency)),
             )
             for sku, quantity, price in lines
         ),
@@ -108,7 +124,7 @@ With an ORM the same holds: its models live in the store's module, and the store
 
 ## Transactions
 
-Writes that must land together go through one transaction; [python-actions](../../python-actions/SKILL.md) holds when. The store's side is a context manager: the writes made inside commit together when the block ends, and none of them land if it raises.
+Writes that must land together go through one transaction; [python-actions](../../python-actions/SKILL.md) holds when. The store's side is a context manager that yields a writer: what goes through the writer commits together when the block ends, and none of it lands if the block raises.
 
 ```python
 # src/shop/storage/sqlite.py
@@ -118,17 +134,40 @@ class SqliteOrders:
 
     db: sqlite3.Connection
 
+    ...
+
+    def save(self, order: Order) -> None:
+        """Write the order and its lines in one transaction, replacing any under its id."""
+        with self.transaction() as tx:
+            tx.save(order)
+
     @contextmanager
-    def transaction(self) -> Generator[None]:
-        """Commit the writes made inside together, or roll them all back if the block raises."""
+    def transaction(self) -> Generator[SqliteTransaction]:
+        """Open a transaction: committed when the block ends, rolled back if it raises.
+
+        Every write in the block goes through the writer it yields: this store's
+        own save would commit, part way through.
+        """
         with self.db:
-            yield
+            yield SqliteTransaction(db=self.db)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SqliteTransaction:
+    """Writes inside one of SqliteOrders' transactions."""
+
+    db: sqlite3.Connection
+
+    def save(self, order: Order) -> None:
+        """Write the order and its lines, replacing any under its id."""
+        ...
 ```
 
-- **A write method never commits on its own;** only `transaction()` does. sqlite3's `with db:` doesn't nest: an inner block commits on its way out, and the outer block's later failure can't take that back. A `save` with its own `with self.db:` would break every transaction it was called in.
+- **The store's own `save` is one write in a transaction of its own,** so a consumer that writes one thing, as the canceller does, declares `save` and calls it. Only a consumer that writes several things declares `transaction()`.
+- **sqlite3's `with db:` doesn't nest:** an inner block commits on its way out, and the outer block's later failure can't take that back. So nothing inside a transaction calls the store's own `save`; every write in the block goes through the writer, which holds the connection and never commits.
 - **The connection is opened with `autocommit=False`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)), so a transaction is always open and nothing lands until a commit.
-- **The operation sees only the context manager:** `with self.orders.transaction(): self.orders.save(cancelled)`. It never holds a connection or a cursor, and never learns how the store keeps its promise.
-- **A call to another service stays outside the block.** A refund can't roll back, so the canceller refunds before it opens the transaction, keyed so a retry refunds once.
+- **The operation sees only the context manager and its writer:** `with self.orders.transaction() as tx: tx.save(order)`. It never holds a connection or a cursor, and never learns how the store keeps its promise.
+- **A call to another service stays outside the transaction.** A refund can't roll back, so the canceller refunds before it saves, keyed so a retry refunds once.
 
 ## No generic base
 
@@ -167,23 +206,24 @@ class FakeOrders:
             if order.customer_id == customer_id and order.status.cancellable
         ]
 
+    ...
+
     def save(self, order: Order) -> None:
         """Hold the order and record that it was saved."""
         self.orders[order.id] = order
         self.saved.append(order)
 
     @contextmanager
-    def transaction(self) -> Generator[None]:
-        """Keep the writes made inside, or none of them if the block raises."""
-        orders, saved = dict(self.orders), list(self.saved)
-        try:
-            yield
-        except BaseException:
-            self.orders, self.saved = orders, saved
-            raise
+    def transaction(self) -> Generator[FakeOrders]:
+        """Stage the block's writes on a copy, and keep them only if it ends cleanly."""
+        staged = FakeOrders(orders=dict(self.orders))
+        yield staged
+        self.orders = staged.orders
+        self.saved.extend(staged.saved)
 ```
 
-One fake fills both `OrderStore` and `CancellableOrders`, so a test of the sweeper passes the same object to it and to the canceller it holds, and they agree on what's stored. It lives in `tests/order/fakes.py`, shared by every test that needs it; [python-testing](../../python-testing/SKILL.md) covers where fakes and builders go.
+- **The transaction's writer is a copy of the fake.** A block that raises never reaches the lines after `yield`, so the copy and its writes are dropped; one that ends cleanly hands them back.
+- **One fake fills `OrderStore`, `CancellableOrders` and `TransactionalOrders`,** so a test of the sweeper passes the same object to it and to the canceller it holds, and they agree on what's stored. It lives in `tests/order/fakes.py`, shared by every test that needs it; [python-testing](../../python-testing/SKILL.md) covers where fakes and builders go.
 
 ## Testing the real store
 
@@ -202,29 +242,28 @@ def orders(path: Path) -> Iterator[SqliteOrders]:
         yield SqliteOrders(db=db)
 
 
-def save(orders: SqliteOrders, *saving: Order) -> None:
-    """Save each order in one transaction."""
-    with orders.transaction():
-        for order in saving:
-            orders.save(order)
+...
 
 
-def test_a_committed_transaction_is_seen_by_another_connection(
+def test_a_saved_order_is_seen_by_another_connection(
     orders: SqliteOrders, path: Path
 ) -> None:
-    save(orders, make_order())
+    orders.save(make_order())
 
     with closing(connect(path)) as other:
         assert SqliteOrders(db=other).get(OrderId("o-1")) == make_order()
+
+
+...
 
 
 def test_a_transaction_that_raises_keeps_none_of_its_writes(
     orders: SqliteOrders,
 ) -> None:
     def save_then_fail() -> None:
-        with orders.transaction():
-            orders.save(make_order(order_id="o-1"))
-            orders.save(make_order(order_id="o-2"))
+        with orders.transaction() as tx:
+            tx.save(make_order(order_id="o-1"))
+            tx.save(make_order(order_id="o-2"))
             raise RuntimeError("disk full")
 
     with pytest.raises(RuntimeError):

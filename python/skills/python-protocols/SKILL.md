@@ -53,13 +53,18 @@ class Canceller:
 
 ```python
 # src/shop/cli.py, in the wiring main supplies: pyrefly checks each fit here.
-Canceller(
-    orders=SqliteOrders(db=db),
-    payments=Gateway(
-        client=http,
-        retry=Retry(sleep=time.sleep, clock=time.monotonic, rand=random.random),
+yield Deps(
+    canceller=Canceller(
+        orders=SqliteOrders(db=db),
+        payments=Gateway(
+            client=http,
+            retry=Retry(
+                sleep=time.sleep, clock=time.monotonic, rand=random.random
+            ),
+        ),
+        now=partial(datetime.now, UTC),
     ),
-    now=partial(datetime.now, UTC),
+    ...
 )
 ```
 
