@@ -34,31 +34,46 @@ def from_environment() -> Generator[Deps]:
     payment gateway's client, closing both on exit.
     """
     settings = Settings()
+    stderr = logging.StreamHandler()
+    stderr.addFilter(CorrelationFilter())
     logging.basicConfig(
-        level=settings.log_level, format="%(levelname)s %(name)s: %(message)s"
+        level=settings.log_level,
+        format="%(levelname)s %(name)s [%(correlation_id)s]: %(message)s",
+        handlers=[stderr],
     )
     with (
         closing(connect(settings.database)) as db,
         httpx2.Client(
             base_url=str(settings.gateway_url),
-            headers={
-                "Authorization": f"Bearer {settings.gateway_token.get_secret_value()}"
-            },
+            headers=_authorised(settings),
             timeout=settings.gateway_timeout.total_seconds(),
         ) as http,
     ):
         yield Deps(
             canceller=Canceller(
                 orders=SqliteOrders(db=db),
-                payments=Gateway(client=http),
+                payments=Gateway(
+                    client=http,
+                    retry=Retry(
+                        sleep=time.sleep, clock=time.monotonic, rand=random.random
+                    ),
+                ),
                 now=partial(datetime.now, UTC),
-            )
+            ),
+            settle=partial(settle_payments, settings),
         )
 
 
+...
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the command line on argv, or on the process's own arguments."""
-    return run(build_app(from_environment), argv)
+    """Run the command line on argv, or on the process's own arguments.
+
+    The run is one piece of work, so it has one correlation id.
+    """
+    with CORRELATION_ID.set(str(uuid.uuid7())):
+        return run(build_app(from_environment), argv)
 ```
 
 `pyproject.toml` names it, `shop = "shop.cli:main"`, and `src/shop/__main__.py` runs `raise SystemExit(main())`. `--help` and a usage error never enter the wiring, so they need no settings.

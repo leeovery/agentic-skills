@@ -30,24 +30,40 @@ shop/
 │       ├── __init__.py       its docstring
 │       ├── __main__.py       python -m shop
 │       ├── cli.py            build_app, run and main: the one place that wires and exits
+│       ├── api.py            the HTTP handlers, framework-neutral
+│       ├── consumers.py      the queue consumers
 │       ├── settings.py       Settings: everything read from the environment
 │       ├── display.py        how values read to people
 │       ├── money.py          Money, in a currency's minor unit
+│       ├── secret.py         a secret that never shows itself
+│       ├── correlation.py    the id stamped on every log line a piece of work causes
+│       ├── processes.py      programs run as child processes, as a Runner
 │       ├── order/            orders: what one is, what goes wrong, cancelling
 │       │   ├── order.py      the ids, Status, Line and Order
 │       │   ├── errors.py     OrderError, and each failure a caller branches on
 │       │   ├── cancel.py     Canceller, and the OrderStore and Refunder it declares
-│       │   └── ratios.py     figures worked out over many orders
+│       │   ├── ratios.py     figures worked out over many orders
+│       │   └── ...           reorder.py, restore.py, sweep.py, withdraw.py, refunds.py
+│       ├── shipping/
+│       │   └── label.py      shipping labels, made by the carrier's tool
+│       ├── settlement/
+│       │   ├── settle.py     settling payments many at once, on asyncio
+│       │   └── poll.py       a job run on an interval beside other work
 │       ├── payments/
-│       │   └── gateway.py    the provider's HTTP API, as a Refunder
+│       │   ├── gateway.py    the provider's HTTP API, as a Refunder
+│       │   ├── settlements.py  the same API from async code, as a settlement Provider
+│       │   └── reports.py    the provider's settlement reports
 │       └── storage/
-│           └── sqlite.py     orders in SQLite, as an OrderStore
+│           ├── sqlite.py     orders in SQLite, as an OrderStore
+│           ├── export.py     the order export, one JSON line per order
+│           ├── atomic.py     replacing a file whole
+│           └── lock.py       a lock file, so one run works at a time
 └── tests/                    a package, mirroring src/shop: order/, payments/, guards/
 ```
 
 - **src layout.** Nothing named `shop` sits at the root, so a test imports the installed package, the one users get, never the tree beside it by accident.
-- **Domain packages** (`order`) and the value modules beneath them (`money`) hold types, their rules and their operations. **Adapters** (`payments`, `storage`) implement the Protocols the domain declares ([python-protocols](../../python-protocols/SKILL.md)). **The edge** (`cli`) imports all of them; none imports it.
-- **Each package and module sits in a layer** of the import-linter contract in [python-quality](../../python-quality/SKILL.md)'s drop-in config, highest first: `cli`; `payments | storage | settings`; `display`; `order`; `money`. A new one joins a layer in the same commit, with its reason.
+- **Domain packages** (`order`, `shipping`, `settlement`) and the value modules beneath them (`money`, `secret`) hold types, their rules and their operations. **Adapters** (`payments`, `storage`, `processes`) implement the Protocols the domain declares ([python-protocols](../../python-protocols/SKILL.md)). **The edges** (`cli`, `api`, `consumers`) import the domain, and `cli` the adapters it wires; nothing imports an edge.
+- **Each package and module sits in a layer** of the import-linter contract in [python-quality](../../python-quality/SKILL.md)'s drop-in config, highest first: `cli`; `api | consumers | settings`; `payments | storage | processes`; `display | shipping | settlement`; `order`; `money | secret | correlation`. A new one joins a layer in the same commit, with its reason.
 
 ## main, `__main__.py` and their test
 
@@ -164,7 +180,7 @@ No `if TYPE_CHECKING:` imports in an application.
 
 - **On 3.14 an annotation is evaluated only when something reads it** ([PEP 649](https://peps.python.org/pep-0649/)), so a forward reference needs neither quotes nor a guarded import.
 - **A guarded import hides a cycle instead of fixing it.** import-linter still counts it, as it reads `TYPE_CHECKING` blocks unless told not to.
-- **pydantic models and typer commands read their annotations at runtime.** A name imported only for the checker passes ruff and pyrefly, then fails: a `BaseSettings` whose field names it imports cleanly and raises `PydanticUserError` (`` `Settings` is not fully defined ``) when it's first constructed, and a typer command raises `NameError` when it runs. Under the drop-in, ruff's `TC004` (default) doesn't see either, as it doesn't know those classes and decorators read annotations; `TC001` to `TC003`, which would move imports under `TYPE_CHECKING`, are off. A test that builds the settings and one that runs each command are what catch it.
+- **pydantic models and typer commands read their annotations at runtime.** A name imported only for the checker passes pyrefly, then fails: a `BaseSettings` whose field names it imports cleanly and raises `PydanticUserError` (`` `Settings` is not fully defined ``) when it's first constructed, and a typer command raises `NameError` when it runs. Under the drop-in, ruff's `TC004` (default) catches the first, as `runtime-evaluated-base-classes` names pydantic's bases; nothing static catches the second, so a test that runs each command is what does. `TC001` to `TC003`, which would move imports under `TYPE_CHECKING`, are off.
 
 ## Module state
 

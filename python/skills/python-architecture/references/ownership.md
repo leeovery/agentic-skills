@@ -31,7 +31,7 @@ If two outputs show it, or two code paths decide on it, it has one owner.
 A report needs the cancellation rate that a summary already shows, and the summary works it out inline. The wrong way, as found:
 
 ```python
-# src/shop/summary.py, before: the rule and its wording, inline
+# ❌ src/shop/summary.py, before: the rule and its wording, inline
 """A day's orders, summed up for the person running the shop."""
 
 from collections.abc import Sequence

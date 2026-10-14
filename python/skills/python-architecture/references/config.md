@@ -67,7 +67,7 @@ Never a `str` that the code parses later, and never an `int` of seconds.
 
 - **`Settings()` is called in `from_environment`,** the wiring `main` hands the CLI, once a command runs ([SKILL.md](../SKILL.md#pattern)). It's the one place the environment is read; ruff's ban list rejects `os.environ` and `os.getenv` in every other file.
 - **`main` passes values, never the settings object:** `connect(settings.database)`, `httpx2.Client(base_url=..., timeout=...)`. A component that takes `Settings` depends on every setting and on pydantic, and its test must build all of them.
-- **import-linter holds it.** `shop.settings` shares a layer with `shop.payments` and `shop.storage`, which may not import each other, and sits above the domain, which may not import it. Only `shop.cli` can.
+- **import-linter holds it.** `shop.settings` shares a layer with the other edges, `shop.api` and `shop.consumers`, which may not import each other, and sits above the adapters and the domain, which may not import it. Only `shop.cli` can.
 - **Not at import.** `settings = Settings()` at module level reads the environment the moment anything imports the module, tests included; python-quality's guard on import-time calls reports it.
 
 ## Every bad value at once
