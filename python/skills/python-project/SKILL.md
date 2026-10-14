@@ -88,7 +88,7 @@ exclude-newer = "1 week"
 
 ## Anti-patterns
 
-- ❌ `[tool.uv] dev-dependencies = [...]` → `[dependency-groups]`, written by `uv add --dev`; the old key is on its way out.
+- ❌ `[tool.uv] dev-dependencies = [...]` → `[dependency-groups]`, written by `uv add --group test`; the old key is on its way out.
 - ❌ `uv sync --frozen` in CI → `uv sync --locked`.
 - ❌ `uv lock --no-install` → there's no such flag; `uv lock` writes the lock and installs nothing.
 - ❌ `uv lock --upgrade` inside a feature → `uv lock --upgrade-package x`, in a commit of its own.
