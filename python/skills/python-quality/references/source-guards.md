@@ -226,7 +226,7 @@ A module body declares: imports, constants, functions, classes and its logger. A
 
 - Decorators and default values run with the `def`; the body doesn't. A class body runs.
 - From 3.14 annotations are evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)), so a call inside one doesn't run at import, and nor does a `type` alias's value.
-- `DECLARATIONS` are calls that build a type, a logger or a constant and touch nothing outside the process. A name joins only on that test, with the project's own: `SettingsConfigDict` is pydantic-settings' declaration of where settings come from.
+- `DECLARATIONS` are calls that build a type, a logger or a constant and touch nothing outside the process. A name joins only on that test, with the project's own: `SettingsConfigDict` is pydantic-settings' declaration of where settings come from, and a `ContextVar` belongs at module level, as the `contextvars` docs require.
 - A `__main__.py` is run, never imported, so it's skipped.
 
 ```python
@@ -252,6 +252,7 @@ from tests.guards.source import (
 # Calls that build a type, a logger or a constant, and touch nothing outside the process.
 DECLARATIONS = frozenset(
     {
+        "ContextVar",
         "NewType",
         "logging.getLogger",
         "dataclass",
