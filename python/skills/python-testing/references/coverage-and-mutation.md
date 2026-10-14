@@ -21,13 +21,12 @@ src/shop/cli.py                   83      4      4      1    94%   81->exit, 164
 src/shop/money.py                 32      1      6      1    95%   48
 src/shop/order/order.py           45      2      6      1    94%   32-33
 src/shop/order/refunds.py         35      1      0      0    97%   62
-src/shop/payments/gateway.py      59      2     12      1    96%   121-122
-src/shop/payments/reports.py      23      5      4      0    74%   41-45
+src/shop/payments/reports.py      28      6      4      0    75%   57-64
 src/shop/processes.py             17      2      0      0    88%   20-21
 --------------------------------------------------------------------------
-TOTAL                            709     23     70      5    96%
+TOTAL                            716     22     72      4    96%
 
-26 files skipped due to complete coverage.
+27 files skipped due to complete coverage.
 ```
 
 `uv run pytest --cov --cov-report=annotate:cov_annotate` also writes a copy of each file with `!` beside every line that never ran, which is quicker to read through than ranges. It marks lines only, not branches: read branches from the table.
@@ -39,11 +38,10 @@ Each entry in `Missing` is a question, and the answer is one of four things: a t
 | Entry | Means | So |
 |---|---|---|
 | `81->exit` in `cli.py` | the branch at line 81 never went the other way: `if unsettled:` was never false | a test is missing: `settle` with every payment settled |
-| `121-122` in `gateway.py` | `passing`'s last arm, `case _: return False`: no test raises an error the allow-list leaves out | a test is missing: a `DecodingError` from the handler fails on the first attempt, unretried |
 | `62` in `refunds.py` | `Tally.report`, which nothing calls | a test is missing, or the method is |
 | `48` in `money.py`, `83-86` in `api.py`, `20-21` in `processes.py` | a split into no parts; the 502 and 500 answers; `ProcessRunner.which` | tests are missing, each a few lines |
 | `32-33` in `order.py` | the `case _: assert_never(self)` arm | unreachable by design, and the type checker proves it: leave it |
-| `41-45` in `reports.py` | the body of `report_totals`, run in worker processes | coverage can't see it yet: below |
+| `57-64` in `reports.py` | the body of `report_totals`, run in worker processes | coverage can't see it yet: below |
 | `164`, `170-180` in `cli.py` | the wiring that enters asyncio and opens a real `AsyncClient` | runs only against the real provider; the parts it wires are tested apart |
 | `3-5` in `__main__.py` | `raise SystemExit(main())` | run by hand; `main` itself is tested |
 
