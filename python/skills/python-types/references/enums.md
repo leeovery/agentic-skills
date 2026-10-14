@@ -73,7 +73,7 @@ A `match` over an enum ends `case _: assert_never(x)`. In that branch `x` has th
 ERROR Argument `Literal[Status.CANCELLED]` is not assignable to parameter `arg` with type `Never` in function `typing.assert_never` [bad-argument-type]
 ```
 
-- **Without it, a forgotten member can slip through.** A function that returns a value gets `bad-return` for the path that falls through, but one that returns nothing passes: pyrefly's `non-exhaustive-match` is only a warning, which the gate doesn't show.
+- **Without it, the drop-in still fails the gap.** pyrefly reports a `match` that leaves out a member as `non-exhaustive-match`, a warning the gate doesn't show by default, and python-quality's drop-in raises it to an error. `assert_never` says the `match` means to cover every member, and checks it at run time too.
 - **At run time it raises** `AssertionError` with the value, if one outside the set ever arrives.
 - **Never `case _: return False`** as the last case: it answers for every member added later, unasked.
 

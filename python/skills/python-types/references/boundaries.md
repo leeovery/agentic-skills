@@ -225,13 +225,19 @@ In the edge module that parses or sends it: `CancelRequest` and `OrderReply` in 
 [[tool.importlinter.contracts]]
 name = "The domain imports no framework, client or wire library"
 type = "forbidden"
-source_modules = ["shop.order", "shop.money"]
+source_modules = [
+    "shop.shipping",
+    "shop.settlement",
+    "shop.order",
+    "shop.money",
+    "shop.secret",
+]
 forbidden_modules = ["pydantic", "pydantic_settings", "httpx2", "typer"]
 ```
 
 - **The edge imports the domain, never the reverse:** a model may use `Status` and `Currency` as field types, and the domain never sees the model.
 - **No shared `schemas` or `models` module.** A model is one source's shape; two sources whose shapes look alike today change apart. `models` is a name the naming guard refuses ([python-quality](../../python-quality/SKILL.md)).
-- **A new edge module joins the top layer** of the `layers` contract, beside `shop.cli`, in the same commit ([python-architecture](../../python-architecture/SKILL.md)).
+- **A new edge module joins the layer under `shop.cli`** in the `layers` contract, beside `shop.api` and `shop.consumers`, in the same commit ([python-architecture](../../python-architecture/SKILL.md)).
 
 ## Checklist
 
