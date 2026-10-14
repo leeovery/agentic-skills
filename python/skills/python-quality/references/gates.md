@@ -20,7 +20,7 @@ Each runs through `uv run`, so it uses the version pinned in `uv.lock` ([python-
 |---|---|---|
 | `ruff format --check .` | anything not in the one format | it reports and changes nothing; `uv run ruff format .` rewrites. Since ruff 0.16 it formats the Python blocks in Markdown files too |
 | `ruff check .` | the rules in `[tool.ruff.lint]`: the default set and the named families | `--fix` applies only safe fixes; read an `--unsafe-fixes` diff before keeping it |
-| `pyrefly check` | type errors, with the strict preset: implicit `Any`, a missing `@override`, an ignore that no longer matches | it reads `[tool.pyrefly]` from the nearest `pyproject.toml`; `pyrefly dump-config` shows where it resolves imports from |
+| `pyrefly check` | type errors, with the strict preset: implicit `Any`, a missing `@override`, an ignore that no longer matches; and, as the drop-in raises it to an error, a call the stubs mark deprecated | it reads `[tool.pyrefly]` from the nearest `pyproject.toml`; `pyrefly dump-config` shows where it resolves imports from |
 | `lint-imports` | the contracts in `[tool.importlinter]`: imports pointing outward, frameworks in the domain | an `ignore_imports` entry that matches nothing fails with `No matches for ignored import` |
 | `pytest` | broken behaviour, any warning, any network call | `strict = true` fails an unregistered marker and an xfail that passes; `--cov` measures coverage, never a gate |
 

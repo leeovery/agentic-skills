@@ -74,6 +74,11 @@ search-path = ["src", "."]
 # longer matches; a `# type: ignore` would silence its whole line, unchecked.
 enabled-ignores = ["pyrefly"]
 
+[tool.pyrefly.errors]
+# A call to an API the stubs mark deprecated fails: it is only a hidden warning by
+# default, and pytest sees a deprecation only when the code runs.
+deprecated = "error"
+
 [tool.pytest]
 # Unknown markers and config keys, xfails that pass, and duplicate parametrize ids
 # all fail. It switches on future strict options too, so pytest stays pinned in the lock.

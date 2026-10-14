@@ -95,7 +95,7 @@ A failing guard prints one line per breach, `tests/test_money.py:15: patches wit
 | an import pointing outward, or a framework in the domain | an import-linter `layers` or `forbidden` contract |
 | what a value's type allows | pyrefly, strict |
 | an idiom older than `requires-python` | ruff's `UP`, and `ruff check --select UP --fix` |
-| a deprecation the code triggers | pytest's `filterwarnings = ["error"]` |
+| a deprecated API | pyrefly, for one the stubs mark deprecated; pytest's `filterwarnings = ["error"]`, for one that warns as it runs |
 | the project's shape: names, what runs at import, which module words a value | a source-guard test |
 | what the code does | a test |
 
