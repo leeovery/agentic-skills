@@ -21,6 +21,10 @@ go/                        # Go skills plugin
   agntc.json
   README.md
   skills/                 # 8 Go skills (SKILL.md, plus references/ where needed)
+python/                    # Python skills plugin
+  agntc.json
+  README.md
+  skills/                 # 9 Python skills (SKILL.md, plus references/ where needed)
 .mint.toml                # mint release config (only keys that differ from mint's defaults)
 release                   # Shim that runs `mint release`
 CHANGELOG.md              # Written by mint at each release
