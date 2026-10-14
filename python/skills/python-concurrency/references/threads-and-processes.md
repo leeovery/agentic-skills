@@ -56,32 +56,51 @@ def _refunded(refunder: Refunder, payment_id: PaymentId, amount: Money) -> bool:
 
 ```python
 # src/shop/payments/reports.py
-def totals(reports: Sequence[Path]) -> Counter[str]:
+class ReportRow(BaseModel):
+    """One row of a settlement report: a payment, its currency and the amount."""
+
+    # Lax, unlike a model fed JSON: a CSV holds only strings, the amount among them.
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    payment_id: str
+    currency: Currency
+    minor: int
+
+
+...
+
+
+def totals(reports: Sequence[Path]) -> Counter[Currency]:
     """The minor units settled in each currency, across the reports.
 
     Parsing is CPU-bound, so each report is read in a process of its own.
     """
-    settled = Counter[str]()
+    settled = Counter[Currency]()
     with ProcessPoolExecutor() as pool:
         for one_report in pool.map(report_totals, reports):
             settled.update(one_report)
     return settled
 
 
-def report_totals(report: Path) -> Counter[str]:
+def report_totals(report: Path) -> Counter[Currency]:
     """The minor units settled in each currency in one report.
 
-    At module level, so a worker process can import it by name.
+    At module level, so a worker process can import it by name. A currency the
+    shop doesn't sell in raises ValidationError, naming those it does.
     """
-    settled = Counter[str]()
+    settled = Counter[Currency]()
     with report.open(encoding="utf-8", newline="") as rows:
-        for _, currency, minor in csv.reader(rows):
-            settled[currency] += int(minor)
+        for payment_id, currency, minor in csv.reader(rows):
+            row = ReportRow.model_validate(
+                {"payment_id": payment_id, "currency": currency, "minor": minor}
+            )
+            settled[row.currency] += row.minor
     return settled
 ```
 
 - **The function a worker runs is at module level.** It's sent by name and imported in the worker; a lambda, a nested function or a method of an object that can't be pickled fails.
-- **Arguments and results are pickled.** Pass a path, not an open file or a connection; return plain values.
+- **Arguments, results and exceptions are pickled.** Pass a path, not an open file or a connection; return plain values. A row whose currency the shop doesn't sell in raises `ValidationError` in the worker, and `totals` raises it again in the caller.
+- **Each row is parsed where it's read,** into the domain's `Currency`, so the totals are keyed by the type every other module uses ([python-types](../../python-types/SKILL.md)).
 - **State is passed in:** as arguments, or with `initializer=` and `initargs=` for something each worker builds once, such as its logging.
 - **A process costs an interpreter's start-up and an import of the program.** It pays for work measured in seconds; for less, measure first ([python-testing](../../python-testing/SKILL.md)).
 - **The pool's size defaults to `os.process_cpu_count()`,** the CPUs this process may use, which is the right number for CPU-bound work.
