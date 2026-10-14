@@ -1,0 +1,145 @@
+# The drop-in tool config. Copy these tables into pyproject.toml, then rename
+# the example project, shop, to yours: the per-file ignore on src/shop/cli.py
+# (the module that holds main), source_pkgs, root_package, and the packages in
+# the two import-linter contracts.
+#
+# Each setting carries its reason. A rule family joins with its reason, once its
+# findings are fixed. Never loosen a setting to get a run green: fix the code, or
+# suppress the one line with its rule and why. The dependency groups that install
+# these tools are python-project's.
+
+[tool.ruff.lint]
+# ruff's default set (correctness, suspicious, complexity, performance, style),
+# plus these, each beside the rule it holds. Never "ALL": every upgrade would
+# switch on rules nobody chose.
+extend-select = [
+    "ANN",     # every signature annotated; Any only where a value really is anything (ANN401)
+    "ARG",     # an unused argument is a seam nobody uses, or a bug
+    "ASYNC",   # blocking calls in async def, and timeouts taken as parameters (ASYNC109)
+    "B",       # likely bugs: raise without from (B904), zip and map without strict (B905, B912)
+    "D100",    # every module opens with a docstring that states its job
+    "D104",    # every package too
+    "DTZ",     # every datetime aware: no naive now(), today(), fromtimestamp() or strptime()
+    "ERA",     # no commented-out code; the history holds it
+    "FBT",     # no bool positional parameters; a flag is keyword-only
+    "G",       # a log message is a constant, its values are arguments
+    "INP",     # every directory of modules is a package, so a name resolves one way
+    "LOG",     # loggers by name, exceptions logged only where they're handled
+    "PGH",     # a suppression names its rule: no blanket noqa or type: ignore
+    "PLR0913", # past five parameters, take a dataclass
+    "PT",      # pytest's own idioms: plain assert, narrow raises, parametrize shapes
+    "PTH",     # pathlib, not os.path
+    "RUF006",  # every asyncio task is held by its owner
+    "S",       # security: shell, pickle, SQL built from strings, hardcoded secrets
+    "T20",     # no print; write to the stream you were given
+    "TID",     # banned APIs, and absolute imports only
+    "TRY",     # raise and catch narrowly; log the traceback where it stops
+    "UP",      # the idioms requires-python allows, StrEnum included (UP042)
+]
+ignore = [
+    # A subclass exists only where a caller branches on it, so a message written
+    # at the raise is fine.
+    "TRY003",
+]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# `from . import x` hides which package a name comes from.
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Each message is the fix. datetime.utcnow is held by DTZ003, in the default set.
+"unittest.mock".msg = "Write a fake of your own Protocol by hand."
+"httpx".msg = "Use httpx2, httpx's maintained continuation: same API, `import httpx2`."
+"asyncio.get_event_loop".msg = "asyncio.run() in main; asyncio.get_running_loop() in a coroutine."
+"sys.exit".msg = "Raise, and let main return the exit code."
+"os.environ".msg = "Read the environment in main, through Settings, and pass the value in."
+"os.getenv".msg = "Read the environment in main, through Settings, and pass the value in."
+"datetime.datetime.now".msg = "Take `now: Callable[[], datetime]`; main passes `partial(datetime.now, UTC)`."
+"time.time".msg = "Take the clock as a parameter; time.monotonic() measures a duration."
+"subprocess".msg = "Run processes behind a Protocol that main supplies."
+
+[tool.ruff.lint.per-file-ignores]
+# main reads the environment and the clock: the one file the ban list allows them.
+# The ignore lifts the whole list, so it names the composition root and nothing else.
+"src/shop/cli.py" = ["TID251"]
+# pytest rewrites assert into the failure message.
+"tests/**" = ["S101"]
+
+[tool.pyrefly]
+preset = "strict"
+project-includes = ["src", "tests"]
+# src for the package, then the root, so tests import their helpers as tests.<module>.
+search-path = ["src", "."]
+# Only `# pyrefly: ignore[code]` silences an error, and strict reports one that no
+# longer matches; a `# type: ignore` would silence its whole line, unchecked.
+enabled-ignores = ["pyrefly"]
+
+[tool.pytest]
+# Unknown markers and config keys, xfails that pass, and duplicate parametrize ids
+# all fail. It switches on future strict options too, so pytest stays pinned in the lock.
+strict = true
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    # tests/ is a package, so prepend puts only the project root on sys.path:
+    # tests import shared helpers as tests.<module>, and shop from the install.
+    "--import-mode=prepend",
+    # No test reaches the network.
+    "--disable-socket",
+    # asyncio's event loop wakes itself through a Unix socket pair.
+    "--allow-unix-socket",
+]
+# A warning fails the test that raised it. A third-party warning you can't fix
+# yet gets an "ignore:<message>:<category>:<module>" line after "error", with
+# why: the last filter that matches wins.
+filterwarnings = ["error"]
+# asyncio is the only async library, so every async test runs on it unmarked.
+asyncio_mode = "auto"
+# Each test gets its own loop, so no state carries between tests.
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+
+[tool.coverage.run]
+# Measured with `uv run pytest --cov`, and read for what no test runs. No fail_under:
+# a target gets met with tests that run code and check nothing.
+branch = true
+source_pkgs = ["shop"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.importlinter]
+root_package = "shop"
+# Lets a contract name third-party packages, not only the project's own.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Imports point inward: the edges import the domain, never the reverse"
+type = "layers"
+# Highest first. A layer may import those below it, never those above. Siblings
+# joined by | are independent: none imports another.
+layers = [
+    "shop.cli",
+    "shop.payments | shop.storage | shop.settings",
+    "shop.display",
+    "shop.order",
+    "shop.money",
+]
+# An ignore_imports entry that matches no import fails, so it's deleted once fixed.
+unmatched_ignore_imports_alerting = "error"
+broken_contract_guidance = """
+Take the value as a parameter that main fills, or declare a Protocol beside the
+code that needs it and let main pass the implementation.
+"""
+
+[[tool.importlinter.contracts]]
+name = "The domain imports no framework, client or wire library"
+type = "forbidden"
+source_modules = ["shop.order", "shop.money"]
+forbidden_modules = ["pydantic", "pydantic_settings", "httpx2", "typer"]
+unmatched_ignore_imports_alerting = "error"
+broken_contract_guidance = """
+Parse at the edge into the domain's own frozen dataclasses, and reach an outside
+service through a Protocol the domain declares and an adapter implements.
+"""
