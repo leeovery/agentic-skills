@@ -28,6 +28,9 @@ class OrderError(Exception):
     """The base of every exception the order package raises."""
 
 
+...
+
+
 class NotCancellable(OrderError):
     """The order's status forbids cancelling it."""
 
@@ -58,9 +61,7 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
         code = app(args=argv, prog_name="shop", standalone_mode=False)
     except typer.TyperException as err:
         ...
-    except KeyboardInterrupt:
-        return 130
-    except (ValidationError, OrderError) as err:
+    except (ValidationError, OrderError, SettlementError) as err:
         typer.echo(f"shop: {err}", err=True)
         return 1
     except Exception:
@@ -69,7 +70,7 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
     ...
 ```
 
-An `OrderError` is an outcome the user reads, printed once with no traceback. Anything else is a bug, logged once with its traceback.
+An `OrderError` or a `SettlementError` is an outcome the user reads, printed once with no traceback. Anything else is a bug, logged once with its traceback.
 
 ## Decision table
 

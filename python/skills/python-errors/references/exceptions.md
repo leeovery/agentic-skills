@@ -106,7 +106,7 @@ except ValueError as err:
 
 ## Every problem at once
 
-- **At a trust boundary, pydantic collects every bad field into one `ValidationError`** ([python-types](../../python-types/SKILL.md)). The harness's `Settings` reports each missing setting in one message, and its test checks two at once.
+- **At a trust boundary, pydantic collects every bad field into one `ValidationError`** ([python-types](../../python-types/SKILL.md)). The shop's `Settings` reports each missing setting in one message, and its test checks two at once.
 - **A check written by hand collects the same way:** each rule appends its problem to a list, and after every rule has run, one exception carries them all as a tuple attribute. The caller fixes everything in one pass.
 
 ## Groups
@@ -143,7 +143,7 @@ def sweep(self, customer_id: CustomerId, *, reason: Reason) -> tuple[Order, ...]
 
 Each edge has one function from exception to answer: `run` for the CLI, a handler wrapper for HTTP. [python-actions](../../python-actions/SKILL.md) holds the codes; the [SKILL.md](../SKILL.md#pattern) pattern shows `run`.
 
-- **Expected failures are answered and not logged:** an `OrderError` or a `ValidationError` prints `shop: <message>` and exits 1. The user reads it, and there's nothing for anyone else to fix.
+- **Expected failures are answered and not logged:** an `OrderError`, a `SettlementError` or a `ValidationError` prints `shop: <message>` and exits 1. The user reads it, and there's nothing for anyone else to fix.
 - **Anything else is a bug, logged once with its traceback** by the last resort, `except Exception: logger.exception("shop failed")`. This is the only `except Exception` in the program; ruff's `BLE001` accepts it because it logs the traceback.
 - **Domain exceptions carry no status or exit code.** An HTTP edge maps `OrderNotFound` to 404 and `NotCancellable` to 409 in its own function; the CLI maps both to 1 in `run`.
 
@@ -151,9 +151,9 @@ Each edge has one function from exception to answer: `run` for the CLI, a handle
 
 `KeyboardInterrupt`, `SystemExit` and `asyncio.CancelledError` derive from `BaseException`, not `Exception`, so no `except Exception` swallows them.
 
-- **Ctrl-C is a `KeyboardInterrupt`,** which `run` turns into exit code 130, the shell's own for an interrupt.
+- **Ctrl-C is a `KeyboardInterrupt`,** which typer turns into exit code 130, the shell's own for an interrupt, and `run` returns it like any other code.
 - **`CancelledError` is how asyncio stops a task:** cleanup runs in `finally` or `async with`, and the error rises on ([python-concurrency](../../python-concurrency/SKILL.md)).
-- **`except BaseException` only to clean up and re-raise,** as the fake store's `transaction()` does to roll back.
+- **`except BaseException` only to clean up and re-raise.** Cleanup that runs however the block ends needs no `except` at all: it goes in `finally`, as the lock file's `held` removes its file ([python-concurrency](../../python-concurrency/SKILL.md)).
 
 ## Suppressing
 
