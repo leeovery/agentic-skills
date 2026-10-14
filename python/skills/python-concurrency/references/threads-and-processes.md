@@ -40,7 +40,7 @@ def _refunded(refunder: Refunder, payment_id: PaymentId, amount: Money) -> bool:
     try:
         refunder.refund(payment_id, amount)
     except PaymentFailed:
-        logger.warning("refund failed", extra={"payment_id": payment_id}, exc_info=True)
+        logger.warning("refund of payment %s failed", payment_id, exc_info=True)
         return False
     return True
 ```
@@ -112,7 +112,7 @@ class Tally:
     """What the refund threads have paid back so far, in each currency."""
 
     lock: threading.Lock = field(default_factory=threading.Lock)  # guards minor
-    minor: Counter[str] = field(default_factory=Counter[str])
+    minor: Counter[Currency] = field(default_factory=Counter[Currency])
 
     def add(self, amount: Money) -> None:
         """Count amount as refunded."""
@@ -120,14 +120,14 @@ class Tally:
             # A read, an add and a write: two threads between them can lose one.
             self.minor[amount.currency] += amount.minor
 
-    def totals(self) -> dict[str, int]:
+    def totals(self) -> dict[Currency, int]:
         """A copy of the totals so far, taken under the lock."""
         with self.lock:
             return dict(self.minor)
 
     def report(self) -> None:
         """Log the totals so far, after the lock is released."""
-        logger.info("refunded so far", extra={"minor": self.totals()})
+        logger.info("refunded so far, in minor units: %s", self.totals())
 ```
 
 - **A named field, declared beside the data it guards,** with a comment saying which. Taken with `with`, never `acquire()` and a `release()` further down.

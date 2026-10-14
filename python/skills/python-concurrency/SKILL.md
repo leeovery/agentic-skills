@@ -54,9 +54,7 @@ class Settler:
             async with asyncio.timeout(self.deadline.total_seconds()):
                 await self.provider.settle(payment_id)
         except SettlementFailed, TimeoutError:
-            logger.warning(
-                "payment not settled", extra={"payment_id": payment_id}, exc_info=True
-            )
+            logger.warning("payment %s not settled", payment_id, exc_info=True)
             return False
         return True
 ```

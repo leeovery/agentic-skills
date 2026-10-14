@@ -53,7 +53,7 @@ async def _settle(
 - **Nothing below it calls `asyncio.run`.** Inside a running loop it raises `RuntimeError: asyncio.run() cannot be called from a running event loop`, so a library function that calls it can never be called from async code.
 - **Async clients open inside the coroutine it runs,** with `async with`. `AsyncClient.aclose()` is a coroutine, so sync wiring can't close one, and only the loop that used its connections can.
 - **`asyncio.get_running_loop()`** inside a coroutine, when an API wants the loop: `loop.time()` for the loop's clock. Never `get_event_loop()`, which raises on 3.14 when no loop is running, and which the drop-in bans.
-- **Ctrl-C cancels the main task.** `asyncio.run` turns the first SIGINT into a cancellation, lets the tasks unwind through their `finally` blocks, then raises `KeyboardInterrupt`, which `main` maps to exit code 130 ([python-actions](../../python-actions/SKILL.md)). A second Ctrl-C raises at once. A task that swallows the cancellation keeps the program running after the first.
+- **Ctrl-C cancels the main task.** `asyncio.run` turns the first SIGINT into a cancellation, lets the tasks unwind through their `finally` blocks, then raises `KeyboardInterrupt`, which typer turns into exit code 130 as it does for any command ([python-actions](../../python-actions/SKILL.md)). A second Ctrl-C raises at once. A task that swallows the cancellation keeps the program running after the first.
 
 ## Tasks and their owner
 
@@ -97,7 +97,9 @@ When the work arrives as a stream, or there's too much to hold a task for each, 
 
 ```python
 # src/shop/settlement/settle.py, on Settler
-async def settle_stream(self, payment_ids: AsyncIterable[PaymentId]) -> list[PaymentId]:
+async def settle_stream(
+    self, payment_ids: AsyncIterable[PaymentId]
+) -> list[PaymentId]:
     """Settle payments as they arrive, and return those that failed.
 
     `limit` workers take them from a queue that holds `limit` more, so a long
@@ -112,7 +114,6 @@ async def settle_stream(self, payment_ids: AsyncIterable[PaymentId]) -> list[Pay
             await queue.put(payment_id)
         queue.shutdown()
     return unsettled
-
 
 async def _work(
     self, queue: asyncio.Queue[PaymentId], unsettled: list[PaymentId]
