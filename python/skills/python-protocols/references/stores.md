@@ -58,7 +58,7 @@ class Sweeper:
     canceller: Canceller
 ```
 
-`SqliteOrders` fills both without knowing either exists, and the sweeper's tests fake one method, not the store's four.
+`SqliteOrders` fills both without knowing either exists, and a fake of `CancellableOrders` needs one method, not the store's four.
 
 ## Rows stay inside
 
