@@ -226,7 +226,8 @@ A module body declares: imports, constants, functions, classes and its logger. A
 
 - Decorators and default values run with the `def`; the body doesn't. A class body runs.
 - From 3.14 annotations are evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)), so a call inside one doesn't run at import, and nor does a `type` alias's value.
-- `DECLARATIONS` are calls that build a type, a logger or a constant and touch nothing outside the process. A name joins only on that test, with the project's own: `SettingsConfigDict` is pydantic-settings' declaration of where settings come from.
+- `DECLARATIONS` are calls that build a type, a logger, a context variable or a constant and touch nothing outside the process: `frozenset`, `tuple` and `re.compile` for constants, and `ContextVar` because the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for one at module level. A name joins only on that test, with the project's own: `SettingsConfigDict` is pydantic-settings' declaration of where settings come from. `TypeVar` stays out: on a 3.12 floor a type parameter replaces it (`UP046`, `UP047`).
+- A name matches as it's written, `re.compile` not `compile`, and a call among an allowed call's arguments is still checked, so `frozenset(open(path))` fails.
 - A `__main__.py` is run, never imported, so it's skipped.
 
 ```python
@@ -249,15 +250,22 @@ from tests.guards.source import (
     write,
 )
 
-# Calls that build a type, a logger or a constant, and touch nothing outside the process.
+# Calls that build a type, a logger, a context variable or a constant: each touches
+# nothing outside the process and builds the same thing on every import. A call among
+# their arguments is checked like any other. The contextvars docs ask for a ContextVar
+# to be made at module level, never in a closure.
 DECLARATIONS = frozenset(
     {
         "NewType",
-        "logging.getLogger",
         "dataclass",
         "field",
+        "logging.getLogger",
+        "ContextVar",
         "SettingsConfigDict",
+        "frozenset",
+        "re.compile",
         "timedelta",
+        "tuple",
     }
 )
 FIX = "call it from main, or from the function that needs it"
@@ -339,6 +347,47 @@ def test_the_import_guard_finds_a_call_at_import(tmp_path: Path) -> None:
     assert report(calls_at_import(tmp_path), allowed=allowed) == [
         f"src/shop/store.py:8: calls sqlite3.connect at import: {FIX}",
         "src/shop/gone.py:old: breaks the rule no more: delete it from the allowance",
+    ]
+
+
+def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "src/shop/prices.py",
+        '''
+        """Prices: each declaration the guard allows, and a file read inside one."""
+        import logging
+        import re
+        from contextvars import ContextVar
+        from dataclasses import dataclass, field
+        from datetime import timedelta
+        from typing import NewType
+
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        logger = logging.getLogger(__name__)
+        PRICE_LIST: ContextVar[str] = ContextVar("price_list", default="retail")
+        Sku = NewType("Sku", str)
+        SKU = re.compile(r"[A-Z]{3}-[0-9]{4}")
+        SYMBOLS = {"GBP": "£", "EUR": "€"}
+        CURRENCIES = tuple(SYMBOLS)
+        ZERO_DECIMAL = frozenset({"JPY", "KRW"})
+        BLOCKED = frozenset(open("blocked.txt"))
+
+
+        class Settings(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="SHOP_")
+            grace: timedelta = timedelta(days=14)
+
+
+        @dataclass(frozen=True, slots=True)
+        class Basket:
+            skus: list[Sku] = field(default_factory=list)
+        ''',
+    )
+
+    assert report(calls_at_import(tmp_path)) == [
+        f"src/shop/prices.py:18: calls open at import: {FIX}",
     ]
 ```
 

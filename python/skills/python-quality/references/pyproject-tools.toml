@@ -58,6 +58,13 @@ ban-relative-imports = "all"
 "time.time".msg = "Take the clock as a parameter; time.monotonic() measures a duration."
 "subprocess".msg = "Run processes behind a Protocol that main supplies."
 
+[tool.ruff.lint.flake8-type-checking]
+# pydantic needs a field's type at runtime: one imported only under `if TYPE_CHECKING:`
+# passes every gate, then fails the first time the model is built. With the bases
+# named, TC004 (default) flags it. ruff follows a base only within its file, so the
+# project's own base model, subclassed in another module, joins the list.
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
+
 [tool.ruff.lint.per-file-ignores]
 # main reads the environment and the clock: the one file the ban list allows them.
 # The ignore lifts the whole list, so it names the composition root and nothing else.
