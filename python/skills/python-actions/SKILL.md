@@ -50,7 +50,7 @@ class Canceller:
             cancel_reason=reason,
         )
         self.orders.save(cancelled)
-        logger.info("order cancelled", extra={"order_id": order_id, "reason": reason})
+        logger.info("order %s cancelled, reason %s", order_id, reason)
         return cancelled
 
 
@@ -60,7 +60,7 @@ def ensure_cancellable(order: Order) -> None:
         raise NotCancellable(order.id, order.status)
 ```
 
-`main`'s wiring builds it once, `Canceller(orders=SqliteOrders(db=db), payments=Gateway(client=http), now=partial(datetime.now, UTC))`, and the command, the handler and the consumer that cancel all call that one.
+`main`'s wiring builds it once, `Canceller(orders=SqliteOrders(db=db), payments=Gateway(client=http, retry=Retry(...)), now=partial(datetime.now, UTC))`, and the command, the handler and the consumer that cancel all call that one.
 
 ## Decision table
 

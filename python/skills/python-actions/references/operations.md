@@ -130,29 +130,34 @@ class Restorer:
         return restored
 ```
 
-`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with `with self.db:`, which commits on a clean exit and rolls back on an exception, and yields a writer bound to it:
+`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with `with self.db:`, which commits on a clean exit and rolls back on an exception, and yields a writer bound to it. Its own `save` is one write in a transaction of its own:
 
 ```python
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SqliteOrders:
-    """Orders in SQLite, as the order package's OrderStore."""
+    """Orders in SQLite, as the order package's OrderStore. No row leaves it."""
 
     db: sqlite3.Connection
 
     ...
 
+    def save(self, order: Order) -> None:
+        """Write the order and its lines in one transaction, replacing any under its id."""
+        with self.transaction() as tx:
+            tx.save(order)
+
     @contextmanager
     def transaction(self) -> Generator[SqliteTransaction]:
         """Open a transaction: committed when the block ends, rolled back if it raises.
 
-        Every write in the block goes through the store it yields: this store's
+        Every write in the block goes through the writer it yields: this store's
         own save would commit, part way through.
         """
         with self.db:
             yield SqliteTransaction(db=self.db)
 ```
 
-- **Every write in the block goes through `tx`,** never the outer store, which would commit outside the transaction.
+- **Every write in the block goes through `tx`,** never the store's own `save`, which opens a `with self.db:` of its own. sqlite3's doesn't nest: the inner block's exit commits the whole transaction part way through, and a later failure can't take that back.
 - **A call that leaves the process can't roll back.** A refund or an email sent inside the block has happened even when the commit fails. Make it before the writes, keyed so a retry is safe, as `Canceller` makes its refund; or record it in the transaction and send it after the commit.
 - **The fake stages the block's writes on a copy** and keeps them only when the block ends cleanly, so a test sees the rollback ([python-testing](../../python-testing/SKILL.md)).
 - **`-> Generator[T]` on a `@contextmanager`,** not `Iterator[T]`: the stubs mark the `Iterator` form deprecated, and the drop-in's pyrefly fails on it.
@@ -238,7 +243,7 @@ def cancel_requested(canceller: Canceller, body: bytes) -> None:
         if err.status is not Status.CANCELLED:
             raise
         # The queue delivers a message at least once: this one was handled before.
-        logger.info("order already cancelled", extra={"order_id": message.order_id})
+        logger.info("order %s already cancelled", message.order_id)
 ```
 
 - **Returning acknowledges the message; raising leaves it on the queue.** A message that can never succeed, such as one for a shipped order, ends in the dead-letter queue, where someone looks at it.

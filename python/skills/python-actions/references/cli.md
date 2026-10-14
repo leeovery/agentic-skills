@@ -9,11 +9,15 @@ typer is the one library here. Version 0.27 bundles its own copy of click and no
 ## The app
 
 ```python
+type Settle = Callable[[Sequence[PaymentId]], list[PaymentId]]
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Deps:
     """What the commands call."""
 
     canceller: Canceller
+    settle: Settle
 
 
 type Wiring = Callable[[], AbstractContextManager[Deps]]
@@ -44,13 +48,21 @@ def build_app(wiring: Wiring) -> typer.Typer:
             order = deps.canceller.cancel(OrderId(order_id), reason=reason)
         typer.echo(f"cancelled {order.id}, worth {display.money(order.total)}")
 
+    @app.command()
+    def settle(payment_ids: list[str]) -> None:
+        """Settle payments with the provider, a few at a time."""
+        with wiring() as deps:
+            unsettled = deps.settle([PaymentId(p) for p in payment_ids])
+        if unsettled:
+            raise SettlementError(f"payments not settled: {', '.join(unsettled)}")
+
     return app
 ```
 
-- **`Deps` holds the operations,** built by the wiring with their stores, clients and clock. A command picks the one it calls. Nothing in a command reads the environment, opens a file or builds a client.
+- **`Deps` holds what every command calls,** built by the wiring with its stores, clients and clock: the `Canceller`, and `settle`, a plain function that enters asyncio for the one command that needs it ([python-concurrency](../../python-concurrency/SKILL.md)). A command picks the one it calls. Nothing in a command reads the environment, opens a file or builds a client.
 - **The wiring is a factory of a context manager,** entered inside the command. `--help`, `shop` alone and a mistyped command never enter it, so they need no settings, no database and no network. `main` passes `from_environment`; a test passes `lambda: nullcontext(Deps(...))`.
 - **No module-level `app`.** One built at import is shared by every test that imports it, and its commands can only reach their dependencies through globals.
-- **The callback keeps `cancel` a subcommand.** A typer app with one command and no callback runs that command as the app itself: `shop o-1` would cancel, and `shop cancel o-1` would fail as an extra argument. The callback's docstring is the app's help.
+- **The callback keeps each command a subcommand, however few there are.** A typer app with one command and no callback runs that command as the app itself: were `cancel` the only one, `shop o-1` would cancel, and `shop cancel o-1` would fail as an extra argument. The callback's docstring is the app's help.
 - **`add_completion=False`** drops the `--install-completion` and `--show-completion` options; the first edits the user's shell start-up file. Turn it on when completion is wanted, and test it.
 
 ## A command
@@ -92,13 +104,11 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
         if message := err.format_message():
             typer.echo(f"shop: {message}", err=True)
         return err.exit_code
-    except KeyboardInterrupt:
-        return 130
     except typer.Abort:
         # A prompt declined, or its input closed with Ctrl-D.
         typer.echo("shop: aborted", err=True)
         return 1
-    except (ValidationError, OrderError) as err:
+    except (ValidationError, OrderError, SettlementError) as err:
         typer.echo(f"shop: {err}", err=True)
         return 1
     except Exception:
@@ -109,21 +119,26 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
     return code if isinstance(code, int) else 0
 ```
 
-- **`standalone_mode=False`** makes typer return or raise instead of printing and calling `sys.exit` itself. Usage errors arrive as `typer.TyperException` subclasses carrying `exit_code`, 2 for each of them; `typer.Exit(n)` and `--help` come back as the return value; an interrupt inside the command comes back as 130.
+- **`standalone_mode=False`** makes typer return or raise instead of printing and calling `sys.exit` itself. Usage errors arrive as `typer.TyperException` subclasses carrying `exit_code`, 2 for each of them; `typer.Exit(n)` and `--help` come back as the return value; an interrupt, while typer parses or the command runs, comes back as 130, so `run` needs no clause for it.
 - **`typer.Abort` is caught before `Exception`.** It isn't a `TyperException`, and without its own clause a declined `typer.confirm(..., abort=True)` would be logged as a crash, traceback and all.
-- **Expected failures print one line and exit 1:** the settings' `ValidationError`, which names every missing or bad value at once, and the domain's `OrderError`. Only the unexpected is logged with its traceback, once, here ([python-errors](../../python-errors/SKILL.md)).
+- **Expected failures print one line and exit 1:** the settings' `ValidationError`, which names every missing or bad value at once, and the domain's `OrderError` and `SettlementError`. Only the unexpected is logged with its traceback, once, here ([python-errors](../../python-errors/SKILL.md)).
 - **A command never exits by itself:** no `sys.exit`, which the drop-in bans outside `shop/cli.py`, and no `raise typer.Exit(1)` for a failure. It raises the domain's exception, and `run` prints it and picks the code.
 
 ## main
 
 ```python
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the command line on argv, or on the process's own arguments."""
-    return run(build_app(from_environment), argv)
+    """Run the command line on argv, or on the process's own arguments.
+
+    The run is one piece of work, so it has one correlation id.
+    """
+    with CORRELATION_ID.set(str(uuid.uuid7())):
+        return run(build_app(from_environment), argv)
 ```
 
 - **`[project.scripts]` names it:** `shop = "shop.cli:main"`. The script uv installs calls `sys.exit(main())`, and `shop/__main__.py` does the same for `python -m shop` with `raise SystemExit(main())`. Nothing else exits.
 - **`from_environment` is the composition root's wiring:** it reads `Settings`, configures logging, and opens the database and the gateway's client for one command ([python-architecture](../../python-architecture/SKILL.md)).
+- **`main` gives the run its correlation id,** so every log line the run causes carries it ([python-errors](../../python-errors/SKILL.md)).
 - **`argv=None` means the process's arguments;** `main([])` means none. Tests always pass a list.
 
 ## Tracebacks and secrets
@@ -138,16 +153,19 @@ typer installs its own `sys.excepthook` when the app is called, and prints a ric
 Build the app over a wiring that yields fakes, and run it with typer's `CliRunner`:
 
 ```python
-def test_cancel_prints_the_order_it_cancelled() -> None:
+def over_fakes(*, settle: Settle) -> typer.Typer:
+    """The command line over fakes: one pending order, and settle as given."""
     canceller = Canceller(
         orders=FakeOrders.holding(make_order()),
         payments=FakeRefunder(),
         now=lambda: NOW,
     )
+    return build_app(lambda: nullcontext(Deps(canceller=canceller, settle=settle)))
 
+
+def test_cancel_prints_the_order_it_cancelled() -> None:
     result = CliRunner().invoke(
-        build_app(lambda: nullcontext(Deps(canceller=canceller))),
-        ["cancel", "o-1", "--reason", "out-of-stock"],
+        over_fakes(settle=lambda _: []), ["cancel", "o-1", "--reason", "out-of-stock"]
     )
 
     assert result.exit_code == 0
@@ -192,7 +210,7 @@ def test_main_exits_2_on_a_usage_error_with_no_settings(
 ```
 
 - **`build_app` with fakes** tests what a command translates: parsing, output and the code. What `cancel` decides is tested on `Canceller`.
-- **`run` over a small app made in the test** covers the codes no real command reaches easily: a command that raises `KeyboardInterrupt` for 130, one that raises `RuntimeError` for the logged 1, one that declines a prompt fed through `isolation(input="n\n")`.
+- **`run` over a small app made in the test** covers the codes no real command reaches easily: a command that raises `KeyboardInterrupt` for 130, one that raises `RuntimeError` for the logged 1, one that declines a prompt fed through `isolation(input="n\n")`. A wiring that raises `KeyboardInterrupt` proves an interrupt while the dependencies open is 130 too.
 - **`main` with no settings** proves `--help` and usage errors never build the wiring. **`main` with settings missing** proves they're all named at once.
 - **Check standard output and standard error apart:** data in one, the failure in the other. Read them inside the `isolation` block; they're closed after it.
 
