@@ -2,7 +2,7 @@
 
 **A source guard is a test that reads the project's own source and fails where a rule breaks.**
 
-Contents: a linter first · the shape of a guard · where the guards live, and how they're imported · the helpers · guard 1, modules named for a job · guard 2, nothing runs at import · guard 3, values worded by display · guard 4, logging configured by main · guard 5, no patching in tests · guard 6, domain classes named for their job · what syntax can't see.
+Contents: a linter first · the shape of a guard · where the guards live, and how they're imported · the helpers · guard 1, modules named for a job · guard 2, nothing runs at import · guard 3, values worded by display · guard 4, logging configured by main · guard 5, no patching in tests · guard 6, domain names say what they are or do · what syntax can't see.
 
 ## A linter first
 
@@ -22,7 +22,7 @@ A guard is for what neither can say: a module's name, what runs at import, which
 - **It parses with `ast`** and walks the tree, tracking the qualname of the def or class around each node.
 - **Each breach says where, what, and the fix:** `src/shop/storage/sqlite.py:45: calls connect at import: call it from main, or from the function that needs it`. `check` fails once with every breach, one per line, and no traceback.
 - **Its allowance only shrinks.** Each entry is `"path:qualname"`, with a comment saying why it's allowed for now. An entry covers every breach in that def or class; one that covers nothing fails, so it's deleted the day the code is fixed.
-- **It's been seen to fail.** A second test writes a module that breaks the rule under `tmp_path`, runs the guard over it, and checks it reports exactly that, a stale allowance entry included. A guard reading the wrong directory otherwise passes forever.
+- **It's been seen to fail.** A second test writes a module that breaks the rule under `tmp_path`, runs the guard over it, and checks it reports exactly that, and a stale allowance entry too where the guard keeps an allowance, as guards 2 and 3 do. A guard reading the wrong directory otherwise passes forever.
 
 ## Where the guards live, and how they're imported
 
@@ -568,17 +568,24 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
 
 The [SKILL.md](../SKILL.md#pattern) pattern. A test that needs `monkeypatch.setattr` has found a missing seam ([python-testing](../../python-testing/SKILL.md)); `unittest.mock` is banned by ruff, so this guard covers the patch ruff can't see.
 
-## Guard 6: domain classes named for their job
+- **Every way to patch, on every `MonkeyPatch`:** `setattr`, `delattr`, `setitem` and `delitem`, on the `monkeypatch` fixture, on a parameter of any name annotated `pytest.MonkeyPatch`, and on the name a `pytest.MonkeyPatch.context()` is bound to. Its fixture has one of each.
+- **`setenv` and `delenv` are allowed.** The environment is the process's input, not code, and the session fixture in [python-testing](../../python-testing/SKILL.md)'s isolation uses them to keep the machine's variables out. A test of a component never needs them: the component takes the value ([python-architecture](../../python-architecture/SKILL.md)).
+- **It knows a `MonkeyPatch` by its annotation,** which ruff's `ANN` asks of every parameter, so a fixture passed on under another name is still found.
 
-An operation is named by its verb, a value by what it is ([python-actions](../../python-actions/SKILL.md)). Only the domain packages are read, the ones the import-linter `forbidden` contract names: an adapter subclassing `logging.Handler` is rightly a Handler.
+## Guard 6: domain names say what they are or do
+
+An operation is named by its verb, a value by what it is, and neither repeats the package it sits in ([python-actions](../../python-actions/SKILL.md)). The guard reports a class with a suffix that says nothing, and a function whose name holds its package's last word: `cancel_order` in `shop.order`, `parse_money` in `shop.money`. Only the domain is read, and the guard takes its list from the import-linter `forbidden` contract in `pyproject.toml`, through `tomllib`, so the two can't drift apart; an adapter subclassing `logging.Handler` is rightly a Handler.
 
 ```python
-# tests/guards/test_class_names.py
-"""Domain classes say what they are or do: no Service, Manager, Handler or Processor."""
+# tests/guards/test_domain_names.py
+"""Domain names say what they are or do: no OrderManager, no cancel_order."""
 
 import ast
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 from tests.guards.source import (
     Breach,
@@ -591,39 +598,80 @@ from tests.guards.source import (
     write,
 )
 
-# The domain packages. An adapter may need a suffix: a logging.Handler subclass is a Handler.
-DOMAIN = (
-    "src/shop/shipping/",
-    "src/shop/settlement/",
-    "src/shop/order/",
-    "src/shop/money.py",
-    "src/shop/secret.py",
-)
+# Its source modules are the domain. An adapter may need a suffix: a
+# logging.Handler subclass is a Handler.
+CONTRACT = "The domain imports no framework, client or wire library"
 SUFFIXES = ("Service", "Manager", "Handler", "Processor")
 FIX = "name an operation by its verb (Canceller), a value by what it is"
+REPEATS = "drop the word its package already says (cancel, not cancel_order)"
 
 
-def vague_classes(root: Path) -> Iterator[Breach]:
-    """The classes in root's domain packages named with a suffix that says nothing."""
+def domain(root: Path) -> dict[str, str]:
+    """Each domain package and module, as its path from root, and its name's last word.
+
+    They're read from the import-linter contract that keeps frameworks out of
+    the domain, so the guard and the contract can't disagree.
+    """
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    for contract in config["tool"]["importlinter"]["contracts"]:
+        if contract["name"] == CONTRACT:
+            return {
+                f"src/{name.replace('.', '/')}": name.rpartition(".")[2]
+                for name in contract["source_modules"]
+            }
+    pytest.fail(f"no import-linter contract named {CONTRACT!r}")
+
+
+def package_of(path: str, packages: dict[str, str]) -> str | None:
+    """The last word of the domain package or module that holds path, if one does."""
+    for base, word in packages.items():
+        if path == f"{base}.py" or path.startswith(f"{base}/"):
+            return word
+    return None
+
+
+def vague_names(root: Path) -> Iterator[Breach]:
+    """Domain classes named for no job, and functions that repeat their package."""
+    packages = domain(root)
     for module in modules(root, "src"):
-        if not module.path.startswith(DOMAIN):
+        package = package_of(module.path, packages)
+        if package is None:
             continue
         for scope, node in scoped(module.tree):
-            if isinstance(node, ast.ClassDef) and node.name.endswith(SUFFIXES):
-                yield Breach(
-                    path=module.path,
-                    line=node.lineno,
-                    scope=qualify(scope, node.name),
-                    what=f"class {node.name} is named for no job",
-                    fix=FIX,
-                )
+            match node:
+                case ast.ClassDef(name=name) if name.endswith(SUFFIXES):
+                    what, fix = f"class {name} is named for no job", FIX
+                case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name) if (
+                    package in name.strip("_").split("_")
+                ):
+                    what, fix = f"{name} repeats its package's name", REPEATS
+                case _:
+                    continue
+            yield Breach(
+                path=module.path,
+                line=node.lineno,
+                scope=qualify(scope, name),
+                what=what,
+                fix=fix,
+            )
 
 
-def test_domain_classes_are_named_for_their_job() -> None:
-    check(vague_classes(project_root()))
+def test_domain_names_say_what_they_are_or_do() -> None:
+    check(vague_names(project_root()))
 
 
-def test_the_class_name_guard_finds_a_manager(tmp_path: Path) -> None:
+def test_the_domain_name_guard_finds_a_manager_and_a_repeat(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "pyproject.toml",
+        f'''
+        [[tool.importlinter.contracts]]
+        name = "{CONTRACT}"
+        type = "forbidden"
+        source_modules = ["shop.order", "shop.money"]
+        forbidden_modules = ["pydantic"]
+        ''',
+    )
     write(
         tmp_path,
         "src/shop/order/manage.py",
@@ -632,15 +680,25 @@ def test_the_class_name_guard_finds_a_manager(tmp_path: Path) -> None:
 
 
         class OrderManager:
-            def cancel(self) -> None: ...
+            def cancel_order(self) -> None: ...
+
+            def reorder(self) -> None: ...
         ''',
     )
+    write(tmp_path, "src/shop/money.py", "def parse_money() -> None: ...")
     write(tmp_path, "src/shop/logs/json.py", "class JsonHandler: ...")
+    write(tmp_path, "src/shop/api.py", "def order_reply() -> None: ...")
 
-    assert report(vague_classes(tmp_path)) == [
+    assert report(vague_names(tmp_path)) == [
+        f"src/shop/money.py:1: parse_money repeats its package's name: {REPEATS}",
         f"src/shop/order/manage.py:4: class OrderManager is named for no job: {FIX}",
+        f"src/shop/order/manage.py:5: cancel_order repeats its package's name: {REPEATS}",
     ]
 ```
+
+- **Words, not letters.** The name is split on `_`, so `reorder` and `reordered` in `shop.order` pass, and `cancel_order` doesn't.
+- **Functions and classes, not modules.** `shop/order/order.py` holds what an order is, and is rightly named for it; guard 1 holds module names to a job.
+- **Its fixture writes a `pyproject.toml` too,** with the contract the guard looks for, so the fixture's domain is what the guard reads.
 
 ## What syntax can't see
 

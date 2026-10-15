@@ -26,7 +26,7 @@ A source guard: a test that reads the project's source and fails where the rule 
 
 ```python
 # tests/guards/test_patching.py
-"""Tests pass a fake through a seam; they never patch an attribute in place."""
+"""Tests pass a fake through a seam; they never patch an attribute or an item in place."""
 
 import ast
 from collections.abc import Iterator
@@ -44,42 +44,94 @@ from tests.guards.source import (
 )
 
 FIX = "take the dependency as a parameter, and pass a fake from the test"
+# setenv and delenv aren't among them: the environment is what the process is
+# given, not code, and the session fixture uses them to keep the machine's out.
+PATCHES = frozenset({"setattr", "delattr", "setitem", "delitem"})
+MONKEYPATCH = frozenset({"pytest.MonkeyPatch", "MonkeyPatch"})
+CONTEXT = frozenset({"pytest.MonkeyPatch.context", "MonkeyPatch.context"})
+
+
+def patchers(tree: ast.Module) -> set[str]:
+    """The names a MonkeyPatch goes by in tree.
+
+    The fixture's own, any name annotated as one, which ruff's ANN asks of every
+    parameter, and the name each MonkeyPatch.context() is bound to.
+    """
+    names = {"monkeypatch"}
+    for node in ast.walk(tree):
+        match node:
+            case ast.arg(arg=name, annotation=ast.expr() as kind) if (
+                dotted(kind) in MONKEYPATCH
+            ):
+                names.add(name)
+            case ast.withitem(
+                context_expr=ast.Call(func=func), optional_vars=ast.Name(id=name)
+            ) if dotted(func) in CONTEXT:
+                names.add(name)
+            case _:
+                pass
+    return names
 
 
 def patches(root: Path) -> Iterator[Breach]:
-    """The monkeypatch.setattr calls in root's tests/."""
+    """Each setattr, delattr, setitem and delitem on a MonkeyPatch in root's tests/."""
     for module in modules(root, "tests"):
+        names = patchers(module.tree)
         for scope, node in scoped(module.tree):
-            if (
-                isinstance(node, ast.Call)
-                and dotted(node.func) == "monkeypatch.setattr"
-            ):
-                what = "patches with monkeypatch.setattr"
-                yield Breach(
-                    path=module.path, line=node.lineno, scope=scope, what=what, fix=FIX
-                )
+            match node:
+                case ast.Call(
+                    func=ast.Attribute(value=ast.Name(id=name), attr=method)
+                ) if name in names and method in PATCHES:
+                    yield Breach(
+                        path=module.path,
+                        line=node.lineno,
+                        scope=scope,
+                        what=f"patches with {name}.{method}",
+                        fix=FIX,
+                    )
+                case _:
+                    pass
 
 
 def test_no_test_patches_an_attribute() -> None:
     check(patches(project_root()))
 
 
-def test_the_patching_guard_finds_a_patch(tmp_path: Path) -> None:
+def test_the_patching_guard_finds_a_patch_on_any_monkeypatch(tmp_path: Path) -> None:
     write(
         tmp_path,
         "tests/test_cancel.py",
         '''
-        """Cancelling, with the clock patched."""
+        """Cancelling, with what it reaches patched."""
+        import sys
+
         import pytest
 
 
         def test_cancel_stamps_the_time(monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.setattr("shop.order.cancel.datetime", None)
+            monkeypatch.delattr("shop.order.cancel.logger")
+
+
+        def test_cancel_offline(patcher: pytest.MonkeyPatch) -> None:
+            patcher.setitem(sys.modules, "shop.payments", None)
+            patcher.delitem(sys.modules, "shop.storage")
+
+
+        def test_cancel_from_the_environment() -> None:
+            with pytest.MonkeyPatch.context() as env:
+                env.setenv("SHOP_DATABASE", "shop.db")
+                env.delenv("SHOP_GATEWAY_URL")
+                env.setattr("shop.order.cancel.datetime", None)
         ''',
     )
 
     assert report(patches(tmp_path)) == [
-        f"tests/test_cancel.py:6: patches with monkeypatch.setattr: {FIX}",
+        f"tests/test_cancel.py:8: patches with monkeypatch.setattr: {FIX}",
+        f"tests/test_cancel.py:9: patches with monkeypatch.delattr: {FIX}",
+        f"tests/test_cancel.py:13: patches with patcher.setitem: {FIX}",
+        f"tests/test_cancel.py:14: patches with patcher.delitem: {FIX}",
+        f"tests/test_cancel.py:21: patches with env.setattr: {FIX}",
     ]
 ```
 
