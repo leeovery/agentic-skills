@@ -13,7 +13,7 @@ Every package has one job and every rule one owner. Nothing happens at import, a
 2. **Each kind of value people read is worded by one function in `shop.display`.** Money, instants and ratios go through `display.money`, `display.instant` and `display.percent`; no other module holds a format spec, `format()` or `strftime()`. A stored or sent value has its own encoder, never a display function. *Wording is the rule copied most, and its copies disagree in the last digit.* Held by a source guard, in python-quality.
 3. **Shared rules come first.** When work is split across agents or PRs, list the meanings more than one part needs and build each once, with tests, before the parts start. *Otherwise each part rebuilds the meaning locally, and review is where the rule gets found.*
 4. **src layout, a package per domain, a module per job.** `src/shop/order/` holds orders, and `cancel.py` cancelling them; each package's docstring states its job. Never `utils`, `helpers`, `common`, `misc`, `shared`, `models`, `services` or `types`, and never a module per class. *A grab-bag name gives code no reason to live anywhere else, a module per class scatters one job across files named for nouns, and under `src/` the tests import the installed package, not the tree beside them.* Held by a source guard on names, in python-quality, and ruff's `INP001` and `D104`.
-5. **`main(argv=None) -> int` in `shop/cli.py`, named in `[project.scripts]`, is the composition root.** It hands the CLI a wiring that, once a command runs, builds the settings, configures logging and opens the dependencies; it returns the exit code that `run` sets ([python-actions](../python-actions/SKILL.md)). Nothing else reads the environment or exits. *A test calls `main` with argv and a scoped environment and checks the code it returns; the wrapper the installer writes exits with it.* Held by ruff's `banned-api` (`TID251`): `sys.exit`, `os.environ`, `os.getenv` and `datetime.now` everywhere but `shop/cli.py`.
+5. **`main(argv=None) -> int` in `shop/cli.py`, named in `[project.scripts]`, is the composition root.** It hands the CLI a wiring that, once a command runs, reads the settings, configures logging, and gives that command what opens its own dependencies; it returns the exit code that `run` sets ([python-actions](../python-actions/SKILL.md)). Nothing else reads the environment or exits. *A test calls `main` with argv and a scoped environment and checks the code it returns; the wrapper the installer writes exits with it.* Held by ruff's `banned-api` (`TID251`): `sys.exit`, `os.environ`, `os.getenv` and `datetime.now` everywhere but `shop/cli.py`.
 6. **Nothing runs at import.** A module body holds imports, constants, functions, classes and its logger: no settings object, client, connection, `basicConfig`, `load_dotenv()`, registration or I/O. *Whatever runs at import runs in every test that imports the module, before the test can choose its inputs, in an order nobody chose.* Held by a source guard, in python-quality.
 7. **Config is one frozen `BaseSettings`, built in `main`'s wiring and nowhere else.** Every missing or bad value is reported at once, and a secret, or anything that says where data goes, has no default. `main` passes each component the values it takes, never the settings object. *A setting read where it's used is a dependency no signature shows, fails mid-run instead of at start, and can't be chosen by a test.* Held by import-linter's `layers`: only `shop.cli` sits above `shop.settings`.
 8. **Imports point inward, and are absolute.** `shop.order` and `shop.money` never import the CLI, the settings, an adapter, pydantic, typer or httpx2; the edges import them. A cycle is fixed by moving a type to its owner, or by a Protocol at the consumer, never by a `types` module or an `if TYPE_CHECKING:` import. *The domain is tested without a transport, and a cycle under `TYPE_CHECKING` is hidden, not gone.* Held by import-linter's `layers` and `forbidden` contracts, and ruff's `TID252`.
@@ -26,14 +26,13 @@ Every package has one job and every rule one owner. Nothing happens at import, a
 ...
 
 
-@contextmanager
-def from_environment() -> Generator[Deps]:
+def from_environment() -> Deps:
     """Wire the commands from the SHOP_ environment variables.
 
-    Reads the settings, configures logging, and opens the database and the
-    payment gateway's client, closing both on exit.
+    Reads the settings and configures logging. Each command opens what it uses
+    when it runs: cancel the database and a client, settle an async client.
     """
-    settings = Settings()
+    settings = read_settings()
     stderr = logging.StreamHandler()
     stderr.addFilter(CorrelationFilter())
     logging.basicConfig(
@@ -41,27 +40,22 @@ def from_environment() -> Generator[Deps]:
         format="%(levelname)s %(name)s [%(correlation_id)s]: %(message)s",
         handlers=[stderr],
     )
-    with (
-        closing(connect(settings.database)) as db,
-        httpx2.Client(
-            base_url=str(settings.gateway_url),
-            headers=_authorised(settings),
-            timeout=settings.gateway_timeout.total_seconds(),
-        ) as http,
-    ):
-        yield Deps(
-            canceller=Canceller(
-                orders=SqliteOrders(db=db),
-                payments=Gateway(
-                    client=http,
-                    retry=Retry(
-                        sleep=time.sleep, clock=time.monotonic, rand=random.random
-                    ),
-                ),
-                now=partial(datetime.now, UTC),
+    url = str(settings.gateway_url)
+    headers = _authorised(settings.gateway_token)
+    timeout = settings.gateway_timeout.total_seconds()
+    return Deps(
+        canceller=partial(
+            _canceller,
+            database=settings.database,
+            client=partial(
+                httpx2.Client, base_url=url, headers=headers, timeout=timeout
             ),
-            settle=partial(settle_payments, settings),
-        )
+        ),
+        settle=partial(
+            settle_payments,
+            partial(httpx2.AsyncClient, base_url=url, headers=headers, timeout=timeout),
+        ),
+    )
 
 
 ...
@@ -76,7 +70,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run(build_app(from_environment), argv)
 ```
 
-`pyproject.toml` names it, `shop = "shop.cli:main"`, and `src/shop/__main__.py` runs `raise SystemExit(main())`. `--help` and a usage error never enter the wiring, so they need no settings.
+`pyproject.toml` names it, `shop = "shop.cli:main"`, and `src/shop/__main__.py` runs `raise SystemExit(main())`. A command calls the wiring only when it runs, so `--help` and a usage error need no settings, and each command opens only its own dependencies: `_canceller` opens the database and the client when `cancel` enters it, and closes both after.
 
 ## Where it goes
 

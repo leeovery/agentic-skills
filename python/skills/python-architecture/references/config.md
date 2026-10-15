@@ -14,8 +14,10 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import HttpUrl, SecretStr
+from pydantic import HttpUrl, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PREFIX = "SHOP_"
 
 
 class Settings(BaseSettings):
@@ -26,7 +28,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="SHOP_", frozen=True, hide_input_in_errors=True
+        env_prefix=PREFIX, frozen=True, hide_input_in_errors=True
     )
 
     database: Path
@@ -34,6 +36,26 @@ class Settings(BaseSettings):
     gateway_token: SecretStr
     gateway_timeout: timedelta = timedelta(seconds=10)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+
+class SettingsError(Exception):
+    """The environment's settings are missing or bad: the message names each one."""
+
+
+def read_settings() -> Settings:
+    """The settings, read from the environment.
+
+    Raises SettingsError naming each variable that's missing or bad, never its
+    value, so run prints it as the user's to fix.
+    """
+    try:
+        return Settings()
+    except ValidationError as err:
+        problems = "".join(
+            f"\n  {PREFIX}{'_'.join(map(str, error['loc'])).upper()}: {error['msg']}"
+            for error in err.errors(include_url=False, include_input=False)
+        )
+        raise SettingsError(f"settings missing or bad:{problems}") from err
 ```
 
 - **One class for the program,** one prefix (`SHOP_`), and a field per setting, named for its concern first: `gateway_url`, `gateway_token`, `gateway_timeout`. The variable is the prefix and the field: `SHOP_GATEWAY_URL`.
@@ -65,24 +87,23 @@ Never a `str` that the code parses later, and never an `int` of seconds.
 
 ## Built in `main`, nowhere else
 
-- **`Settings()` is called in `from_environment`,** the wiring `main` hands the CLI, once a command runs ([SKILL.md](../SKILL.md#pattern)). It's the one place the environment is read; ruff's ban list rejects `os.environ` and `os.getenv` in every other file.
-- **`main` passes values, never the settings object:** `connect(settings.database)`, `httpx2.Client(base_url=..., timeout=...)`. A component that takes `Settings` depends on every setting and on pydantic, and its test must build all of them.
+- **`read_settings()` is called in `from_environment`,** the wiring `main` hands the CLI, once a command runs ([SKILL.md](../SKILL.md#pattern)). It's the one place the environment is read; ruff's ban list rejects `os.environ` and `os.getenv` in every other file.
+- **`main` passes values, never the settings object:** `database=settings.database`, and a client factory with the URL, the token's header and the timeout bound in. `_authorised` takes the token alone. A component that takes `Settings` depends on every setting and on pydantic, and its test must build all of them.
 - **import-linter holds it.** `shop.settings` shares a layer with the other edges, `shop.api` and `shop.consumers`, which may not import each other, and sits above the adapters and the domain, which may not import it. Only `shop.cli` can.
 - **Not at import.** `settings = Settings()` at module level reads the environment the moment anything imports the module, tests included; python-quality's guard on import-time calls reports it.
 
 ## Every bad value at once
 
-pydantic validates every field before raising, so one `ValidationError` names each missing and each bad value. `run` turns it into one message on stderr and exit code 1 ([python-actions](../../python-actions/SKILL.md)):
+pydantic validates every field before raising, so one `ValidationError` names each missing and each bad value. `read_settings` turns it into a `SettingsError` naming each variable, never its value, and `run` prints that on stderr with exit code 1 ([python-actions](../../python-actions/SKILL.md)):
 
 ```
-shop: 3 validation errors for Settings
-database
-  Field required [type=missing]
-    For further information visit https://errors.pydantic.dev/2.14/v/missing
-gateway_url
-  Field required [type=missing]
-...
+shop: settings missing or bad:
+  SHOP_DATABASE: Field required
+  SHOP_GATEWAY_URL: Field required
+  SHOP_GATEWAY_TOKEN: Field required
 ```
+
+The settings' failure gets its own exception so `run` can tell it from a `ValidationError` anywhere else, which is a bug and is logged with its traceback.
 
 A rule across fields (a timeout no longer than a limit set beside it) is a `@model_validator(mode="after")` on `Settings`, so it fails at start too.
 
@@ -188,8 +209,11 @@ def test_main_names_every_missing_setting_and_exits_1(tmp_path: Path) -> None:
     code, _, stderr = run_main(env, ["cancel", "o-1"])
 
     assert code == 1
-    assert "gateway_url\n  Field required" in stderr
-    assert "gateway_token\n  Field required" in stderr
+    assert stderr == (
+        "shop: settings missing or bad:\n"
+        "  SHOP_GATEWAY_URL: Field required\n"
+        "  SHOP_GATEWAY_TOKEN: Field required\n"
+    )
 ```
 
 - **No `monkeypatch.setenv` around a component.** A component never reads the environment, so its test passes the value as a parameter; only `main`'s tests set variables.
