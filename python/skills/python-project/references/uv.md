@@ -13,16 +13,15 @@ uv init --package --python 3.14 shop
 - **What it writes:** `pyproject.toml`, `.python-version`, `README.md`, a `.gitignore`, and `src/shop/__init__.py` holding a `main` that prints a greeting, named in `[project.scripts]` as `shop = "shop:main"`. The tree it grows into is [python-architecture](../../python-architecture/SKILL.md)'s: `main` moves to `shop/cli.py` and the script follows it.
 - **`--package`** is the default since uv 0.12, and says so on any version. `--lib` starts a library ([libraries.md](libraries.md)).
 - **`--python 3.14`** sets both `requires-python = ">=3.14"` and `.python-version`. Left out, uv uses the first interpreter it finds, which may be older than the floor you meant.
-- **The build backend** is `uv_build`, bounded to the uv minor that ran `init`: `uv_build>=0.12.23,<0.13.0` from uv 0.12.23, `uv_build>=0.13.1,<0.14.0` from 0.13.1. uv's minor releases may break, so keep the bound, and raise both ends in a commit of its own when the project moves to a new uv minor.
-- **The version** lives in `[project] version` and nowhere else. `uv version --bump minor` raises it; code reads it with `importlib.metadata.version("shop")`, called where it's used, never at module level.
+- **The build backend** is `uv_build`, bounded to the uv minor that ran `init`: `uv_build>=0.13.1,<0.14.0` from uv 0.13.1. Keep the bound, and raise both ends in a commit of its own when the project moves to a new uv minor.
+- **The version** lives in `[project] version` alone; `uv version --bump minor` raises it.
 - **Add `.env` to the `.gitignore`;** `uv init` doesn't ([python-architecture](../../python-architecture/SKILL.md) holds what a `.env` is for).
 
 ## The Python version
 
 - **`requires-python`** is the oldest Python the project supports. ruff reads it as its target, so `UP` suggests only what the floor allows.
-- **`.python-version`** is the interpreter `uv run` uses. Pin it to the floor (`uv python pin 3.14`), so the tests run on the oldest Python the project promises. uv downloads that interpreter on first use if the machine lacks it.
+- **`.python-version`** is the interpreter `uv run` uses. Pin it to the floor (`uv python pin 3.14`); uv downloads it on first use if the machine lacks it.
 - **Both are committed, and raised together.** Then `uv lock`, the gates, and python-quality's `UP` pass, in a commit of their own ([python-quality](../../python-quality/SKILL.md)).
-- **Without a `.python-version`,** uv picks for each machine: the first suitable interpreter it finds, or the newest it can download, 3.15 from uv 0.13.
 
 ## Dependencies and groups
 
@@ -36,10 +35,10 @@ uv remove --group test hypothesis
 
 - **`uv add` writes a lower bound** (`httpx2>=2.13.1`), resolves, updates `uv.lock` and syncs. The lock holds the exact version.
 - **Tools live in named groups,** `lint` and `test` ([PEP 735](https://peps.python.org/pep-0735/) `[dependency-groups]`), never in `[project.dependencies]` or an extra: groups aren't published, so no user installs them.
-- **`dev` composes them:** `dev = [{ include-group = "lint" }, { include-group = "test" }]`. uv syncs `dev` by default, so `uv sync` and `uv run` have every tool. `uv add` has no flag that writes an `include-group` entry, so that line is written by hand, once, then `uv lock`. `uv add --dev x` would put `x` in `dev` beside them; add it to its group instead.
+- **`dev` composes them:** `dev = [{ include-group = "lint" }, { include-group = "test" }]`. uv syncs `dev` by default, so `uv sync` and `uv run` have every tool. No `uv add` flag writes an `include-group` entry, so that line is written by hand, then `uv lock`. `uv add --dev x` would put `x` in `dev` beside them; add it to its group instead.
 - **An extra is for users,** a feature they choose to install (`shop[cli]`), never for tools.
-- **`[tool.uv] dev-dependencies`** is the old form of the dev group, which uv's docs say will be deprecated and removed. Move it to `[dependency-groups]`.
-- **A new runtime dependency comes with its reason in the PR:** what the standard library lacks, and why this package. `uv tree --invert --package idna` shows what pulled a transitive one in.
+- **`[tool.uv] dev-dependencies`** is the old form of the dev group, on its way out of uv. Move it to `[dependency-groups]`.
+- **`uv tree --invert --package idna`** shows what pulled a transitive dependency in.
 
 ## Running
 
@@ -79,8 +78,8 @@ uv remove --group test hypothesis
 exclude-newer = "1 week"
 ```
 
-- **uv ignores every file uploaded less than a week ago** when it resolves. A release that turns out malicious is usually yanked within days; a lock taken a week behind never sees it.
-- **It holds back `uv add` too,** so it goes in before the first one. Each bound `uv add` writes is then the newest release a week old: `pydantic>=2.13.5` on 2026-10-15, with 2.14.1 four days old. A bound on a release inside the week, written before the cooldown or by hand, fails `uv lock`, which says the package "was filtered by `exclude-newer`" and suggests `exclude-newer-package`.
+- **uv ignores every file uploaded less than a week ago** when it resolves, `uv add` included, so each bound it writes is the newest release a week old.
+- **A bound on a release inside the week,** written before the cooldown or by hand, fails `uv lock`, which says the package "was filtered by `exclude-newer`" and suggests `exclude-newer-package`.
 - **The syntax:** a friendly duration (`"24 hours"`, `"1 week"`, `"30 days"`), an ISO 8601 one (`"P7D"`), or a fixed timestamp. Months and years aren't allowed. The lock records the span (`exclude-newer-span = "P1W"`), not a date, so each upgrade counts the week back from the day it runs.
 - **A release you need sooner,** a fix that can't wait, is exempted by name until the week passes, with why. `false` takes the package's newest release; a duration of its own, `{ urllib3 = "1 day" }`, a shorter wait:
 

@@ -14,8 +14,7 @@ def reordered(
 ) -> Order:
     """A new pending order for previous's products still on sale, at today's prices.
 
-    Raises OrderError when none of them is still on sale, and ValueError when
-    today's prices are in more than one currency, which no catalogue should give.
+    Raises OrderError when none of them is still on sale.
     """
     lines = tuple(
         Line(sku=line.sku, quantity=line.quantity, unit_price=prices[line.sku])
@@ -43,24 +42,20 @@ class Reorderer:
     catalogue: Catalogue
 
     def reorder(self, order_id: OrderId, *, new_id: OrderId) -> Order:
-        """Place the order with the id again as new_id, and return the order stored as it.
-
-        The caller picks new_id once for each reorder it means, so a request sent
-        twice places one order, and the second gets the first's back.
-        """
+        """Place the order with the id again as new_id, and return the order stored as it."""
         previous = self.orders.get(order_id)
         prices = self.catalogue.prices(line.sku for line in previous.lines)
         return self.orders.add(reordered(previous, order_id=new_id, prices=prices))
 ```
 
-- **`Orders` and `Catalogue` are Protocols declared beside it,** with only the methods it calls ([python-protocols](../../python-protocols/SKILL.md)). `new_id` comes from the caller, the id of the reorder it means, so a request sent twice places one order ([below](#idempotency)).
-- **`main` builds it with keywords,** and a test builds it the same way with fakes in the fields; `kw_only=True` means two collaborators of one type can't swap. No `__init__` by hand: a field that needs a default takes one.
+- **`Orders` and `Catalogue` are Protocols declared beside it,** with only the methods it calls ([python-protocols](../../python-protocols/SKILL.md)). `new_id` comes from the caller, so a request sent twice places one order ([below](#idempotency)).
+- **`main` builds it with keywords,** and a test builds it the same way with fakes in the fields; `kw_only=True` means two collaborators of one type can't swap. No `__init__` by hand.
 - **Two jobs are two dataclasses,** even when they hold the same store. A class with `create`, `cancel` and `refund` is a service under another name: it gathers every job's collaborators and grows with each job added.
 - **A question about one value is a property on its type,** not an operation: `order.total`, `status.cancellable`.
 
 ## Nothing per call
 
-One operation can serve calls that run at once, on an edge's threads or tasks, so a call never stores anything on it. A count kept as a field, `self.restored += 1`, would be shared by two restores at once. `frozen=True` makes that an error: pyrefly reports ``Cannot set field `restored` [read-only]``, and it raises `FrozenInstanceError` if it runs. `slots=True` gives the instance no `__dict__`, so a new name, `self.current = order`, fails too (`missing-attribute`).
+One operation can serve calls that run at once, so a call never stores anything on it: a count kept as a field, `self.restored += 1`, would be shared by two restores at once. `frozen=True` makes that an error, and `slots=True` gives the instance no `__dict__`, so a new name, `self.current = order`, fails too.
 
 A call's state is local to the call: `Restorer.restore`, below, counts in a local variable. When helpers need the same state, pass it, or build a private, unfrozen dataclass inside the method and hand that to them.
 
@@ -68,7 +63,7 @@ A call's state is local to the call: `Restorer.restore`, below, counts in a loca
 
 - **The module is the job, the class its doer, the method the verb:** `shop/order/cancel.py`, `Canceller`, `cancel`. A reader writes `from shop.order.cancel import Canceller` and `canceller.cancel(order_id, reason=reason)`.
 - **A pure function is named for what it returns** (`reordered`, `total`); a method that acts, for the act (`reorder`).
-- **No `Service`, `Manager`, `Handler` or `Processor`** on a class in a domain package, and no function named `cancel_order` in `shop.order`. Guard 6 in [python-quality](../../python-quality/SKILL.md)'s source guards holds both, over the packages import-linter's `forbidden` contract names: it reports a class with one of the suffixes, and a function whose name holds its package's last word.
+- **No `Service`, `Manager`, `Handler` or `Processor`** on a class in a domain package, and no function named `cancel_order` in `shop.order`. Guard 6 in [python-quality](../../python-quality/SKILL.md)'s source guards holds both.
 
 ## Guards
 
@@ -109,8 +104,8 @@ class Withdrawer:
 
 The trap this avoids: a `withdraw` that saves each order as cancelled itself, and forgets the refund, because the refund lives in `cancel`.
 
-- **The field is a one-method Protocol,** `Cancels`, declaring `cancel(order_id, *, reason) -> Order` beside `Withdrawer`. Its tests pass a hand-written fake of it, `FakeCanceller`, which records "cancel `o-1`, out of stock" for each cancel it makes, or raises instead what the test sets for an order, so they check what the withdrawer asks and none of the canceller's own steps.
-- **The wiring builds the chain:** `Withdrawer(orders=store, canceller=canceller)`, with the `SqliteOrders` and the `Canceller` the edges get. No command withdraws yet, so `main` builds none; `test_sqlite.py` holds the store as `OrdersByProduct`, and pyrefly checks it fits.
+- **The field is a one-method Protocol,** `Cancels`, declaring `cancel(order_id, *, reason) -> Order` beside `Withdrawer`. Its tests pass a fake of it, `FakeCanceller`, so they check what the withdrawer asks and none of the canceller's own steps.
+- **The wiring builds the chain:** `Withdrawer(orders=store, canceller=canceller)`, with the `SqliteOrders` and the `Canceller` the edges get.
 
 ## Transactions
 
@@ -124,11 +119,7 @@ class Restorer:
     orders: TransactionalOrders
 
     def restore(self, orders: Iterable[Order]) -> int:
-        """Save every order in one transaction, and return how many it saved.
-
-        Each save replaces the order under its id, so a second run leaves the
-        store as the first did, and a failed run leaves it as it was.
-        """
+        """Save every order in one transaction, and return how many it saved."""
         restored = 0
         with self.orders.transaction() as tx:
             for order in orders:
@@ -137,38 +128,9 @@ class Restorer:
         return restored
 ```
 
-`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with an explicit `BEGIN IMMEDIATE`, which takes the write lock at once, commits it when the block ends and rolls it back if the block raises, and yields a writer bound to it. Its own `save` is one write in a transaction of its own:
+`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with `BEGIN IMMEDIATE`, commits it when the block ends, rolls it back if the block raises, and yields a writer bound to it; [python-protocols](../../python-protocols/SKILL.md) shows it.
 
-```python
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SqliteOrders:
-    """Orders in SQLite, as the order package's OrderStore. No row leaves it."""
-
-    db: sqlite3.Connection
-
-    ...
-
-    def save(self, order: Order) -> None:
-        """Write the order and its lines in one transaction, replacing any under its id."""
-        with self.transaction() as tx:
-            tx.save(order)
-
-    ...
-
-    @contextmanager
-    def transaction(self) -> Generator[SqliteTransaction]:
-        """Open a transaction: committed when the block ends, rolled back if it raises.
-
-        Every write in the block goes through the writer it yields. This store's
-        own save opens a transaction of its own, which SQLite refuses in here.
-        """
-        with _transaction(self.db, writes=True):
-            yield SqliteTransaction(db=self.db)
-```
-
-`_transaction` is the module's one `BEGIN` and `COMMIT`, rolling back if the block raises; [python-protocols](../../python-protocols/SKILL.md) shows it.
-
-- **Every write in the block goes through `tx`,** never the store's own `save`, which opens a transaction of its own. SQLite refuses a `BEGIN` inside another, so that mistake fails at once rather than committing part way through.
+- **Every write in the block goes through `tx`,** never the store's own `save`, which opens a transaction of its own. SQLite refuses a `BEGIN` inside another, so the mistake fails at once rather than commit part way.
 - **A call that leaves the process can't roll back.** A refund or an email sent inside the block has happened even when the commit fails. Make it outside, keyed so a retry is safe: `Canceller` claims the order, refunds, then saves. Or record it in the transaction and send it after the commit.
 - **The fake stages the block's writes on a copy** and keeps them only when the block ends cleanly, so a test sees the rollback ([python-testing](../../python-testing/SKILL.md)).
 - **`-> Generator[T]` on a `@contextmanager`,** not `Iterator[T]`: the stubs mark the `Iterator` form deprecated, and the drop-in's pyrefly fails on it.
@@ -178,19 +140,11 @@ class SqliteOrders:
 A file something else reads is never written in place. `Path.write_bytes` and `open(path, "w")` truncate it first, so a crash midway leaves it empty or cut short. Write a temporary file in the same directory, get it to disk, then rename it over the target: a rename within one filesystem is atomic, so a reader sees the old file or the new one.
 
 ```python
-# A new file is its owner's alone, as mkstemp makes it: who else may read the
-# data is the caller's to say.
 NEW_FILE_MODE = 0o600
 
 
 def replace(path: Path, data: bytes, *, mode: int | None = None) -> None:
-    """Replace the file at path with data, in mode, or in the mode path has now.
-
-    The data goes to a temporary file beside path, reaches the disk, then is
-    renamed over path: a rename within one filesystem is atomic. On any
-    failure the temporary file is removed and path is left as it was. A path
-    through a symlink replaces the file it leads to, and the link stays.
-    """
+    """Replace the file at path with data, in mode, or in the mode path has now."""
     target = path.resolve()
     with tempfile.NamedTemporaryFile(
         dir=target.parent, prefix=f".{target.name}.", delete_on_close=False
@@ -208,36 +162,29 @@ def replace(path: Path, data: bytes, *, mode: int | None = None) -> None:
 
 def _mode_of(path: Path) -> int:
     """The permission bits of the file at path, or NEW_FILE_MODE when there's none."""
-    try:
-        return stat.S_IMODE(path.stat().st_mode)
-    except FileNotFoundError:
-        return NEW_FILE_MODE
+    ...
 
 
 def _sync_directory(directory: Path) -> None:
     """Flush directory's entries to disk: on POSIX, a rename lives in the directory."""
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    ...
 ```
 
 - **The same directory,** never `/tmp`: a rename can't cross filesystems, and `Path.replace` raises `OSError` when asked to.
-- **A link stays a link.** `replace` resolves the path first, so a path through a symlink gets the file it leads to replaced, beside that file, and the link still points at it. Renamed over the link itself, the link would become a copy that the next writer of the target never updates. `test_atomic.py` replaces a file through a link in another directory.
-- **`delete_on_close=False`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)) keeps the file through `close()`, and the `with` deletes it on the way out if anything failed. After the rename there's nothing under its name, which it ignores.
-- **The file keeps its mode.** `replace` reads it before writing and gives it to the new file, so a private file stays private; a caller passes `mode` to change it. A new file is `0o600`, as `mkstemp` makes it, since who else may read the data is the caller's to say. `test_atomic.py` replaces a `0o600` file and a `0o644` one, and checks each kept its mode.
-- **`fchmod`, then `fsync`, then the rename,** or a crash can leave the new name pointing at data, or a mode, that never reached the disk. **Then `fsync` the directory** on POSIX, where the rename is an entry in the directory: without it, a crash can bring back the old file.
+- **A link stays a link.** `replace` resolves the path first, so the file a symlink leads to is replaced and the link still points at it.
+- **`delete_on_close=False`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)) keeps the file through `close()`, and the `with` deletes it on the way out if anything failed.
+- **The file keeps its mode,** so a private file stays private; a caller passes `mode` to change it. A new file is `0o600`, as `mkstemp` makes it: who else may read the data is the caller's to say.
+- **`fchmod`, then `fsync`, then the rename,** or a crash can leave the new name pointing at data that never reached the disk. **Then `fsync` the directory** on POSIX, or a crash can bring back the old file.
 - **It lives in one module, `shop/storage/atomic.py`,** called as `atomic.replace(path, data)`, so the steps are written once.
 
 ## Idempotency
 
 A message is delivered again, a user presses twice, a retry follows a timeout that had in fact succeeded. Each must leave the state one run would.
 
-- **An upsert, never a check then a write.** `if not store.exists(id): store.insert(order)` lets two runs both see nothing and both insert. The SQLite store's save upserts the order, `INSERT … ON CONFLICT (id) DO UPDATE`, and replaces its lines in the same transaction, so restoring the same export twice leaves one copy of each order.
-- **A new record's id comes from the caller.** `reorder(order_id, *, new_id)` takes the new order's id, picked once for the reorder the caller means, as a form does when it's shown. The store's `add` writes only where no order has the id, `INSERT … ON CONFLICT (id) DO NOTHING`, and returns the order stored, so a reorder sent twice places one order and both calls get it back. An id minted inside the call is new each time, and a double submit places two.
-- **An idempotency key on every write to a provider,** derived from the work: the canceller keys its refund `cancel-{order_id}`, and the gateway sends it as `Idempotency-Key`, so a cancel run twice refunds once, and a later refund of the same payment for another reason isn't mistaken for a repeat. A fresh `uuid4()` per call gives every retry a new key, and the provider does it twice. The adapter owns the header ([python-protocols](../../python-protocols/SKILL.md)).
-- **A job that stops partway is safe to run again** when it selects what's left to do. `withdraw` cancels only the orders still open, an order its first run left `CANCELLING` among them, so a second run finishes the first's work.
+- **An upsert, never a check then a write.** `if not store.exists(id): store.insert(order)` lets two runs both see nothing and both insert. The SQLite store's save upserts, `INSERT … ON CONFLICT (id) DO UPDATE`, so restoring the same export twice leaves one copy of each order.
+- **A new record's id comes from the caller,** picked once for what it means, as a form does when it's shown. The store's `add` writes only where no order has the id, `INSERT … ON CONFLICT (id) DO NOTHING`, and returns the order stored, so a reorder sent twice places one order. An id minted inside the call is new each time, and a double submit places two.
+- **An idempotency key on every write to a provider,** derived from the work: the canceller keys its refund `cancel-{order_id}`, so a cancel run twice refunds once. A fresh `uuid4()` per call gives every retry a new key, and the provider does it twice. The adapter owns the header ([python-protocols](../../python-protocols/SKILL.md)).
+- **A job that stops partway is safe to run again** when it selects what's left to do. `withdraw` cancels only the orders still open, an order its first run left `CANCELLING` among them.
 
 ### A claim before the call that can't be undone
 
@@ -248,9 +195,7 @@ Load, check and save lets a cancel overwrite a shipment that lands between the l
 def start_cancelling(self, order_id: OrderId) -> Order:
     """Move the order to CANCELLING and return it, if its status allows cancelling.
 
-    The status is checked and changed by one statement, so a shipment that
-    lands first is refused. Raises NotCancellable with the status it found,
-    or OrderNotFound.
+    Raises NotCancellable with the status it found, or OrderNotFound.
     """
     with _transaction(self.db, writes=True):
         claimed = self.db.execute(
@@ -264,13 +209,10 @@ def start_cancelling(self, order_id: OrderId) -> Order:
     return order
 ```
 
-`_transaction` holds the `UPDATE` and the read after it in one transaction, and `_read` loads the order and its lines inside it ([python-protocols](../../python-protocols/SKILL.md)).
-
-- **The write is the check.** The `UPDATE` changes the status only where the current one allows cancelling, the statuses `_cancellable()` reads from `Status.cancellable`, and its row count says whether it won. 0 means the order can't be cancelled now, whatever it was when someone loaded it, and the store raises `NotCancellable` with the status it found.
+- **The write is the check.** The `UPDATE` changes the status only where the current one allows cancelling, and its row count says whether it won. 0 means the order can't be cancelled now, whatever it was when someone loaded it.
 - **The claim is a state of its own, `CANCELLING`,** and the refund waits for it. A shipment written the same way, `UPDATE orders SET status = 'shipped' WHERE id = ? AND status = 'paid'`, misses a claimed order, so nothing ships under the refund.
-- **`CANCELLING` still allows cancelling,** so a cancel that stopped after the claim, at a crash, a refused refund or a redelivered message, runs again and finishes. Its refund carries the same key, so the provider refunds once.
+- **`CANCELLING` still allows cancelling,** so a cancel that stopped after the claim runs again and finishes. Its refund carries the same key, so the provider refunds once.
 - **The last write needs no condition.** Nothing else moves a claimed order, so `save` writes it `CANCELLED`, with the time and the reason, whole.
-- **The fake store claims the same way,** refusing what the real one refuses, so the canceller's tests run against the rule they rely on ([python-testing](../../python-testing/SKILL.md)).
 
 ## Edges
 
@@ -321,7 +263,7 @@ def cancel_requested(canceller: Canceller, body: bytes) -> None:
 `CancelRequested` is the message's pydantic model, with `extra="forbid"`: the order's id and a `Reason`.
 
 - **Returning acknowledges the message; raising leaves it on the queue.** A message that can never succeed, such as one for a shipped order, ends in the dead-letter queue, where someone looks at it.
-- **A redelivery is success.** The order already cancelled is the state the message asked for, so the consumer acknowledges it rather than failing forever. An order a delivery left `CANCELLING`, stopped after its claim, the next delivery finishes.
+- **A redelivery is success.** The order already cancelled is the state the message asked for, so the consumer acknowledges it rather than failing forever.
 - **The loop that pulls messages, and its shutdown,** are [python-concurrency](../../python-concurrency/SKILL.md)'s.
 
 ### What an edge never does

@@ -15,17 +15,10 @@ uv run pytest --cov
 ```text
 Name                           Stmts   Miss Branch BrPart  Cover   Missing
 --------------------------------------------------------------------------
-src/shop/__main__.py               2      2      0      0     0%   3-5
-src/shop/api.py                   37      4      6      1    84%   83-86
-src/shop/cli.py                   91      4      4      0    96%   178, 184-190
-src/shop/money.py                 30      1      6      1    94%   56
 src/shop/order/order.py           53      2     12      1    95%   34-35
 src/shop/payments/refunds.py      35      1      0      0    97%   65
 src/shop/payments/reports.py      28      6      4      0    75%   57-64
-src/shop/processes.py             17      2      0      0    88%   20-21
 src/shop/storage/atomic.py        25      0      2      1    96%   30->exit
---------------------------------------------------------------------------
-TOTAL                            803     22     86      4    97%
 
 26 files skipped due to complete coverage.
 ```
@@ -40,14 +33,11 @@ Each entry in `Missing` is a question, and the answer is one of four things: a t
 |---|---|---|
 | `30->exit` in `atomic.py` | the branch at line 30 never went the other way: `if os.name == "posix":` was never false | it runs only on Windows, where no job measures it: leave it |
 | `65` in `refunds.py` | `Tally.report`, which nothing calls | a test is missing, or the method is |
-| `56` in `money.py`, `83-86` in `api.py`, `20-21` in `processes.py` | a split into no parts; the 502 and 500 answers; `ProcessRunner.which` | tests are missing, each a few lines |
 | `34-35` in `order.py` | the `case _: assert_never(self)` arm | unreachable by design, and the type checker proves it: leave it |
 | `57-64` in `reports.py` | the body of `report_totals`, run in worker processes | coverage can't see it yet: below |
-| `178`, `184-190` in `cli.py` | the wiring that enters asyncio and opens a real `AsyncClient` | runs only against the real provider; the parts it wires are tested apart |
-| `3-5` in `__main__.py` | `raise SystemExit(main())` | run by hand; `main` itself is tested |
 
 - **Branches matter more than lines.** A line with an `if` runs whichever way it goes; `30->exit` is the way nobody went, and the line count can't show it.
-- **Missed code that nothing should run is deleted,** not tested. `run` once ended with `except KeyboardInterrupt: return 130`, and the report showed it never ran, though the interrupt test passed: typer turns an interrupt into 130 before `run` sees it. The clause went, and the test stayed.
+- **Missed code that nothing should run is deleted,** not tested. An `except KeyboardInterrupt: return 130` that never ran, though the interrupt test passed, was dead: typer turns an interrupt into 130 first. The clause went, and the test stayed.
 - **`# pragma: no cover` hides a line from every later reader.** Leave a known gap in the report, where it's seen, instead.
 
 ## Code in other processes
@@ -63,7 +53,7 @@ With it, `report_totals` reads as covered. Threads and asyncio tasks run in the 
 
 ## Never a target
 
-No `fail_under`, no `--cov-fail-under`, no percentage in CI. A target is met by tests that call code and assert nothing, which is the cheapest way to raise the number and the least use. It also punishes deleting a well-tested function. Coverage is read when someone asks whether the tests are enough, and before a mutation run, to know which code has any tests at all.
+No `fail_under`, no `--cov-fail-under`, no percentage in CI. A target is met by tests that call code and assert nothing, the cheapest way to raise the number and the least use. Coverage is read when someone asks whether the tests are enough, and before a mutation run, to know which code has any tests at all.
 
 ## mutmut
 
@@ -83,11 +73,11 @@ uv run --group mutation mutmut show "shop.settlement.settle.xǁSettlerǁ_settled
 uv run --group mutation mutmut browse                   # step through them, and retest after a fix
 ```
 
-- **It's an audit, not a gate.** It reruns tests for every mutant, so it runs now and then: on a package after a change to it, or when someone asks whether the tests are strong enough. mutmut 3.8 is Beta, and installed in a `mutation` dependency group of its own, outside `dev`, so each command names the group ([python-project](../../python-project/SKILL.md)).
+- **It's an audit, not a gate.** It reruns tests for every mutant, so it runs now and then: on a package after a change to it, or when someone asks whether the tests are strong enough. mutmut 3.8 is Beta, and installed in a `mutation` dependency group of its own ([python-project](../../python-project/SKILL.md)).
 - **POSIX only.** It forks a process per mutant; on Windows it runs inside WSL.
-- **The source guards sit it out.** mutmut copies the project into `mutants/` with each function rewritten, so the guards reading `src/` there find code that isn't the project's and fail. Keep `mutants/` out of version control.
+- **The source guards sit it out.** mutmut copies the project into `mutants/` with each function rewritten, which the guards would fail. Keep `mutants/` out of version control.
 - **It mutates code inside functions,** and only the functions some test calls. Module-level constants and code no test reaches are coverage's to find first.
-- **Read each survivor and decide.** `🙁` survived: either an assert is missing, so write the test that kills it, or the change can't matter. Running the shop's settlement package, every survivor but one was in the settler's one log call: the message changed to `"XXpayment %s not settledXX"`, the payment's id to `None`, `exc_info=True` to `False`. The other was `SettlementFailed`'s message changed to `None`, and callers branch on its type and its `payment_id`. Nobody reads either as API, so they're mutants to leave. Where a project agrees for every log call, `do_not_mutate_patterns` in `[tool.mutmut]` skips them.
+- **Read each survivor and decide.** `🙁` survived: either an assert is missing, so write the test that kills it, or the change can't matter, such as a log call's message changed to `"XXpayment %s not settledXX"`. Where a project agrees for every log call, `do_not_mutate_patterns` in `[tool.mutmut]` skips them.
 - **`⏰` timed out** is a mutant that never finished, such as the settler's deadline changed to `asyncio.timeout(None)`, which waits on a hung payment for good: the tests caught it by not finishing.
 
 ## Mutations by hand
@@ -99,4 +89,4 @@ The cheap version, for one change you've just made:
 3. Run the tests for that module: `uv run pytest tests/order/test_cancel.py`.
 4. Revert with `git checkout -- src/shop/order/cancel.py`, then the next. One at a time, never stacked.
 
-Swap the claim in `Canceller.cancel`, `self.orders.start_cancelling(order_id)`, for a plain `self.orders.get(order_id)`, and `test_cancel_refuses_a_shipped_order` and `test_cancel_leaves_the_order_cancelling_when_the_refund_fails` fail: the claim is held. A mutation that leaves every test green gets a test that fails on it, written before the revert, and seen to pass after.
+A mutation that leaves every test green gets a test that fails on it, written before the revert, and seen to pass after.

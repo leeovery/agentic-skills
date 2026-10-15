@@ -36,7 +36,7 @@ def test_no_test_looks_up_a_name() -> None:
         socket.getaddrinfo("pay.example", 443)
 ```
 
-- **On Windows the block is narrower.** asyncio's socket pair is loopback TCP there, so a Windows job adds `--allow-hosts=127.0.0.1`, and pytest-socket then blocks only a connection to another host. Opening a socket and looking up a name pass, so the two tests above fail on that job: skip them on Windows.
+- **On Windows the block is narrower.** asyncio's socket pair is loopback TCP there, so a Windows job adds `--allow-hosts=127.0.0.1`, which blocks only a connection to another host: skip the two tests above on Windows.
 - **No `@pytest.mark.enable_socket` and no `--force-enable-socket`.** A test that needs the network is testing the provider, not the code; it gets `MockTransport`.
 - **A blocked call can hide in a swallowed exception.** Code that catches `Exception` around a request turns the block into a degraded result, and the test passes. The guard makes the call fail; only the test's asserts notice the result.
 
@@ -58,8 +58,8 @@ def _outside_world(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         yield
 ```
 
-- **`pytest.MonkeyPatch.context()`,** as the `monkeypatch` fixture is per test and this is per session. `setenv` and `delenv` change the environment and undo it after. `setattr`, `delattr`, `setitem` and `delitem` stay banned on it as on the fixture: python-quality's patching guard finds the name a `context()` is bound to.
-- **The variable names come from `Settings` and its `PREFIX`,** so a setting added later is unset too, and so is every one after a change of prefix, and a developer's real `SHOP_DATABASE` can never reach a test.
+- **`pytest.MonkeyPatch.context()`,** as the `monkeypatch` fixture is per test and this is per session. `setenv` and `delenv` change the environment and undo it after; `setattr` and its kin stay banned on it, as on the fixture.
+- **The variable names come from `Settings` and its `PREFIX`,** so a setting added later is unset too, and a developer's real `SHOP_DATABASE` can never reach a test.
 - **The run checks it:** `assert Path.home().is_relative_to(tmp_path_factory.getbasetemp())`.
 - **A subprocess the code starts** inherits this environment, so it gets the throwaway home as well.
 
@@ -69,8 +69,6 @@ def _outside_world(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
 
 ```python
 # tests/test_settings.py
-# Every field, as the strings an environment holds. A field left out would be
-# read from the process's environment, even through model_validate.
 STRINGS = {
     "database": "shop.db",
     "gateway_url": "https://pay.example",
@@ -115,7 +113,7 @@ def run_main(
         return main(argv), stdout.getvalue().decode(), stderr.getvalue().decode()
 ```
 
-`CliRunner().isolation(env=...)` sets and unsets the variables for the call and restores them after, and captures both streams. Commands themselves are tested through `build_app` over fakes, without `main`; only the wiring and the exit codes need it ([python-actions](../../python-actions/SKILL.md)).
+`CliRunner().isolation(env=...)` sets and unsets the variables for the call, restores them after, and captures both streams. Commands themselves are tested through `build_app` over fakes, without `main`; only the wiring and the exit codes need it ([python-actions](../../python-actions/SKILL.md)).
 
 ## The strict config
 
