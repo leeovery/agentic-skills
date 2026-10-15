@@ -63,7 +63,7 @@ Two members with one value make the second an alias of the first: `Reason.STOCK_
 What a member means is a property, with a `match` that names every member:
 
 - **Every member is named,** even those that answer like another. When a member is added, pyrefly reports, through `assert_never`, each `match` that hasn't decided about it, instead of the new member falling into a default.
-- **Callers ask the property,** never `order.status in (Status.PENDING, Status.PAID)` inline: that copy of the rule drifts the day a member is added. `CANCELLING` joined the cancellable set in one line of the property, and every caller asking it followed.
+- **Callers ask the property,** never `order.status in (Status.PENDING, Status.PAID)` inline: that copy of the rule drifts the day a member is added. `CANCELLING` joined the cancellable set in one line of the property, and every caller asking it followed. `Status.paid` is the same for which statuses mean an order was paid for: `Order` asks it to require a payment id, and the test builder asks it to give one by default.
 - **A label for people is `shop.display`'s,** not a property: wording lives in one module ([python-architecture](../../python-architecture/SKILL.md)).
 - **Each change of status with side effects is its own operation** (`Canceller`, `Withdrawer`), guarded by a property such as `cancellable`, which the store's conditional claim asks too ([python-actions](../../python-actions/SKILL.md)). There's no state-machine library: the property says what's allowed, and the operation says what happens.
 

@@ -71,11 +71,13 @@ class Order:
             raise ValueError("an order has at least one line")
         if len({line.unit_price.currency for line in self.lines}) > 1:
             raise ValueError("an order's lines are priced in one currency")
+        if self.status.paid and self.payment_id is None:
+            raise ValueError(f"a {self.status} order has its payment's id")
 
     ...
 ```
 
-`Line` holds a `Money`, an integer of minor units and a `Currency`, and its `__post_init__` asks for a quantity of at least one at a price of zero or more; [values.md](references/values.md) has all three.
+A status says what else an order holds: a paid or shipped one its payment's id, a pending one none, and a cancelled one, alone, the time and the reason. `Line` holds a `Money`, an integer of minor units and a `Currency`, and asks for a quantity of at least one at a price of zero or more; [values.md](references/values.md) has every rule.
 
 ## Decision table
 
