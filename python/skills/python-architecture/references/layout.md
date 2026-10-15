@@ -25,6 +25,9 @@ shop/
 ├── pyproject.toml        the project, its script, its dependency groups, the tool config
 ├── uv.lock               every version, pinned; committed
 ├── .python-version
+├── README.md
+├── scripts/
+│   └── gateway_status.py   a script with its dependencies inline, run by uv
 ├── src/
 │   └── shop/
 │       ├── __init__.py       its docstring
@@ -38,12 +41,15 @@ shop/
 │       ├── secret.py         a secret that never shows itself
 │       ├── correlation.py    the id stamped on every log line a piece of work causes
 │       ├── processes.py      programs run as child processes, as a Runner
-│       ├── order/            orders: what one is, what goes wrong, cancelling
+│       ├── order/            orders: what one is, what goes wrong, what's done to one
 │       │   ├── order.py      the ids, Status, Line and Order
 │       │   ├── errors.py     OrderError, and each failure a caller branches on
 │       │   ├── cancel.py     Canceller, and the OrderStore and Refunder it declares
-│       │   ├── ratios.py     figures worked out over many orders
-│       │   └── ...           reorder.py, restore.py, sweep.py, withdraw.py, refunds.py
+│       │   ├── reorder.py    an earlier order placed again, at today's prices
+│       │   ├── restore.py    exported orders saved in one transaction
+│       │   ├── sweep.py      a customer's cancellable orders, each cancelled
+│       │   ├── withdraw.py   a product withdrawn, and its open orders cancelled
+│       │   └── ratios.py     figures worked out over many orders
 │       ├── shipping/
 │       │   └── label.py      shipping labels, made by the carrier's tool
 │       ├── settlement/
@@ -52,6 +58,8 @@ shop/
 │       ├── payments/
 │       │   ├── gateway.py    the provider's HTTP API, as a Refunder
 │       │   ├── settlements.py  the same API from async code, as a settlement Provider
+│       │   ├── refunds.py    many refunds at once from sync code, on a thread pool
+│       │   ├── limits.py     how many calls the provider takes at once, split once
 │       │   └── reports.py    the provider's settlement reports
 │       └── storage/
 │           ├── sqlite.py     orders in SQLite, as an OrderStore
@@ -61,6 +69,7 @@ shop/
 └── tests/                    a package, mirroring src/shop: order/, payments/, guards/
 ```
 
+- **Every package has an `__init__.py` holding only its docstring,** left out of the tree below `src/shop/`.
 - **src layout.** Nothing named `shop` sits at the root, so a test imports the installed package, the one users get, never the tree beside it by accident.
 - **Domain packages** (`order`, `shipping`, `settlement`) and the value modules beneath them (`money`, `secret`) hold types, their rules and their operations. **Adapters** (`payments`, `storage`, `processes`) implement the Protocols the domain declares ([python-protocols](../../python-protocols/SKILL.md)). **The edges** (`cli`, `api`, `consumers`) import the domain, and `cli` the adapters it wires; nothing imports an edge.
 - **Each package and module sits in a layer** of the import-linter contract in [python-quality](../../python-quality/SKILL.md)'s drop-in config, highest first: `cli`; `api | consumers | settings`; `payments | storage | processes`; `display | shipping | settlement`; `order`; `money | secret | correlation`. A new one joins a layer in the same commit, with its reason.
