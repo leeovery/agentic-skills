@@ -65,6 +65,7 @@ class FakeOrders:
 
     orders: dict[OrderId, Order] = field(default_factory=dict)
     saved: list[Order] = field(default_factory=list)
+    in_transaction: bool = False
 
     @classmethod
     def holding(cls, *orders: Order) -> FakeOrders:
@@ -73,6 +74,7 @@ class FakeOrders:
 
     def get(self, order_id: OrderId) -> Order:
         """Return the order, or raise OrderNotFound as the real store does."""
+        self._begin()
         try:
             return self.orders[order_id]
         except KeyError:
@@ -91,10 +93,18 @@ class FakeOrders:
 
     def save(self, order: Order) -> None:
         """Hold the order and record that it was saved."""
+        self._begin()
         self.orders[order.id] = order
         self.saved.append(order)
 
     ...
+
+    def _begin(self) -> None:
+        """Refuse a call made inside the transaction, as SQLite refuses its BEGIN."""
+        if self.in_transaction:
+            raise sqlite3.OperationalError(
+                "cannot start a transaction within a transaction"
+            )
 
 
 @dataclass(slots=True)
@@ -112,7 +122,7 @@ class FakeRefunder:
             raise self.error
 ```
 
-- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, and its claim refuses with `NotCancellable` what the SQLite store's conditional `UPDATE` refuses, asking the same `status.cancellable`, so the code under test meets the same exceptions in a test as in production. The methods left out above, the other consumers' queries and the transaction, answer as the real store does too ([python-protocols](../../python-protocols/SKILL.md)).
+- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, and its claim refuses with `NotCancellable` what the SQLite store's conditional `UPDATE` refuses, asking the same `status.cancellable`, so the code under test meets the same exceptions in a test as in production. Inside its transaction it refuses a call to itself with the `OperationalError` SQLite raises, through `_begin`, so code that writes past the transaction's writer fails in a test as it does in production. The methods left out above, the other consumers' queries and the transaction, answer as the real store does too, and `tests/order/test_fakes.py` checks the refusals and the queries' order against what `test_sqlite.py` checks of the real store ([python-protocols](../../python-protocols/SKILL.md)).
 - **It doesn't inherit from the Protocol.** It matches it by shape, and pyrefly checks the match where the test passes it to `Canceller`. A Protocol method the fake lacks fails the type check, not a test run.
 - **Check what it recorded as a value:** `assert payments.refunded == [PAID_IN_FULL]`, the `Refund` of £25 to `pay-1` under the key `cancel-o-1`. Check the order or the number of calls only when they are the behaviour.
 - **It keeps the Protocol's promises and holds no other logic.** `FakeRefunder` records one refund per key because `Refunder` promises a second does nothing, so a test of a cancel run twice sees whether both runs used one key. Once a fake needs logic past its promises, a memory implementation that lives beside the real one is the better tool ([python-protocols](../../python-protocols/SKILL.md)).
@@ -261,7 +271,7 @@ This is what fixtures are for: a resource with a lifetime, opened before the tes
 
 ## When a test seems to need a patch
 
-`unittest.mock` is banned by ruff's `TID251`, and `monkeypatch.setattr` by a source guard. A test that seems to need either has found a dependency the code reaches for instead of being handed:
+`unittest.mock` is banned by ruff's `TID251`, and `setattr`, `delattr`, `setitem` and `delitem` on any `MonkeyPatch` by a source guard. A test that seems to need either has found a dependency the code reaches for instead of being handed:
 
 | The test wants to patch | Give the code |
 |---|---|

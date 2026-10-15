@@ -20,7 +20,7 @@ The guards below don't replace the seams. They catch the test that slipped past 
 
 ## The network
 
-The drop-in runs pytest with pytest-socket's `--disable-socket`, and `--allow-unix-socket` so asyncio's event loop can wake itself ([python-quality](../../python-quality/SKILL.md)). Any socket a test opens, and any name it looks up, fails it.
+The drop-in runs pytest with pytest-socket's `--disable-socket`, and `--allow-unix-socket` so asyncio's event loop can wake itself ([python-quality](../../python-quality/SKILL.md)). Any network socket a test opens, and any name it looks up, fails it.
 
 With the drop-in's `filterwarnings = ["error"]`, the failure arrives as a warning turned error, `UserWarning: A test tried to use socket.socket.`, or `socket.getaddrinfo` for a lookup: pytest-socket warns before it raises. The run proves the guard is on:
 
@@ -58,7 +58,7 @@ def _outside_world(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         yield
 ```
 
-- **`pytest.MonkeyPatch.context()`,** as the `monkeypatch` fixture is per test and this is per session. `setenv` and `delenv` change the environment and undo it after; `setattr` stays banned.
+- **`pytest.MonkeyPatch.context()`,** as the `monkeypatch` fixture is per test and this is per session. `setenv` and `delenv` change the environment and undo it after. `setattr`, `delattr`, `setitem` and `delitem` stay banned on it as on the fixture: python-quality's patching guard finds the name a `context()` is bound to.
 - **The variable names come from `Settings` and its `PREFIX`,** so a setting added later is unset too, and so is every one after a change of prefix, and a developer's real `SHOP_DATABASE` can never reach a test.
 - **The run checks it:** `assert Path.home().is_relative_to(tmp_path_factory.getbasetemp())`.
 - **A subprocess the code starts** inherits this environment, so it gets the throwaway home as well.
