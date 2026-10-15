@@ -27,7 +27,7 @@ Contents: the seams · callable field or Protocol · the clock · waits · the e
 ## The clock
 
 - **A decision about an instant takes `now`:** a 14-day return window, a token's expiry, the time an order was cancelled. A pure function takes the instant as an argument instead, and the operation that calls it reads `now` once.
-- **`main` passes `partial(datetime.now, UTC)`,** so every instant is aware and in UTC ([python-types](../../python-types/SKILL.md)). ruff's `banned-api` keeps `datetime.now` and `time.time` in the module that holds `main`, and its `DTZ` rules flag a naive one there.
+- **`main` passes `partial(datetime.now, UTC)`,** so every instant is aware and in UTC ([python-types](../../python-types/SKILL.md)). ruff's `banned-api` keeps `datetime.now` and `time.time` out of every module but the one that holds `main` and the process adapter, whose lift is for `subprocess`, and its `DTZ` rules flag a naive one there.
 - **A test stops the clock where it cares:**
 
 ```python
@@ -173,12 +173,18 @@ class ProcessRunner:
         return None if found is None else Path(found)
 
     def run(self, program: Path, *args: str) -> Finished:
-        """Run program with args, never through a shell, and say how it ended."""
+        """Run program with args, never through a shell, and say how it ended.
+
+        Only stderr is kept, read as UTF-8 with each byte that doesn't decode shown
+        as U+FFFD, so a program that writes another encoding still says how it ended.
+        """
         try:
             done = subprocess.run(  # noqa: S603  # no shell, and the caller names the program
                 [program, *args],
-                capture_output=True,
-                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self.timeout.total_seconds(),
                 check=False,
             )
@@ -188,6 +194,7 @@ class ProcessRunner:
 ```
 
 - **A list of arguments, never `shell=True`,** so an order id can't become a command. `subprocess.run` kills the child when the timeout passes, before it raises.
+- **Only stderr is kept, decoded as UTF-8 with `errors="replace"`.** `text=True` decodes both streams strictly, in the locale's encoding, so one byte of Latin-1 raises `UnicodeDecodeError` and hides how the program ended; the test writes `\xff` to both. stdout, which nothing reads, goes to `DEVNULL` rather than into memory.
 - **The ban lifts for this file alone, with its reason.** `per-file-ignores` lifts all of `TID251` at once ([python-quality](../../python-quality/SKILL.md)), so the file holds the adapter and nothing that reads the clock or the environment:
 
 ```toml

@@ -27,7 +27,7 @@ A Protocol belongs to the code that calls it, and it exists to be swapped: in `m
    - Settings arrive as parsed values; files under a base `Path`; HTTP as an `httpx2.Client` built in the wiring with its base URL, auth and timeout.
 
    *Code that reads the clock or the environment itself can only be tested at the real time, on the real machine.* Held by ruff's `banned-api` (`TID251`): `datetime.now`, `time.time`, `os.environ`, `os.getenv` and `subprocess` everywhere but the module that holds `main` and the one adapter that runs processes.
-8. **Fakes are written by hand:** a class that records its calls and returns what the test set. *A fake reads like the domain, and the test checks outcomes instead of pinning the order of calls.* Held by ruff's `banned-api`, which bans `unittest.mock`, and a source guard on `monkeypatch.setattr`, in [python-quality](../python-quality/SKILL.md).
+8. **Fakes are written by hand:** a class that records its calls and returns what the test set. *A fake reads like the domain, and the test checks outcomes instead of pinning the order of calls.* Held by ruff's `banned-api`, which bans `unittest.mock`, and a source guard on patching through any `MonkeyPatch`, in [python-quality](../python-quality/SKILL.md).
 9. **No ABC base classes for seams, and no `@runtime_checkable` dispatch.** *An ABC makes every implementation, fakes included, import and inherit the consumer's class, so one class can't fill a second consumer's need without inheriting that too. `isinstance` against a runtime-checkable Protocol checks only that the names exist: an object whose `refund` is a string passes.*
 
 ## Pattern

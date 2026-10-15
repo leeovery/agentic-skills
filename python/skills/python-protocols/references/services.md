@@ -26,8 +26,8 @@ Domain types in and out: the order package's `Refund`, made of a `PaymentId`, `M
 class Gateway:
     """The provider's refunds endpoint, as the order package's Refunder.
 
-    main hands it a client with the base URL, the token and a timeout set, so
-    every call has a deadline, and the policy for calls that fail in passing.
+    main hands it a client with the base URL, the token and a timeout set, so no
+    step of a call waits for ever, and the policy for calls that fail in passing.
     """
 
     client: httpx2.Client
@@ -92,7 +92,9 @@ class Gateway:
 ## Timeouts
 
 - **Every call has one, set on the client the wiring builds** from `Settings.gateway_timeout` ([seams.md](seams.md)). `build_request` copies the client's timeout onto each request. Left unset, httpx2 waits five seconds, a number nobody chose.
-- **The timeout bounds one attempt; the policy bounds the whole call.** The deadline is checked before each wait, so a refund gives up within `within` plus one attempt's timeout. Deadlines on waits inside asyncio are [python-concurrency](../../python-concurrency/SKILL.md)'s.
+- **The timeout bounds each step of a call, never the call.** httpx2's `Timeout` has four: `connect`, `read` (each wait for more of the answer), `write` (each send) and `pool` (a free connection), and one number sets all four. A provider that trickles its answer, a byte inside every `read`, never trips one: a sync client with a half-second timeout, reading ten bytes sent 0.3 seconds apart, returns after three seconds.
+- **The policy bounds the retries, not an attempt.** `_send` checks `within` before each wait, so no wait runs past the deadline, but an attempt under way runs as long as its steps keep arriving. No figure bounds a sync refund.
+- **A deadline on the whole call needs async code.** `asyncio.timeout` cancels the call wherever it waits, as `Settler`'s `deadline` does for each settlement: the same trickle, through `httpx2.AsyncClient` under `asyncio.timeout(1)`, raises `TimeoutError` at one second. httpx2's sync client has nothing like it, and a thread can't be stopped from outside, so sync code that needs one moves the call to the async client ([python-concurrency](../../python-concurrency/SKILL.md)).
 
 ## Retries
 
@@ -245,7 +247,7 @@ def test_refund_never_retries_a_permanent_failure() -> None:
     assert time.slept == []
 ```
 
-The adapter's tests add one each for retrying a dropped connection under the same idempotency key, never retrying a `LocalProtocolError`, honouring `Retry-After`, stopping when the wait would pass the deadline, and logging each retry. pytest-socket fails any test that opens a real socket, so a client built without the mock transport fails loudly.
+The adapter's tests add one each for retrying a dropped connection under the same idempotency key, never retrying a `LocalProtocolError`, honouring `Retry-After`, stopping when the wait would pass the deadline, and logging each retry. pytest-socket fails any test that opens a network socket, so a client built without the mock transport fails loudly.
 
 Code that refunds is tested against `FakeRefunder` instead (the [SKILL.md](../SKILL.md#pattern) pattern), and never sees HTTP, so a change in the provider's API breaks the gateway's tests alone.
 
