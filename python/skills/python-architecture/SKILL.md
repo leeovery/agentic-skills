@@ -70,7 +70,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run(build_app(from_environment), argv)
 ```
 
-`pyproject.toml` names it, `shop = "shop.cli:main"`, and `src/shop/__main__.py` runs `raise SystemExit(main())`. A command calls the wiring only when it runs, so `--help` and a usage error need no settings, and each command opens only its own dependencies: `_canceller` opens the database and the client when `cancel` enters it, and closes both after.
+`pyproject.toml` names it, `shop = "shop.cli:main"`, and `src/shop/__main__.py` runs `raise SystemExit(main())`. A command calls the wiring only when it runs, so `--help` and a usage error need no settings, and each command opens only its own dependencies: `_canceller` opens the database and the client when `cancel` enters it, and closes both after. Of what the wiring calls, `_authorised` builds the gateway's auth header, `settle_payments` runs the async settler from sync code ([python-concurrency](../python-concurrency/SKILL.md)), and `CORRELATION_ID` and `CorrelationFilter` stamp each log line with the run's id ([python-errors](../python-errors/SKILL.md)).
 
 ## Where it goes
 
