@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-10-15
+
+✨ Added
+- New Python plugin (`python/`) with nine skills for Python 3.14 projects: architecture, project, actions, types, protocols, errors, concurrency, testing and quality.
+- Python skills cover uv for everything, frozen dataclasses and `NewType` ids, Protocols declared by their consumers, and exceptions handled once.
+- A drop-in tool config (`pyproject-tools.toml`) for ruff, pyrefly strict, pytest, coverage, import-linter and mutmut, with a reason beside each rule.
+- `ast`-based source guards for the rules no linter can hold, each with the test that proves it fails.
+- Install the Python plugin with `npx agntc@latest add leeovery/agentic-skills/python` or `npx skills add leeovery/agentic-skills/python`.
+
+🔧 Changed
+- The root README now lists Python alongside Laravel, Nuxt and Go, with a badge, plugin table row and install commands.
+
 ## [0.2.4] - 2026-10-13
 
 🔧 Changed
