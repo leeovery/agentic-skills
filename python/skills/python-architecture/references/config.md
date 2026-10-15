@@ -8,24 +8,11 @@ Contents: the one `Settings` · field types · defaults and secrets · built in 
 
 ```python
 # src/shop/settings.py
-"""The shop's configuration, read once from SHOP_ environment variables."""
-
-from datetime import timedelta
-from pathlib import Path
-from typing import Literal
-
-from pydantic import HttpUrl, SecretStr, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
 PREFIX = "SHOP_"
 
 
 class Settings(BaseSettings):
-    """Everything the shop reads from its environment, checked when it's built.
-
-    Every missing or bad value is reported at once, without the values given,
-    and the secret has no default, so a deploy that forgets it fails at start.
-    """
+    """Everything the shop reads from its environment, checked when it's built."""
 
     model_config = SettingsConfigDict(
         env_prefix=PREFIX, frozen=True, hide_input_in_errors=True
@@ -43,11 +30,7 @@ class SettingsError(Exception):
 
 
 def read_settings() -> Settings:
-    """The settings, read from the environment.
-
-    Raises SettingsError naming each variable that's missing or bad, never its
-    value, so run prints it as the user's to fix.
-    """
+    """The settings, or SettingsError naming each variable that's missing or bad."""
     try:
         return Settings()
     except ValidationError as err:
@@ -55,11 +38,7 @@ def read_settings() -> Settings:
 
 
 def problems(err: ValidationError) -> str:
-    """Each of err's errors on a line of its own, never with the value given.
-
-    A field's error names its variable. A rule across fields has no one variable,
-    so its error is its message alone, and the message names the variables.
-    """
+    """Each of err's errors on a line of its own, never with the value given."""
     return "".join(
         f"\n  {_variable(error['loc'])}{error['msg']}"
         for error in err.errors(include_url=False, include_input=False)
@@ -99,7 +78,7 @@ Never a `str` that the code parses later, and never an `int` of seconds.
 
 ## Built in `main`, nowhere else
 
-- **`read_settings()` is called in `from_environment`,** the wiring `main` hands the CLI, once a command runs ([SKILL.md](../SKILL.md#pattern)). It's the one place the environment is read; ruff's ban list rejects `os.environ` and `os.getenv` in every other file but the process adapter, whose lift is for `subprocess`.
+- **`read_settings()` is called in `from_environment`,** the wiring `main` hands the CLI, once a command runs ([SKILL.md](../SKILL.md#pattern)). It's the one place the environment is read.
 - **`main` passes values, never the settings object:** `database=settings.database`, and a client factory with the URL, the token's header and the timeout bound in. `_authorised` takes the token alone. A component that takes `Settings` depends on every setting and on pydantic, and its test must build all of them.
 - **import-linter holds it.** `shop.settings` shares a layer with the other edges, `shop.api` and `shop.consumers`, which may not import each other, and sits above the adapters and the domain, which may not import it. Only `shop.cli` can.
 - **Not at import.** `settings = Settings()` at module level reads the environment the moment anything imports the module, tests included; python-quality's guard on import-time calls reports it.
@@ -117,7 +96,7 @@ shop: settings missing or bad:
 
 The settings' failure gets its own exception so `run` can tell it from a `ValidationError` anywhere else, which is a bug and is logged with its traceback.
 
-A rule across fields (a timeout no longer than a deadline set beside it) is a `@model_validator(mode="after")` on `Settings`, so it fails at start too. Its error belongs to no one field, so its location is empty: `problems` prints its message alone, and the message names the variables, `Value error, SHOP_GATEWAY_TIMEOUT is longer than SHOP_GATEWAY_DEADLINE`. Prefixing the empty location would print a variable called `SHOP_`. The settings' tests hold this with such a validator on a subclass, `WithADeadline`, below.
+A rule across fields (a timeout no longer than a deadline set beside it) is a `@model_validator(mode="after")` on `Settings`, so it fails at start too. Its error belongs to no one field, so its location is empty: `problems` prints its message alone, and the message names the variables.
 
 ## `.env` files
 
@@ -134,19 +113,7 @@ A rule across fields (a timeout no longer than a deadline set beside it) is a `@
 
 ```python
 # tests/test_settings.py
-"""The settings, given every field, so nothing comes from the machine's environment."""
-
-from datetime import timedelta
-from pathlib import Path
-from typing import Self
-
-import pytest
-from pydantic import HttpUrl, SecretStr, ValidationError, model_validator
-
-from shop.settings import Settings, problems
-
-# Every field, as the strings an environment holds. A field left out would be
-# read from the process's environment, even through model_validate.
+# Every field, as the strings an environment holds.
 STRINGS = {
     "database": "shop.db",
     "gateway_url": "https://pay.example",
@@ -177,30 +144,6 @@ def test_every_bad_setting_is_reported_at_once_without_its_value() -> None:
     assert "not a url" not in str(caught.value)
 
 
-class WithADeadline(Settings):
-    """Settings with a rule across two fields, which a model_validator holds."""
-
-    gateway_deadline: timedelta
-
-    @model_validator(mode="after")
-    def timeout_within_the_deadline(self) -> Self:
-        """Refuse a timeout longer than the deadline it's part of."""
-        if self.gateway_timeout > self.gateway_deadline:
-            raise ValueError(
-                "SHOP_GATEWAY_TIMEOUT is longer than SHOP_GATEWAY_DEADLINE"
-            )
-        return self
-
-
-def test_a_rule_across_fields_is_reported_by_its_message_alone() -> None:
-    with pytest.raises(ValidationError) as caught:
-        WithADeadline.model_validate(STRINGS | {"gateway_deadline": "PT1S"})
-
-    assert problems(caught.value) == (
-        "\n  Value error, SHOP_GATEWAY_TIMEOUT is longer than SHOP_GATEWAY_DEADLINE"
-    )
-
-
 def test_the_token_never_shows_in_the_settings_repr() -> None:
     settings = Settings(
         database=Path("shop.db"),
@@ -213,44 +156,13 @@ def test_the_token_never_shows_in_the_settings_repr() -> None:
     assert "token-1" not in repr(settings)
 ```
 
-- **A test of `main` scopes the environment** with `CliRunner().isolation(env=...)`, which sets each variable for the block and unsets each one given as `None`. `NO_SETTINGS` names every `SHOP_` variable `Settings` reads, from its fields, so a variable on the machine running the tests can't fill a gap:
+- **A test of `main` scopes the environment** with `CliRunner().isolation(env=...)`, which sets each variable for the block and unsets each one given as `None`. `NO_SETTINGS` names every `SHOP_` variable `Settings` reads, from its fields, so a variable on the machine running the tests can't fill a gap; [python-testing](../../python-testing/SKILL.md) builds each test's environment on it:
 
 ```python
 # tests/test_cli.py
-...
-
 NO_SETTINGS = dict.fromkeys(
     (f"SHOP_{name.upper()}" for name in Settings.model_fields), None
 )
-
-...
-
-
-def environment(tmp_path: Path, **values: str | None) -> dict[str, str | None]:
-    """Every SHOP_ variable main reads, valid unless overridden. None unsets one."""
-    valid = {
-        "SHOP_DATABASE": str(tmp_path / "shop.db"),
-        "SHOP_GATEWAY_URL": "https://pay.example",
-        "SHOP_GATEWAY_TOKEN": "token-1",
-    }
-    given = {f"SHOP_{name.upper()}": value for name, value in values.items()}
-    return NO_SETTINGS | valid | given
-
-
-...
-
-
-def test_main_names_every_missing_setting_and_exits_1(tmp_path: Path) -> None:
-    env = environment(tmp_path, gateway_url=None, gateway_token=None)
-
-    code, _, stderr = run_main(env, ["cancel", "o-1"])
-
-    assert code == 1
-    assert stderr == (
-        "shop: settings missing or bad:\n"
-        "  SHOP_GATEWAY_URL: Field required\n"
-        "  SHOP_GATEWAY_TOKEN: Field required\n"
-    )
 ```
 
 - **No `monkeypatch.setenv` around a component.** A component never reads the environment, so its test passes the value as a parameter; only `main`'s tests set variables.

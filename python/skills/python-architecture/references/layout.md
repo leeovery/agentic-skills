@@ -45,10 +45,6 @@ shop/
 │       │   ├── order.py      the ids, Status, Line and Order
 │       │   ├── errors.py     OrderError, and each failure a caller branches on
 │       │   ├── cancel.py     Canceller, and the OrderStore and Refunder it declares
-│       │   ├── reorder.py    an earlier order placed again, at today's prices
-│       │   ├── restore.py    exported orders saved in one transaction
-│       │   ├── sweep.py      a customer's cancellable orders, each cancelled
-│       │   ├── withdraw.py   a product withdrawn, and its open orders cancelled
 │       │   └── ratios.py     figures worked out over many orders
 │       ├── shipping/
 │       │   └── label.py      shipping labels, made by the carrier's tool
@@ -57,15 +53,10 @@ shop/
 │       │   └── poll.py       a job run on an interval beside other work
 │       ├── payments/
 │       │   ├── gateway.py    the provider's HTTP API, as a Refunder
-│       │   ├── settlements.py  the same API from async code, as a settlement Provider
-│       │   ├── refunds.py    many refunds at once from sync code, on a thread pool
-│       │   ├── limits.py     how many calls the provider takes at once, split once
-│       │   └── reports.py    the provider's settlement reports
+│       │   └── settlements.py  the same API from async code, as a settlement Provider
 │       └── storage/
 │           ├── sqlite.py     orders in SQLite, as an OrderStore
-│           ├── export.py     the order export, one JSON line per order
-│           ├── atomic.py     replacing a file whole
-│           └── lock.py       a lock file, so one run works at a time
+│           └── atomic.py     replacing a file whole
 └── tests/                    a package, mirroring src/shop: order/, payments/, guards/
 ```
 
@@ -99,20 +90,6 @@ raise SystemExit(main())
 
 ```python
 # tests/test_cli.py
-...
-
-
-def run_main(
-    env: Mapping[str, str | None], argv: Sequence[str]
-) -> tuple[int, str, str]:
-    """Call main with argv in env, returning its exit code, stdout and stderr."""
-    with CliRunner().isolation(env=env) as (stdout, stderr, _):
-        return main(argv), stdout.getvalue().decode(), stderr.getvalue().decode()
-
-
-...
-
-
 def test_main_exits_1_for_an_order_it_cant_find(tmp_path: Path) -> None:
     code, _, stderr = run_main(environment(tmp_path), ["cancel", "o-404"])
 
@@ -120,7 +97,7 @@ def test_main_exits_1_for_an_order_it_cant_find(tmp_path: Path) -> None:
     assert stderr == "shop: order o-404 not found\n"
 ```
 
-`environment` sets every `SHOP_` variable and unsets the rest ([config.md](config.md)).
+`run_main` calls `main` inside the isolation, and `environment` sets every `SHOP_` variable and unsets the rest; both are [python-testing](../../python-testing/SKILL.md)'s.
 
 ## Naming
 
@@ -146,23 +123,17 @@ Import what you need from here: the modules below are free to move.
 
 from shop.money import Money
 from shop.order.cancel import Canceller, OrderStore, Refunder
-from shop.order.errors import NotCancellable, OrderError, OrderNotFound, PaymentFailed
-from shop.order.order import Line, Order, OrderId, Reason, Status
+from shop.order.errors import OrderError
+from shop.order.order import Order, OrderId
 
 __all__ = [
     "Canceller",
-    "Line",
     "Money",
-    "NotCancellable",
     "Order",
     "OrderError",
     "OrderId",
-    "OrderNotFound",
     "OrderStore",
-    "PaymentFailed",
-    "Reason",
     "Refunder",
-    "Status",
 ]
 ```
 
@@ -189,7 +160,7 @@ No `if TYPE_CHECKING:` imports in an application.
 
 - **On 3.14 an annotation is evaluated only when something reads it** ([PEP 649](https://peps.python.org/pep-0649/)), so a forward reference needs neither quotes nor a guarded import.
 - **A guarded import hides a cycle instead of fixing it.** import-linter still counts it, as it reads `TYPE_CHECKING` blocks unless told not to.
-- **pydantic models and typer commands read their annotations at runtime.** A name imported only for the checker passes pyrefly, then fails: a `BaseSettings` whose field names it imports cleanly and raises `PydanticUserError` (`` `Settings` is not fully defined ``) when it's first constructed, and a typer command raises `NameError` when it runs. Under the drop-in, ruff's `TC004` (default) catches the first, as `runtime-evaluated-base-classes` names pydantic's bases; nothing static catches the second, so a test that runs each command is what does. `TC001` to `TC003`, which would move imports under `TYPE_CHECKING`, are off.
+- **pydantic models and typer commands read their annotations at runtime.** A name imported only for the checker passes pyrefly, then fails: a `BaseSettings` raises `PydanticUserError` when it's first constructed, and a typer command raises `NameError` when it runs. Under the drop-in, ruff's `TC004` catches the first; nothing static catches the second, so a test that runs each command is what does. `TC001` to `TC003`, which would move imports under `TYPE_CHECKING`, are off.
 
 ## Module state
 

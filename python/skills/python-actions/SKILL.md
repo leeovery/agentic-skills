@@ -41,8 +41,6 @@ class Canceller:
         # Claimed before the refund, which can't be undone, so nothing ships
         # under it; a cancel that stopped after the claim can run again.
         order = self.orders.start_cancelling(order_id)
-        # Claimed, it's CANCELLING whatever it was; Order holds a paid one to its
-        # payment's id, and a pending one to none.
         if order.payment_id is not None:
             # Keyed by the order, so a cancel run again refunds once.
             self.payments.refund(
@@ -63,7 +61,7 @@ class Canceller:
         return cancelled
 ```
 
-`main`'s wiring builds it when `cancel` runs, `Canceller(orders=SqliteOrders(db=db), payments=Gateway(client=http, retry=Retry(...)), now=partial(datetime.now, UTC))`, and the HTTP handler and the queue consumer call one built the same way. `start_cancelling` moves the order to `CANCELLING` in one write conditioned on its status, so a shipment that lands first is refused rather than overwritten, and nothing ships under the refund. A cancel that stops after the claim leaves the order `CANCELLING`, which still allows cancelling, so it runs again and finishes; whether it refunds comes from the payment id, which `Order` requires of a paid order and refuses on a pending one. The refund's key comes from the work, the order being cancelled, so the second run refunds once, and a refund of the same payment for another reason gets a key of its own.
+`main`'s wiring builds it when `cancel` runs, `Canceller(orders=SqliteOrders(db=db), payments=Gateway(client=http, retry=Retry(...)), now=partial(datetime.now, UTC))`, and the HTTP handler and the queue consumer call one built the same way. `start_cancelling` moves the order to `CANCELLING` in one write conditioned on its status, so a shipment that lands first is refused rather than overwritten. A cancel that stops after the claim leaves the order `CANCELLING`, which still allows cancelling, so it runs again and finishes, and the refund's key makes the second run refund once.
 
 ## Decision table
 
