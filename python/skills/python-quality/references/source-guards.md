@@ -494,7 +494,7 @@ def test_the_wording_guard_finds_a_value_worded_in_place(tmp_path: Path) -> None
 
 ## Guard 4: logging configured by main
 
-`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). It goes by the name called, so `from logging import basicConfig` is caught as well as `logging.basicConfig`, and `addHandler` on any logger. ruff's `LOG015`, in the default set, catches a call on the root logger.
+`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). It goes by the name called, so `from logging import basicConfig` is caught as well as `logging.basicConfig`, and `addHandler` on any logger. ruff's `LOG015`, in the default set, catches a call on the root logger. It's the [SKILL.md](../SKILL.md#pattern) pattern, there without its imports.
 
 ```python
 # tests/guards/test_logging.py
@@ -566,11 +566,122 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
 
 ## Guard 5: no patching in tests
 
-The [SKILL.md](../SKILL.md#pattern) pattern. A test that needs `monkeypatch.setattr` has found a missing seam ([python-testing](../../python-testing/SKILL.md)); `unittest.mock` is banned by ruff, so this guard covers the patch ruff can't see.
+A test that needs `monkeypatch.setattr` has found a missing seam ([python-testing](../../python-testing/SKILL.md)); `unittest.mock` is banned by ruff, so this guard covers the patch ruff can't see.
 
 - **Every way to patch, on every `MonkeyPatch`:** `setattr`, `delattr`, `setitem` and `delitem`, on the `monkeypatch` fixture, on a parameter of any name annotated `pytest.MonkeyPatch`, and on the name a `pytest.MonkeyPatch.context()` is bound to. Its fixture has one of each.
 - **`setenv` and `delenv` are allowed.** The environment is the process's input, not code, and the session fixture in [python-testing](../../python-testing/SKILL.md)'s isolation uses them to keep the machine's variables out. A test of a component never needs them: the component takes the value ([python-architecture](../../python-architecture/SKILL.md)).
 - **It knows a `MonkeyPatch` by its annotation,** which ruff's `ANN` asks of every parameter, so a fixture passed on under another name is still found.
+
+```python
+# tests/guards/test_patching.py
+"""Tests pass a fake through a seam; they never patch an attribute or an item in place."""
+
+import ast
+from collections.abc import Iterator
+from pathlib import Path
+
+from tests.guards.source import (
+    Breach,
+    check,
+    dotted,
+    modules,
+    project_root,
+    report,
+    scoped,
+    write,
+)
+
+FIX = "take the dependency as a parameter, and pass a fake from the test"
+# setenv and delenv aren't among them: the environment is what the process is
+# given, not code, and the session fixture uses them to keep the machine's out.
+PATCHES = frozenset({"setattr", "delattr", "setitem", "delitem"})
+MONKEYPATCH = frozenset({"pytest.MonkeyPatch", "MonkeyPatch"})
+CONTEXT = frozenset({"pytest.MonkeyPatch.context", "MonkeyPatch.context"})
+
+
+def patchers(tree: ast.Module) -> set[str]:
+    """The names a MonkeyPatch goes by in tree.
+
+    The fixture's own, any name annotated as one, which ruff's ANN asks of every
+    parameter, and the name each MonkeyPatch.context() is bound to.
+    """
+    names = {"monkeypatch"}
+    for node in ast.walk(tree):
+        match node:
+            case ast.arg(arg=name, annotation=ast.expr() as kind) if (
+                dotted(kind) in MONKEYPATCH
+            ):
+                names.add(name)
+            case ast.withitem(
+                context_expr=ast.Call(func=func), optional_vars=ast.Name(id=name)
+            ) if dotted(func) in CONTEXT:
+                names.add(name)
+            case _:
+                pass
+    return names
+
+
+def patches(root: Path) -> Iterator[Breach]:
+    """Each setattr, delattr, setitem and delitem on a MonkeyPatch in root's tests/."""
+    for module in modules(root, "tests"):
+        names = patchers(module.tree)
+        for scope, node in scoped(module.tree):
+            match node:
+                case ast.Call(
+                    func=ast.Attribute(value=ast.Name(id=name), attr=method)
+                ) if name in names and method in PATCHES:
+                    yield Breach(
+                        path=module.path,
+                        line=node.lineno,
+                        scope=scope,
+                        what=f"patches with {name}.{method}",
+                        fix=FIX,
+                    )
+                case _:
+                    pass
+
+
+def test_no_test_patches_an_attribute() -> None:
+    check(patches(project_root()))
+
+
+def test_the_patching_guard_finds_a_patch_on_any_monkeypatch(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "tests/test_cancel.py",
+        '''
+        """Cancelling, with what it reaches patched."""
+        import sys
+
+        import pytest
+
+
+        def test_cancel_stamps_the_time(monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setattr("shop.order.cancel.datetime", None)
+            monkeypatch.delattr("shop.order.cancel.logger")
+
+
+        def test_cancel_offline(patcher: pytest.MonkeyPatch) -> None:
+            patcher.setitem(sys.modules, "shop.payments", None)
+            patcher.delitem(sys.modules, "shop.storage")
+
+
+        def test_cancel_from_the_environment() -> None:
+            with pytest.MonkeyPatch.context() as env:
+                env.setenv("SHOP_DATABASE", "shop.db")
+                env.delenv("SHOP_GATEWAY_URL")
+                env.setattr("shop.order.cancel.datetime", None)
+        ''',
+    )
+
+    assert report(patches(tmp_path)) == [
+        f"tests/test_cancel.py:8: patches with monkeypatch.setattr: {FIX}",
+        f"tests/test_cancel.py:9: patches with monkeypatch.delattr: {FIX}",
+        f"tests/test_cancel.py:13: patches with patcher.setitem: {FIX}",
+        f"tests/test_cancel.py:14: patches with patcher.delitem: {FIX}",
+        f"tests/test_cancel.py:21: patches with env.setattr: {FIX}",
+    ]
+```
 
 ## Guard 6: domain names say what they are or do
 
