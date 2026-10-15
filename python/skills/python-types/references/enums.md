@@ -14,13 +14,15 @@ class Status(StrEnum):
     PENDING = "pending"
     PAID = "paid"
     SHIPPED = "shipped"
+    # Claimed by a cancel, before its refund: one that stopped there runs again.
+    CANCELLING = "cancelling"
     CANCELLED = "cancelled"
 
     @property
     def cancellable(self) -> bool:
         """Whether an order in this status can still be cancelled."""
         match self:
-            case Status.PENDING | Status.PAID:
+            case Status.PENDING | Status.PAID | Status.CANCELLING:
                 return True
             case Status.SHIPPED | Status.CANCELLED:
                 return False
@@ -61,9 +63,9 @@ Two members with one value make the second an alias of the first: `Reason.STOCK_
 What a member means is a property, with a `match` that names every member:
 
 - **Every member is named,** even those that answer like another. When a member is added, pyrefly reports, through `assert_never`, each `match` that hasn't decided about it, instead of the new member falling into a default.
-- **Callers ask the property,** never `order.status in (Status.PENDING, Status.PAID)` inline: that copy of the rule drifts the day a member is added.
+- **Callers ask the property,** never `order.status in (Status.PENDING, Status.PAID)` inline: that copy of the rule drifts the day a member is added. `CANCELLING` joined the cancellable set in one line of the property, and every caller asking it followed.
 - **A label for people is `shop.display`'s,** not a property: wording lives in one module ([python-architecture](../../python-architecture/SKILL.md)).
-- **Each change of status with side effects is its own operation** (`Canceller`, `Withdrawer`), guarded by a property such as `cancellable` ([python-actions](../../python-actions/SKILL.md)). There's no state-machine library: the property says what's allowed, and the operation says what happens.
+- **Each change of status with side effects is its own operation** (`Canceller`, `Withdrawer`), guarded by a property such as `cancellable`, which the store's conditional claim asks too ([python-actions](../../python-actions/SKILL.md)). There's no state-machine library: the property says what's allowed, and the operation says what happens.
 
 ## `match` and `assert_never`
 
@@ -81,7 +83,7 @@ ERROR Argument `Literal[Status.CANCELLED]` is not assignable to parameter `arg` 
 
 A string from outside becomes a member at the edge, through the edge's parser, and both list the valid values when it isn't one:
 
-- **A pydantic field typed `Status`:** `Input should be 'pending', 'paid', 'shipped' or 'cancelled'`, with every other problem in the payload beside it ([boundaries.md](boundaries.md)).
+- **A pydantic field typed `Status`:** `Input should be 'pending', 'paid', 'shipped', 'cancelling' or 'cancelled'`, with every other problem in the payload beside it ([boundaries.md](boundaries.md)).
 - **A typer option typed `Reason`:** `Invalid value for '--reason': 'bored' is not one of 'customer', 'out-of-stock', 'fraud'.`, exit 2, and `--help` lists them too ([python-actions](../../python-actions/SKILL.md)).
 - **Never `Status(text)` on outside input.** Its error, `'lost' is not a valid Status`, names only the bad value, and it reports one problem where the model reports all.
 - **Reading back your own stored data** is where `Status(row_value)` belongs, as in the SQLite store: a value outside the set there is a damaged store, and the `ValueError` names it.

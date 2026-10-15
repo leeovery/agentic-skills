@@ -35,13 +35,15 @@ class Status(StrEnum):
     PENDING = "pending"
     PAID = "paid"
     SHIPPED = "shipped"
+    # Claimed by a cancel, before its refund: one that stopped there runs again.
+    CANCELLING = "cancelling"
     CANCELLED = "cancelled"
 
     @property
     def cancellable(self) -> bool:
         """Whether an order in this status can still be cancelled."""
         match self:
-            case Status.PENDING | Status.PAID:
+            case Status.PENDING | Status.PAID | Status.CANCELLING:
                 return True
             case Status.SHIPPED | Status.CANCELLED:
                 return False
