@@ -22,64 +22,64 @@ Work is done when every gate passes clean, and a rule that must always hold is a
 
 ## Pattern
 
-A source guard: a test that reads the project's source and fails where the rule breaks, then a second test that proves it can. `check`, `report`, `scoped` and the rest are in [source-guards.md](references/source-guards.md).
+A source guard: a test that reads the project's source and fails where the rule breaks, then a second test that proves it can. `check`, `report`, `modules` and the rest are in [source-guards.md](references/source-guards.md).
 
 ```python
-# tests/guards/test_logging.py
-"""Logging is configured once, by main; every other module only names its logger."""
+# tests/guards/test_names.py
+"""Modules and packages are named for the one job they do."""
 
 ...
 
-ENTRY = "src/shop/cli.py"
-CONFIGURES = frozenset({"basicConfig", "dictConfig", "fileConfig", "addHandler"})
-FIX = "leave it to main; a module only calls logging.getLogger(__name__)"
+# These name no job, so any code fits under them.
+GRAB_BAGS = frozenset(
+    {
+        "common",
+        "helpers",
+        "misc",
+        "models",
+        "services",
+        "shared",
+        "types",
+        "util",
+        "utils",
+    }
+)
+FIX = "name it for the one thing it does, or move each part to the module it serves"
 
 
-def configures_logging(root: Path) -> Iterator[Breach]:
-    """The calls in root's src/ modules, but main's, that configure logging."""
+def grab_bags(root: Path) -> Iterator[Breach]:
+    """The modules and packages in root's src/ named for no job."""
     for module in modules(root, "src"):
-        if module.path == ENTRY:
-            continue
-        for scope, node in scoped(module.tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = dotted(node.func)
-            called = node.func.attr if isinstance(node.func, ast.Attribute) else name
-            if called in CONFIGURES:
-                what = f"configures logging with {name or called}"
-                yield Breach(
-                    path=module.path, line=node.lineno, scope=scope, what=what, fix=FIX
-                )
+        path = PurePosixPath(module.path)
+        is_package = path.stem == "__init__"
+        name = path.parent.name if is_package else path.stem
+        if name in GRAB_BAGS:
+            kind = "package" if is_package else "module"
+            yield Breach(
+                path=module.path,
+                line=1,
+                scope=TOP,
+                what=f"{kind} {name} names no job",
+                fix=FIX,
+            )
 
 
-def test_only_main_configures_logging() -> None:
-    check(configures_logging(project_root()))
+def test_modules_are_named_for_their_job() -> None:
+    check(grab_bags(project_root()))
 
 
-def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) -> None:
-    write(
-        tmp_path,
-        "src/shop/payments/gateway.py",
-        '''
-        """Refunds, logging to a file of their own."""
-        import logging
+def test_the_naming_guard_finds_a_grab_bag(tmp_path: Path) -> None:
+    write(tmp_path, "src/shop/utils/__init__.py", '"""Odds and ends."""')
+    write(tmp_path, "src/shop/order/helpers.py", '"""Odds and ends."""')
+    write(tmp_path, "src/shop/order/cancel.py", '"""Cancelling an order."""')
 
-        logger = logging.getLogger(__name__)
-
-
-        def setup() -> None:
-            logging.basicConfig(level=logging.DEBUG)
-            logger.addHandler(logging.FileHandler("refunds.log"))
-        ''',
-    )
-
-    assert report(configures_logging(tmp_path)) == [
-        f"src/shop/payments/gateway.py:8: configures logging with logging.basicConfig: {FIX}",
-        f"src/shop/payments/gateway.py:9: configures logging with logger.addHandler: {FIX}",
+    assert report(grab_bags(tmp_path)) == [
+        f"src/shop/order/helpers.py:1: module helpers names no job: {FIX}",
+        f"src/shop/utils/__init__.py:1: package utils names no job: {FIX}",
     ]
 ```
 
-A failing guard prints one line per breach, `src/shop/payments/gateway.py:8: configures logging with logging.basicConfig: leave it to main; a module only calls logging.getLogger(__name__)`, all of them at once.
+A failing guard prints one line per breach, `src/shop/order/helpers.py:1: module helpers names no job: name it for the one thing it does, or move each part to the module it serves`, all of them at once.
 
 ## Which gate
 

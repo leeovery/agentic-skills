@@ -160,7 +160,7 @@ def write(root: Path, name: str, source: str) -> None:
 
 ## Guard 1: modules named for a job
 
-A grab-bag name gives code no reason to live anywhere else ([python-architecture](../../python-architecture/SKILL.md)). A package is named by its `__init__.py`, so it's reported once.
+A grab-bag name gives code no reason to live anywhere else ([python-architecture](../../python-architecture/SKILL.md)). A package is named by its `__init__.py`, so it's reported once. It's the [SKILL.md](../SKILL.md#pattern) pattern, there without its imports.
 
 ```python
 # tests/guards/test_names.py
@@ -414,7 +414,7 @@ def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
 
 ## Guard 3: values worded by display
 
-How a value reads to people is `shop.display`'s to say. Everywhere else, a format spec, `format()` or `strftime()` is a copy of that rule that will drift ([python-architecture](../../python-architecture/SKILL.md)). ruff's `UP031` and `UP032`, in the default set, flag `%` formatting and `str.format`, so specs end up in f-strings, where this guard reads them. A stored or sent value has an encoder of its own, `isoformat()` and the like, never a display function ([python-types](../../python-types/SKILL.md)).
+How a value reads to people is `shop.display`'s to say. Everywhere else, a format spec, `format()` or `strftime()` is a copy of that rule that will drift ([python-architecture](../../python-architecture/SKILL.md)). ruff's `UP031` and `UP032`, in the default set, flag `%` formatting and a literal's `str.format`, so specs end up in f-strings, where this guard reads them, as it does in a t-string's interpolations. A `.format()` on a template held in a name, which ruff leaves alone, and `strftime` imported from `time`, it reports by the name called. A stored or sent value has an encoder of its own, `isoformat()` and the like, never a display function ([python-types](../../python-types/SKILL.md)).
 
 ```python
 # tests/guards/test_wording.py
@@ -452,13 +452,22 @@ def wording(root: Path) -> Iterator[Breach]:
 
 
 def _words(node: ast.AST) -> tuple[int, str] | None:
-    """Where and how node words a value: a format spec, format() or strftime()."""
+    """Where and how node words a value: a format spec, format(), str.format() or strftime().
+
+    A spec is read in an f-string and in a t-string alike. A method goes by its
+    name, as the guard can't see the type it's called on.
+    """
     match node:
-        case ast.FormattedValue(format_spec=ast.JoinedStr()):
+        case (
+            ast.FormattedValue(format_spec=ast.JoinedStr())
+            | ast.Interpolation(format_spec=ast.JoinedStr())
+        ):
             return node.lineno, "words a value with a format spec"
         case ast.Call(func=ast.Name(id="format")):
             return node.lineno, "words a value with format()"
-        case ast.Call(func=ast.Attribute(attr="strftime")):
+        case ast.Call(func=ast.Attribute(attr="format" | "format_map")):
+            return node.lineno, "words a value with str.format()"
+        case ast.Call(func=ast.Attribute(attr="strftime") | ast.Name(id="strftime")):
             return node.lineno, "words a time with strftime()"
         case _:
             return None
@@ -475,10 +484,22 @@ def test_the_wording_guard_finds_a_value_worded_in_place(tmp_path: Path) -> None
         '''
         """A day's sales, worded where they're totalled."""
         from datetime import datetime
+        from string.templatelib import Template
+        from time import strftime
+
+        LINE = "{:.2f} sold"
 
 
         def headline(total: int, day: datetime) -> str:
             return f"{total / 100:.2f} on {day.strftime('%d %b')}"
+
+
+        def banner(total: int) -> Template:
+            return t"{total / 100:.2f} today"
+
+
+        def summary(total: int) -> str:
+            return LINE.format(total / 100) + strftime(" at %H:%M")
 
 
         def footer(rate: float) -> str:
@@ -487,14 +508,17 @@ def test_the_wording_guard_finds_a_value_worded_in_place(tmp_path: Path) -> None
     )
 
     assert report(wording(tmp_path), allowed={"src/shop/report.py:footer"}) == [
-        f"src/shop/report.py:6: words a value with a format spec: {FIX}",
-        f"src/shop/report.py:6: words a time with strftime(): {FIX}",
+        f"src/shop/report.py:10: words a value with a format spec: {FIX}",
+        f"src/shop/report.py:10: words a time with strftime(): {FIX}",
+        f"src/shop/report.py:14: words a value with a format spec: {FIX}",
+        f"src/shop/report.py:18: words a value with str.format(): {FIX}",
+        f"src/shop/report.py:18: words a time with strftime(): {FIX}",
     ]
 ```
 
 ## Guard 4: logging configured by main
 
-`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). It goes by the name called, so `from logging import basicConfig` is caught as well as `logging.basicConfig`, and `addHandler` on any logger. ruff's `LOG015`, in the default set, catches a call on the root logger. It's the [SKILL.md](../SKILL.md#pattern) pattern, there without its imports.
+`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). It goes by the name called, so `from logging import captureWarnings` is caught as well as `logging.basicConfig`, and `addHandler` or `setLevel` on any logger; `logging.disable` only by its whole name, as `disable` alone is too common a word. A logger changed rather than called is caught too: `propagate`, `disabled`, `level` or `handlers` assigned, and a call on its `handlers` list, such as `handlers.clear()`. Its fixture has each form. ruff's `LOG015`, in the default set, catches a call on the root logger.
 
 ```python
 # tests/guards/test_logging.py
@@ -516,25 +540,55 @@ from tests.guards.source import (
 )
 
 ENTRY = "src/shop/cli.py"
-CONFIGURES = frozenset({"basicConfig", "dictConfig", "fileConfig", "addHandler"})
+# Called by these names on any logger or handler, or imported from logging.
+CONFIGURES = frozenset(
+    {
+        "addFilter",
+        "addHandler",
+        "basicConfig",
+        "captureWarnings",
+        "dictConfig",
+        "fileConfig",
+        "removeFilter",
+        "removeHandler",
+        "setLevel",
+        "setLoggerClass",
+        "setLogRecordFactory",
+    }
+)
+# Too common a word to go by alone, so only as logging's own.
+DISABLE = "logging.disable"
+# A logger's own settings, changed by assigning them.
+SETTINGS = frozenset({"disabled", "handlers", "level", "propagate"})
 FIX = "leave it to main; a module only calls logging.getLogger(__name__)"
 
 
 def configures_logging(root: Path) -> Iterator[Breach]:
-    """The calls in root's src/ modules, but main's, that configure logging."""
+    """The calls and assignments in root's src/ modules, but main's, that configure logging."""
     for module in modules(root, "src"):
         if module.path == ENTRY:
             continue
         for scope, node in scoped(module.tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = dotted(node.func)
-            called = node.func.attr if isinstance(node.func, ast.Attribute) else name
-            if called in CONFIGURES:
-                what = f"configures logging with {name or called}"
+            if found := _configures(node):
+                line, what = found
                 yield Breach(
-                    path=module.path, line=node.lineno, scope=scope, what=what, fix=FIX
+                    path=module.path, line=line, scope=scope, what=what, fix=FIX
                 )
+
+
+def _configures(node: ast.AST) -> tuple[int, str] | None:
+    """Where and how node configures logging: a call, a logger's handlers changed, a setting."""
+    match node:
+        case ast.Call(func=ast.Attribute(attr=name) | ast.Name(id=name) as func) if (
+            name in CONFIGURES or dotted(func) == DISABLE
+        ):
+            return node.lineno, f"configures logging with {ast.unparse(func)}"
+        case ast.Call(func=ast.Attribute(value=ast.Attribute(attr="handlers")) as func):
+            return node.lineno, f"configures logging with {ast.unparse(func)}"
+        case ast.Attribute(attr=name, ctx=ast.Store()) if name in SETTINGS:
+            return node.lineno, f"configures logging by setting {ast.unparse(node)}"
+        case _:
+            return None
 
 
 def test_only_main_configures_logging() -> None:
@@ -548,19 +602,33 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
         '''
         """Refunds, logging to a file of their own."""
         import logging
+        import logging.config
+        from logging import captureWarnings
 
         logger = logging.getLogger(__name__)
 
 
         def setup() -> None:
             logging.basicConfig(level=logging.DEBUG)
+            logging.config.dictConfig({"version": 1})
+            captureWarnings(True)
             logger.addHandler(logging.FileHandler("refunds.log"))
+            logger.setLevel(logging.DEBUG)
+            logger.propagate = False
+            logging.getLogger("httpx2").handlers.clear()
+            logging.disable(logging.INFO)
         ''',
     )
 
     assert report(configures_logging(tmp_path)) == [
-        f"src/shop/payments/gateway.py:8: configures logging with logging.basicConfig: {FIX}",
-        f"src/shop/payments/gateway.py:9: configures logging with logger.addHandler: {FIX}",
+        f"src/shop/payments/gateway.py:10: configures logging with logging.basicConfig: {FIX}",
+        f"src/shop/payments/gateway.py:11: configures logging with logging.config.dictConfig: {FIX}",
+        f"src/shop/payments/gateway.py:12: configures logging with captureWarnings: {FIX}",
+        f"src/shop/payments/gateway.py:13: configures logging with logger.addHandler: {FIX}",
+        f"src/shop/payments/gateway.py:14: configures logging with logger.setLevel: {FIX}",
+        f"src/shop/payments/gateway.py:15: configures logging by setting logger.propagate: {FIX}",
+        f"src/shop/payments/gateway.py:16: configures logging with logging.getLogger('httpx2').handlers.clear: {FIX}",
+        f"src/shop/payments/gateway.py:17: configures logging with logging.disable: {FIX}",
     ]
 ```
 
@@ -568,7 +636,7 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
 
 A test that needs `monkeypatch.setattr` has found a missing seam ([python-testing](../../python-testing/SKILL.md)); `unittest.mock` is banned by ruff, so this guard covers the patch ruff can't see.
 
-- **Every way to patch, on every `MonkeyPatch`:** `setattr`, `delattr`, `setitem` and `delitem`, on the `monkeypatch` fixture, on a parameter of any name annotated `pytest.MonkeyPatch`, and on the name a `pytest.MonkeyPatch.context()` is bound to. Its fixture has one of each.
+- **Every way to patch, on every `MonkeyPatch`:** `setattr`, `delattr`, `setitem` and `delitem`, on the `monkeypatch` fixture, on a parameter or a variable of any name annotated `pytest.MonkeyPatch`, on a name bound to one built in place, `pytest.MonkeyPatch()` or a `context()` of the class or of the fixture, by a `with`, an `=` or a `:=`, and on one built in the call itself, `pytest.MonkeyPatch().setattr(...)`. A name bound from another found counts too, so `patchers` searches until it finds no more. Its fixture has each form.
 - **`setenv` and `delenv` are allowed.** The environment is the process's input, not code, and the session fixture in [python-testing](../../python-testing/SKILL.md)'s isolation uses them to keep the machine's variables out. A test of a component never needs them: the component takes the value ([python-architecture](../../python-architecture/SKILL.md)).
 - **It knows a `MonkeyPatch` by its annotation,** which ruff's `ANN` asks of every parameter, so a fixture passed on under another name is still found.
 
@@ -596,29 +664,61 @@ FIX = "take the dependency as a parameter, and pass a fake from the test"
 # given, not code, and the session fixture uses them to keep the machine's out.
 PATCHES = frozenset({"setattr", "delattr", "setitem", "delitem"})
 MONKEYPATCH = frozenset({"pytest.MonkeyPatch", "MonkeyPatch"})
-CONTEXT = frozenset({"pytest.MonkeyPatch.context", "MonkeyPatch.context"})
 
 
 def patchers(tree: ast.Module) -> set[str]:
     """The names a MonkeyPatch goes by in tree.
 
-    The fixture's own, any name annotated as one, which ruff's ANN asks of every
-    parameter, and the name each MonkeyPatch.context() is bound to.
+    The fixture's own; any name annotated as one, which ruff's ANN asks of every
+    parameter; and any name bound to one made in place, by MonkeyPatch() or by a
+    context() of the class or of one, in a with, an assignment or a :=. A name
+    bound from another found here counts too, so the search runs until it finds
+    no more.
     """
     names = {"monkeypatch"}
-    for node in ast.walk(tree):
-        match node:
-            case ast.arg(arg=name, annotation=ast.expr() as kind) if (
-                dotted(kind) in MONKEYPATCH
-            ):
-                names.add(name)
-            case ast.withitem(
-                context_expr=ast.Call(func=func), optional_vars=ast.Name(id=name)
-            ) if dotted(func) in CONTEXT:
-                names.add(name)
-            case _:
-                pass
-    return names
+    while True:
+        found = {name for node in ast.walk(tree) if (name := _bound(node, names))}
+        if found <= names:
+            return names
+        names |= found
+
+
+def _bound(node: ast.AST, patchers: set[str]) -> str | None:
+    """The name node binds to a MonkeyPatch, if it binds one."""
+    match node:
+        case (
+            ast.arg(arg=name, annotation=ast.expr() as kind)
+            | ast.AnnAssign(target=ast.Name(id=name), annotation=ast.expr() as kind)
+        ) if dotted(kind) in MONKEYPATCH:
+            return name
+        case (
+            ast.withitem(context_expr=made, optional_vars=ast.Name(id=name))
+            | ast.Assign(targets=[ast.Name(id=name)], value=made)
+            | ast.NamedExpr(target=ast.Name(id=name), value=made)
+        ) if _makes(made, patchers):
+            return name
+        case _:
+            return None
+
+
+def _makes(node: ast.expr, patchers: set[str]) -> bool:
+    """Whether node makes a MonkeyPatch: MonkeyPatch(), or a context() of the class or of one."""
+    match node:
+        case ast.Call(func=func) if dotted(func) in MONKEYPATCH:
+            return True
+        case ast.Call(func=ast.Attribute(value=owner, attr="context")):
+            return dotted(owner) in MONKEYPATCH or _is_patcher(owner, patchers)
+        case _:
+            return False
+
+
+def _is_patcher(node: ast.expr, patchers: set[str]) -> bool:
+    """Whether node is a MonkeyPatch: a name one goes by, or one made in place."""
+    match node:
+        case ast.Name(id=name):
+            return name in patchers
+        case _:
+            return _makes(node, patchers)
 
 
 def patches(root: Path) -> Iterator[Breach]:
@@ -627,14 +727,14 @@ def patches(root: Path) -> Iterator[Breach]:
         names = patchers(module.tree)
         for scope, node in scoped(module.tree):
             match node:
-                case ast.Call(
-                    func=ast.Attribute(value=ast.Name(id=name), attr=method)
-                ) if name in names and method in PATCHES:
+                case ast.Call(func=ast.Attribute(value=owner, attr=method) as func) if (
+                    method in PATCHES and _is_patcher(owner, names)
+                ):
                     yield Breach(
                         path=module.path,
                         line=node.lineno,
                         scope=scope,
-                        what=f"patches with {name}.{method}",
+                        what=f"patches with {ast.unparse(func)}",
                         fix=FIX,
                     )
                 case _:
@@ -671,6 +771,18 @@ def test_the_patching_guard_finds_a_patch_on_any_monkeypatch(tmp_path: Path) -> 
                 env.setenv("SHOP_DATABASE", "shop.db")
                 env.delenv("SHOP_GATEWAY_URL")
                 env.setattr("shop.order.cancel.datetime", None)
+
+
+        def test_cancel_in_a_block(monkeypatch: pytest.MonkeyPatch) -> None:
+            with monkeypatch.context() as inside:
+                inside.setattr("shop.order.cancel.logger", None)
+
+
+        def test_cancel_with_a_patcher_of_its_own() -> None:
+            mp = pytest.MonkeyPatch()
+            mp.setattr("shop.order.cancel.datetime", None)
+            pytest.MonkeyPatch().delitem(sys.modules, "shop.payments")
+            mp.undo()
         ''',
     )
 
@@ -680,6 +792,9 @@ def test_the_patching_guard_finds_a_patch_on_any_monkeypatch(tmp_path: Path) -> 
         f"tests/test_cancel.py:13: patches with patcher.setitem: {FIX}",
         f"tests/test_cancel.py:14: patches with patcher.delitem: {FIX}",
         f"tests/test_cancel.py:21: patches with env.setattr: {FIX}",
+        f"tests/test_cancel.py:26: patches with inside.setattr: {FIX}",
+        f"tests/test_cancel.py:31: patches with mp.setattr: {FIX}",
+        f"tests/test_cancel.py:32: patches with pytest.MonkeyPatch().delitem: {FIX}",
     ]
 ```
 
