@@ -11,22 +11,28 @@ Contents: naming · each consumer's slice · rows stay inside · transactions ·
 | `OrderRepository.find(customer_id=c, status="pending")` | `orders.cancellable_for(customer_id)` |
 | `get(order_id)` returning a row, a dict or an ORM object | `get(order_id)` returning an `Order` |
 | `update(order_id, **fields)` for every change | `save(order)` for a whole value |
+| `get(order_id)`, a status check, then `save(order)` | `start_cancelling(order_id)`: one write, conditioned on the status |
 
 - **Methods take and return domain types,** never rows, driver objects or ORM models.
 - **Not found is the domain's exception,** raised inside the store: `SqliteOrders.get` raises `OrderNotFound`, so no caller checks for `None` or imports `sqlite3`.
-- **A query's name says which records, in what order,** so no caller filters what the store hands back. Where the records are picked by a domain rule, the store asks the rule's owner: `cancellable_for` keeps the orders whose `status.cancellable` holds, rather than copying the list of statuses into SQL ([python-architecture](../../python-architecture/SKILL.md)).
+- **A query's name says which records, in what order,** so no caller filters what the store hands back. Where the records are picked by a domain rule, the store asks the rule's owner: `cancellable_for` keeps the orders whose `status.cancellable` holds, rather than copying the list of statuses into SQL, and `start_cancelling` binds the statuses `Status` names into its `UPDATE` ([python-architecture](../../python-architecture/SKILL.md)).
 
 ## Each consumer's slice
 
-The real store has every method. Each consumer declares the few it calls, beside the code that calls them. The canceller's:
+The real store has every method. Each consumer declares the few it calls, beside the code that calls them. The canceller's, a claim and a save:
 
 ```python
 # src/shop/order/cancel.py
 class OrderStore(Protocol):
-    """Where the canceller loads orders and saves them."""
+    """Where the canceller claims orders and saves them."""
 
-    def get(self, order_id: OrderId) -> Order:
-        """Return the order with the id, or raise OrderNotFound."""
+    def start_cancelling(self, order_id: OrderId) -> Order:
+        """Move the order to CANCELLING and return it, if its status allows cancelling.
+
+        One write, conditioned on the status the order has as it runs, so a
+        shipment that lands first is refused, never overwritten. Raises
+        NotCancellable, or OrderNotFound.
+        """
         ...
 
     def save(self, order: Order) -> None:
@@ -117,10 +123,10 @@ def _order(order_id: OrderId, row: OrderRow, lines: Sequence[LineRow]) -> Order:
     )
 ```
 
-A stored value the domain refuses, a status nobody defined, raises `ValueError: 'refunded' is not a valid Status`, which names no order. `get` adds the one fact the traceback lacks and lets it rise:
+A stored value the domain refuses, a status nobody defined, raises `ValueError: 'refunded' is not a valid Status`, which names no order. `_read`, which loads an order for `get` and for the claim, adds the one fact the traceback lacks and lets it rise:
 
 ```python
-# src/shop/storage/sqlite.py, in SqliteOrders.get
+# src/shop/storage/sqlite.py, in SqliteOrders._read, which get and the claim share
 try:
     return _order(order_id, row, lines)
 except ValueError as err:
@@ -149,12 +155,14 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 @contextmanager
-def _transaction(db: sqlite3.Connection) -> Generator[None]:
+def _transaction(db: sqlite3.Connection, *, writes: bool) -> Generator[None]:
     """Run the block in one transaction: committed when it ends, rolled back if it raises.
 
     SQLite refuses a BEGIN inside another, so a transaction can't nest unseen.
     """
-    db.execute("BEGIN")
+    # One that writes takes the write lock as it begins, so a second writer
+    # waits its turn rather than failing as it turns a read into a write.
+    db.execute("BEGIN IMMEDIATE" if writes else "BEGIN")
     try:
         yield
         db.execute("COMMIT")
@@ -175,8 +183,10 @@ class SqliteOrders:
     def get(self, order_id: OrderId) -> Order:
         """Load the order with its lines, or raise OrderNotFound."""
         # One transaction, so the order and its lines come from one state of the file.
-        with _transaction(self.db):
-            ...
+        with _transaction(self.db, writes=False):
+            return self._read(order_id)
+
+    ...
 
     def save(self, order: Order) -> None:
         """Write the order and its lines in one transaction, replacing any under its id."""
@@ -190,8 +200,10 @@ class SqliteOrders:
         Every write in the block goes through the writer it yields. This store's
         own save opens a transaction of its own, which SQLite refuses in here.
         """
-        with _transaction(self.db):
+        with _transaction(self.db, writes=True):
             yield SqliteTransaction(db=self.db)
+
+    ...
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -205,11 +217,12 @@ class SqliteTransaction:
         ...
 ```
 
-- **The store's own `save` is one write in a transaction of its own,** so a consumer that writes one thing, as the canceller does, declares `save` and calls it. Only a consumer that writes several things declares `transaction()`.
+- **The store's own `save` is one write in a transaction of its own,** so a consumer whose writes stand alone, as the canceller's claim and save do, declares `save` and calls it. Only a consumer that writes several things declares `transaction()`.
 - **A transaction doesn't nest.** SQLite refuses a `BEGIN` inside another, so the store's own `save` called in the block raises `OperationalError: cannot start a transaction within a transaction` and the block rolls back, rather than commit part way. Every write in the block goes through the writer, which holds the connection and opens nothing; a read the block needs comes before it.
 - **The connection is opened with `autocommit=True`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)): a statement outside a transaction is a transaction of its own, and one that spans statements is an explicit `BEGIN` and `COMMIT`. Under `autocommit=False` one is always open, so a read leaves its lock behind, and another connection's write fails with `database is locked` until the reader next commits.
+- **A transaction that writes begins `IMMEDIATE`,** taking the write lock at once. A second writer then waits its turn, up to the connection's five-second busy timeout, where after a plain `BEGIN` it could fail with `SQLITE_BUSY` as its read turned into a write.
 - **The operation sees only the context manager and its writer:** `with self.orders.transaction() as tx: tx.save(order)`. It never holds a connection or a cursor, and never learns how the store keeps its promise.
-- **A call to another service stays outside the transaction.** A refund can't roll back, so the canceller refunds before it saves, keyed so a retry refunds once.
+- **A call to another service stays outside the transaction.** A refund can't roll back, so the canceller claims the order, refunds, then saves, each a write of its own, and the refund's key makes a second run refund once ([python-actions](../../python-actions/SKILL.md)).
 
 ## No generic base
 
@@ -217,7 +230,7 @@ A `Repository[T]` with `find`, `add` and `delete` for every type moves the queri
 
 ## The fake
 
-Callers test against a fake that holds orders in a dict and behaves like the real store where a test depends on it: not found, the order of a query's answer, and a transaction that keeps nothing when its block raises.
+Callers test against a fake that holds orders in a dict and behaves like the real store where a test depends on it: not found, a claim refused for the status it finds, the order of a query's answer, and a transaction that keeps nothing when its block raises.
 
 ```python
 # tests/order/fakes.py
@@ -239,6 +252,15 @@ class FakeOrders:
             return self.orders[order_id]
         except KeyError:
             raise OrderNotFound(order_id) from None
+
+    def start_cancelling(self, order_id: OrderId) -> Order:
+        """Move the order to CANCELLING and return it, refusing it as the real store does."""
+        order = self.get(order_id)
+        if not order.status.cancellable:
+            raise NotCancellable(order.id, order.status)
+        claimed = copy.replace(order, status=Status.CANCELLING)
+        self.orders[order.id] = claimed
+        return claimed
 
     def cancellable_for(self, customer_id: CustomerId) -> list[Order]:
         """The customer's orders whose status allows cancelling, by id, as the real store answers."""
@@ -265,7 +287,8 @@ class FakeOrders:
 ```
 
 - **The transaction's writer is a copy of the fake.** A block that raises never reaches the lines after `yield`, so the copy and its writes are dropped; one that ends cleanly hands them back.
-- **One fake fills `OrderStore`, `CancellableOrders` and `TransactionalOrders`,** so a test of the sweeper passes the same object to it and to the canceller it holds, and they agree on what's stored. It lives in `tests/order/fakes.py`, shared by every test that needs it; [python-testing](../../python-testing/SKILL.md) covers where fakes and builders go.
+- **Its claim asks `status.cancellable`, as the real store's `UPDATE` does,** so a canceller test of a shipped order meets the same `NotCancellable`, and a claimed order reads back `CANCELLING`.
+- **One fake fills `OrderStore`, `CancellableOrders` and `TransactionalOrders`.** It lives in `tests/order/fakes.py`, shared by every test that needs it, beside `FakeCanceller`, the fake of `Cancels` that the sweeper's and the withdrawer's tests pass; [python-testing](../../python-testing/SKILL.md) covers where fakes and builders go.
 
 ## Testing the real store
 
@@ -339,9 +362,29 @@ def test_a_save_inside_a_transaction_fails_rather_than_commit_part_way(
         save_inside()
 
     assert orders.cancellable_for(CustomerId("c-1")) == []
+
+
+...
+
+
+def test_start_cancelling_refuses_an_order_shipped_since_it_was_loaded(
+    orders: SqliteOrders, path: Path
+) -> None:
+    orders.save(make_order(status=Status.PAID, payment_id="pay-1"))
+    loaded = orders.get(OrderId("o-1"))
+    shipped = copy.replace(loaded, status=Status.SHIPPED)
+    with closing(connect(path)) as other:
+        SqliteOrders(db=other).save(shipped)
+
+    with pytest.raises(NotCancellable) as refused:
+        orders.start_cancelling(loaded.id)
+
+    assert refused.value.status is Status.SHIPPED
+    assert orders.get(OrderId("o-1")) == shipped
 ```
 
 - **A commit is checked from a second connection.** The connection that wrote reads its own uncommitted writes, so a read through it passes whether or not anything was committed.
 - **So is a lock left behind.** A read that leaves its transaction open passes every test on one connection, and fails the first write from another. A further test holds a read open on a second connection, so the store's `COMMIT` fails, and checks the next save still works: SQLite leaves a transaction open when its `COMMIT` fails.
+- **A conditional write is tested against the change it guards against:** the order loaded, then shipped from a second connection, then refused by the claim, still shipped.
 - **Each query gets a test that puts the records it must skip beside the ones it must find:** a shipped order and another customer's, for `cancellable_for`.
 - **A server database** (Postgres, MySQL) runs in a container the test session starts, with a schema per test or a transaction rolled back after each; the same tests run against it.

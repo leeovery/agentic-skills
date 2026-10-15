@@ -16,7 +16,7 @@ src/shop/cli.py                the wiring: builds the client and the policy, pic
 
 ## The Protocol
 
-Domain types in and out: the order package's `Refund`, made of a `PaymentId`, `Money` and a key, and its exceptions. No `httpx2.Response`, vendor dict or request model appears in it. Once the vendor's names are in the signature, the Protocol is the SDK by another name, and replacing the vendor rewrites every caller.
+Domain types in and out: the order package's `Refund`, made of a `PaymentId`, `Money` and an `IdempotencyKey`, and its exceptions. No `httpx2.Response`, vendor dict or request model appears in it. Once the vendor's names are in the signature, the Protocol is the SDK by another name, and replacing the vendor rewrites every caller.
 
 ## The adapter
 
@@ -85,7 +85,7 @@ class Gateway:
 ```
 
 - **`Gateway` is concrete,** and nothing in it names `Refunder`. pyrefly checks the fit where the wiring passes it to `Canceller`.
-- **The refund carries its idempotency key, derived by the caller from the work:** the canceller's is `cancel-{order_id}`. The provider refunds once per key however often it's asked, and a later refund of the same payment, for another reason, comes with a key of its own. That is what makes the write safe to retry, and why `Canceller` can refund before its own write ([python-actions](../../python-actions/SKILL.md)).
+- **The refund carries its idempotency key, derived by the caller from the work:** the canceller's is `cancel-{order_id}`. The provider refunds once per key however often it's asked, and a later refund of the same payment, for another reason, comes with a key of its own. That is what makes the write safe to retry, and lets a cancel that stopped after its refund run again ([python-actions](../../python-actions/SKILL.md)).
 - **No decisions.** Whether an order may be refunded is the order package's question. The adapter refunds.
 - **The body is the wire's shape,** built here and nowhere else; a response worth reading is parsed here into domain types ([python-types](../../python-types/SKILL.md)).
 

@@ -20,7 +20,7 @@ A Protocol belongs to the code that calls it, and it exists to be swapped: in `m
 
    *Your Protocol is the contract you control, in your domain's words. The adapter is the only code that knows the vendor, so a change on their side breaks one module and its tests.* Held by an import-linter `forbidden` contract: the domain never imports `httpx2`.
 5. **The adapter owns the call's policy, and nothing above it retries.** Every call has a timeout, set on the client the wiring builds. A call is retried only for a failure in passing (the connection failed or dropped, it timed out, or the answer was 429, 502, 503 or 504), stopping on attempts or elapsed time, with a jittered backoff, honouring `Retry-After`, and logging each retry. A write is retried only when it carries an idempotency key. The library's exceptions leave the adapter translated, `raise PaymentFailed(...) from err`. *A retry at two layers multiplies, four attempts over four is sixteen calls to a provider already struggling, and a write retried without a key charges twice.*
-6. **A store is a Protocol named for its data, its methods in the domain's words:** `cancellable_for(customer_id)`, not `find(status=...)`. No generic repository base. *Each query a caller needs has a name that says what it returns, and the store is free to answer it however it likes.*
+6. **A store is a Protocol named for its data, its methods in the domain's words:** `cancellable_for(customer_id)`, not `find(status=...)`; `start_cancelling(order_id)`, not `update(order_id, status=...)`. No generic repository base. *Each query and each write a caller needs has a name that says what it does, and the store is free to answer it however it likes, in one conditional statement where it must.*
 7. **The clock, the environment, files, the network and processes are seams, filled in `main`.**
    - One function is a callable field, passed as the function itself: `now: Callable[[], datetime]`, which `main` fills with `partial(datetime.now, UTC)`; `sleep`; `rand`.
    - An object of several methods is a Protocol: a process runner that finds a program and runs it.
@@ -34,6 +34,12 @@ A Protocol belongs to the code that calls it, and it exists to be swapped: in `m
 
 ```python
 # src/shop/order/cancel.py: the consumer declares what it calls.
+IdempotencyKey = NewType("IdempotencyKey", str)
+
+
+...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Refund:
     """Money going back to a payment, under a key the caller derives from the work.
@@ -44,7 +50,7 @@ class Refund:
 
     payment_id: PaymentId
     amount: Money
-    key: str
+    key: IdempotencyKey
 
 
 class Refunder(Protocol):
@@ -81,14 +87,15 @@ with closing(connect(database)) as db, client() as http:
 # tests/order/fakes.py: the fake records what it was asked and raises what it was told.
 @dataclass(slots=True)
 class FakeRefunder:
-    """A Refunder that records each refund and raises error, when it's set."""
+    """A Refunder that records each refund, once per key, and raises error, when it's set."""
 
     refunded: list[Refund] = field(default_factory=list)
     error: Exception | None = None
 
     def refund(self, refund: Refund) -> None:
-        """Record the refund, then raise the error the test set, if any."""
-        self.refunded.append(refund)
+        """Record the refund, once per key as the provider makes it, then raise error, if set."""
+        if all(made.key != refund.key for made in self.refunded):
+            self.refunded.append(refund)
         if self.error is not None:
             raise self.error
 ```

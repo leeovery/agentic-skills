@@ -226,7 +226,7 @@ The adapter's own tests run this interpreter as the child, `Path(sys.executable)
 
 - **A value a test must predict is a seam.** The retry policy's jitter comes from `rand`, and its tests pass `lambda: 1.0` to make every wait exact. An id minted with `uuid.uuid7()` ([3.14](https://docs.python.org/3/whatsnew/3.14.html)) that a test checks comes from `new_id`.
 - **One nothing asserts on needs no seam.** `main` mints the run's correlation id with `uuid.uuid7()` itself.
-- **An id derived from data needs none either:** the canceller's refund key is `cancel-{order_id}`, the same on every retry of that cancel.
+- **An id derived from data needs none either:** the canceller's refund key is `cancel-{order_id}`, the same each time that cancel runs.
 - ruff's `S311` flags a call to `random.random()` as unfit for secrets. Passing the function as a seam calls nothing, so it isn't flagged, and jitter is no secret. A token or a key comes from `secrets`.
 
 ## No defaults
