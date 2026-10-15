@@ -84,7 +84,7 @@ except KeyError:
 `err.add_note(...)` ([3.11](https://docs.python.org/3/whatsnew/3.11.html)) adds a line the traceback prints under the message, and the exception keeps its type, so every `except` that matched it still does:
 
 ```python
-# src/shop/storage/sqlite.py, in SqliteOrders.get
+# src/shop/storage/sqlite.py, in SqliteOrders._read, which get and the claim share
 try:
     return _order(order_id, row, lines)
 except ValueError as err:
@@ -176,11 +176,13 @@ Match the way callers match: by type, then attributes.
 # tests/order/test_cancel.py
 def test_cancel_refuses_a_shipped_order() -> None:
     orders = FakeOrders.holding(make_order(status=Status.SHIPPED, payment_id="pay-1"))
+    payments = FakeRefunder()
 
     with pytest.raises(NotCancellable) as refused:
-        canceller(orders).cancel(OrderId("o-1"), reason=Reason.CUSTOMER)
+        canceller(orders, payments).cancel(OrderId("o-1"), reason=Reason.CUSTOMER)
 
     assert refused.value.status is Status.SHIPPED
+    assert payments.refunded == []
     assert orders.saved == []
 ```
 
