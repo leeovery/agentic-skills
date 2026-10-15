@@ -20,6 +20,7 @@ A guard is for what neither can say: a module's name, what runs at import, which
 - **It finds the project by walking up to `pyproject.toml`** from its own file, never by a fixed `../..` that breaks when the test moves.
 - **It reads every `.py` file under `src/`,** or `tests/` for a rule about tests, but those in a directory starting with `.` below it. It never skips the root by that test: a checkout can sit inside a hidden directory.
 - **It parses with `ast`** and walks the tree, tracking the qualname of the def or class around each node.
+- **It runs on every Python the project supports,** from 3.11, which `tomllib` needs. A library runs its tests on each Python from its floor ([python-project](../../python-project/SKILL.md)), guards among them, so a node class newer than the floor is looked up only behind a version check, as `ast.TypeAlias` (3.12) and `ast.Interpolation` (3.14) are, and a fixture in newer syntax is a test of its own, skipped below the version that parses it, as guard 3's t-string is. What a guard reports follows the Python it runs on: below 3.14 an annotation runs at import, so guard 2 reads annotations there. Its tests ran on 3.11, 3.12 and 3.13 too; those that read the shop's own source can't there, as the shop is written for 3.14.
 - **Each breach says where, what, and the fix:** `src/shop/storage/sqlite.py:45: calls connect at import: call it from main, or from the function that needs it`. `check` fails once with every breach, one per line, and no traceback.
 - **Its allowance only shrinks.** Each entry is `"path:qualname"`, with a comment saying why it's allowed for now. An entry covers every breach in that def or class; one that covers nothing fails, so it's deleted the day the code is fixed.
 - **It's been seen to fail.** A second test writes a module that breaks the rule under `tmp_path`, runs the guard over it, and checks it reports exactly that, and a stale allowance entry too where the guard keeps an allowance, as guards 2 and 3 do. A guard reading the wrong directory otherwise passes forever.
@@ -225,7 +226,7 @@ def test_the_naming_guard_finds_a_grab_bag(tmp_path: Path) -> None:
 A module body declares: imports, constants, functions, classes and its logger. A settings object, a client, a connection or a registration at module level runs in every test that imports it, before any test can stop it ([python-architecture](../../python-architecture/SKILL.md)).
 
 - Decorators and default values run with the `def`; the body doesn't. A class body runs.
-- From 3.14 annotations are evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)), so a call inside one doesn't run at import, and nor does a `type` alias's value.
+- From 3.14 annotations are evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)), so a call inside one doesn't run at import, and nor does a `type` alias's value. Below 3.14 an annotation on a def, or at module or class level, runs where it's written, so there the guard reads it; its fixture expects what the Python running it does.
 - `DECLARATIONS` are calls that build a type, a logger, a context variable or a constant and touch nothing outside the process: `frozenset`, `tuple` and `re.compile` for constants, and `ContextVar` because the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for one at module level. A name joins only on that test, with the project's own: `ConfigDict` and `SettingsConfigDict` are pydantic's declarations of how a boundary model parses and where settings come from, and `Field`, `field_validator` and `model_validator` declare a field's constraints and a model's checks, which run when a model parses, never at import. `TypeVar` stays out: on a 3.12 floor a type parameter replaces it (`UP046`, `UP047`).
 - A name matches as it's written, `re.compile` not `compile`, and a call among an allowed call's arguments is still checked, so `frozenset(open(path))` fails.
 - A `__main__.py` is run, never imported, so it's skipped.
@@ -235,6 +236,7 @@ A module body declares: imports, constants, functions, classes and its logger. A
 """Nothing runs at import: a module declares, and main does the work."""
 
 import ast
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -274,6 +276,9 @@ DECLARATIONS = frozenset(
     }
 )
 FIX = "call it from main, or from the function that needs it"
+# From 3.14 an annotation is evaluated only when something asks for it (PEP 649);
+# before, one on a def or at module or class level runs where it's written.
+LAZY_ANNOTATIONS = sys.version_info >= (3, 14)
 
 # Calls let stand for now, each "path:qualname" with why. The set only shrinks.
 ALLOWED: frozenset[str] = frozenset()
@@ -295,11 +300,15 @@ def calls_at_import(root: Path) -> Iterator[Breach]:
 
 def _runs(node: ast.AST, scope: str) -> Iterator[tuple[str, ast.Call]]:
     """The calls node makes when its module is imported, each with its scope."""
+    if sys.version_info >= (3, 12) and isinstance(node, ast.TypeAlias):
+        return  # a type alias's value is evaluated lazily, like an annotation
     parts: list[ast.AST | None]
     match node:
         case ast.FunctionDef() | ast.AsyncFunctionDef():
             # Decorators and defaults run with the def; the body runs when it's called.
             parts = [*node.decorator_list, *node.args.defaults, *node.args.kw_defaults]
+            if not LAZY_ANNOTATIONS:
+                parts += [*_annotations(node.args), node.returns]
         case ast.Lambda():
             parts = [*node.args.defaults, *node.args.kw_defaults]
         case ast.ClassDef():
@@ -307,10 +316,7 @@ def _runs(node: ast.AST, scope: str) -> Iterator[tuple[str, ast.Call]]:
             for statement in node.body:
                 yield from _runs(statement, qualify(scope, node.name))
         case ast.AnnAssign():
-            # Annotations are evaluated lazily from 3.14, so only the value runs.
-            parts = [node.value]
-        case ast.TypeAlias():
-            parts = []  # evaluated lazily, like an annotation
+            parts = [node.value] if LAZY_ANNOTATIONS else [node.annotation, node.value]
         case ast.Call():
             yield scope, node
             parts = list(ast.iter_child_nodes(node))
@@ -319,6 +325,12 @@ def _runs(node: ast.AST, scope: str) -> Iterator[tuple[str, ast.Call]]:
     for part in parts:
         if part is not None:
             yield from _runs(part, scope)
+
+
+def _annotations(args: ast.arguments) -> list[ast.expr | None]:
+    """The annotation of each of a def's parameters."""
+    every = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+    return [arg.annotation for arg in every if arg is not None]
 
 
 def test_nothing_runs_at_import() -> None:
@@ -410,6 +422,32 @@ def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
     assert report(calls_at_import(tmp_path)) == [
         f"src/shop/prices.py:19: calls open at import: {FIX}",
     ]
+
+
+def test_the_import_guard_reads_annotations_as_this_python_runs_them(
+    tmp_path: Path,
+) -> None:
+    write(
+        tmp_path,
+        "src/shop/limits.py",
+        '''
+        """Limits, one of them read as its annotation is evaluated."""
+        from typing import Annotated
+
+        from shop.config import load_limit
+
+        LIMIT: Annotated[int, load_limit()] = 5
+        ''',
+    )
+
+    # A library's matrix runs the guard on each Python it supports, and each
+    # reports what runs at import there.
+    expected: list[str] = (
+        []
+        if sys.version_info >= (3, 14)
+        else [f"src/shop/limits.py:6: calls load_limit at import: {FIX}"]
+    )
+    assert report(calls_at_import(tmp_path)) == expected
 ```
 
 ## Guard 3: values worded by display
@@ -421,8 +459,11 @@ How a value reads to people is `shop.display`'s to say. Everywhere else, a forma
 """Values are worded for people by shop.display alone."""
 
 import ast
+import sys
 from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 from tests.guards.source import (
     Breach,
@@ -454,14 +495,18 @@ def wording(root: Path) -> Iterator[Breach]:
 def _words(node: ast.AST) -> tuple[int, str] | None:
     """Where and how node words a value: a format spec, format(), str.format() or strftime().
 
-    A spec is read in an f-string and in a t-string alike. A method goes by its
-    name, as the guard can't see the type it's called on.
+    A spec is read in an f-string and in a t-string alike; a Python older than
+    3.14 has no t-strings, nor ast.Interpolation. A method goes by its name, as
+    the guard can't see the type it's called on.
     """
+    if (
+        sys.version_info >= (3, 14)
+        and isinstance(node, ast.Interpolation)
+        and isinstance(node.format_spec, ast.JoinedStr)
+    ):
+        return node.lineno, "words a value with a format spec"
     match node:
-        case (
-            ast.FormattedValue(format_spec=ast.JoinedStr())
-            | ast.Interpolation(format_spec=ast.JoinedStr())
-        ):
+        case ast.FormattedValue(format_spec=ast.JoinedStr()):
             return node.lineno, "words a value with a format spec"
         case ast.Call(func=ast.Name(id="format")):
             return node.lineno, "words a value with format()"
@@ -484,7 +529,6 @@ def test_the_wording_guard_finds_a_value_worded_in_place(tmp_path: Path) -> None
         '''
         """A day's sales, worded where they're totalled."""
         from datetime import datetime
-        from string.templatelib import Template
         from time import strftime
 
         LINE = "{:.2f} sold"
@@ -492,10 +536,6 @@ def test_the_wording_guard_finds_a_value_worded_in_place(tmp_path: Path) -> None
 
         def headline(total: int, day: datetime) -> str:
             return f"{total / 100:.2f} on {day.strftime('%d %b')}"
-
-
-        def banner(total: int) -> Template:
-            return t"{total / 100:.2f} today"
 
 
         def summary(total: int) -> str:
@@ -508,17 +548,38 @@ def test_the_wording_guard_finds_a_value_worded_in_place(tmp_path: Path) -> None
     )
 
     assert report(wording(tmp_path), allowed={"src/shop/report.py:footer"}) == [
-        f"src/shop/report.py:10: words a value with a format spec: {FIX}",
-        f"src/shop/report.py:10: words a time with strftime(): {FIX}",
-        f"src/shop/report.py:14: words a value with a format spec: {FIX}",
-        f"src/shop/report.py:18: words a value with str.format(): {FIX}",
-        f"src/shop/report.py:18: words a time with strftime(): {FIX}",
+        f"src/shop/report.py:9: words a value with a format spec: {FIX}",
+        f"src/shop/report.py:9: words a time with strftime(): {FIX}",
+        f"src/shop/report.py:13: words a value with str.format(): {FIX}",
+        f"src/shop/report.py:13: words a time with strftime(): {FIX}",
+    ]
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 14), reason="t-strings came in 3.14: older can't parse one"
+)
+def test_the_wording_guard_reads_a_t_strings_format_spec(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "src/shop/banner.py",
+        '''
+        """Today's banner, worded where it's built."""
+        from string.templatelib import Template
+
+
+        def banner(total: int) -> Template:
+            return t"{total / 100:.2f} today"
+        ''',
+    )
+
+    assert report(wording(tmp_path)) == [
+        f"src/shop/banner.py:6: words a value with a format spec: {FIX}",
     ]
 ```
 
 ## Guard 4: logging configured by main
 
-`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). It goes by the name called, so `from logging import captureWarnings` is caught as well as `logging.basicConfig`, and `addHandler` or `setLevel` on any logger; `logging.disable` only by its whole name, as `disable` alone is too common a word. A logger changed rather than called is caught too: `propagate`, `disabled`, `level` or `handlers` assigned, and a call on its `handlers` list, such as `handlers.clear()`. Its fixture has each form. ruff's `LOG015`, in the default set, catches a call on the root logger.
+`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). It goes by the name called, so `from logging import captureWarnings` is caught as well as `logging.basicConfig`, and `addHandler` or `setLevel` on any logger; `logging.disable` only by its whole name, as `disable` alone is too common a word. A logger changed rather than called is caught too: `propagate`, `disabled`, `level` or `handlers` assigned, and a call on its `handlers` list, such as `handlers.clear()`. Those words are common, so they count only on what is plainly a logger: a name bound from `logging.getLogger(...)`, the module's `logger`, `logging.root`, or a `getLogger(...)` call itself. A domain class setting `self.level` passes; its fixture holds one. Its fixture has each form. ruff's `LOG015`, in the default set, catches a call on the root logger.
 
 ```python
 # tests/guards/test_logging.py
@@ -558,8 +619,11 @@ CONFIGURES = frozenset(
 )
 # Too common a word to go by alone, so only as logging's own.
 DISABLE = "logging.disable"
-# A logger's own settings, changed by assigning them.
+# A logger's own settings, changed by assigning them. The words are common, so
+# they count only on what is plainly a logger.
 SETTINGS = frozenset({"disabled", "handlers", "level", "propagate"})
+GET_LOGGER = frozenset({"logging.getLogger", "getLogger"})
+ROOT = "logging.root"
 FIX = "leave it to main; a module only calls logging.getLogger(__name__)"
 
 
@@ -568,27 +632,60 @@ def configures_logging(root: Path) -> Iterator[Breach]:
     for module in modules(root, "src"):
         if module.path == ENTRY:
             continue
+        loggers = _loggers(module.tree)
         for scope, node in scoped(module.tree):
-            if found := _configures(node):
+            if found := _configures(node, loggers):
                 line, what = found
                 yield Breach(
                     path=module.path, line=line, scope=scope, what=what, fix=FIX
                 )
 
 
-def _configures(node: ast.AST) -> tuple[int, str] | None:
+def _configures(node: ast.AST, loggers: set[str]) -> tuple[int, str] | None:
     """Where and how node configures logging: a call, a logger's handlers changed, a setting."""
     match node:
         case ast.Call(func=ast.Attribute(attr=name) | ast.Name(id=name) as func) if (
             name in CONFIGURES or dotted(func) == DISABLE
         ):
             return node.lineno, f"configures logging with {ast.unparse(func)}"
-        case ast.Call(func=ast.Attribute(value=ast.Attribute(attr="handlers")) as func):
+        case ast.Call(
+            func=ast.Attribute(
+                value=ast.Attribute(value=owner, attr="handlers")
+            ) as func
+        ) if _is_logger(owner, loggers):
             return node.lineno, f"configures logging with {ast.unparse(func)}"
-        case ast.Attribute(attr=name, ctx=ast.Store()) if name in SETTINGS:
+        case ast.Attribute(value=owner, attr=name, ctx=ast.Store()) if (
+            name in SETTINGS and _is_logger(owner, loggers)
+        ):
             return node.lineno, f"configures logging by setting {ast.unparse(node)}"
         case _:
             return None
+
+
+def _loggers(tree: ast.Module) -> set[str]:
+    """The names in tree plainly bound to a logger: logger, and each bound from one."""
+    names = {"logger"}
+    for node in ast.walk(tree):
+        match node:
+            case (
+                ast.Assign(targets=[ast.Name(id=name)], value=ast.expr() as value)
+                | ast.AnnAssign(target=ast.Name(id=name), value=ast.expr() as value)
+            ) if _is_logger(value, names):
+                names.add(name)
+            case _:
+                pass
+    return names
+
+
+def _is_logger(node: ast.expr, loggers: set[str]) -> bool:
+    """Whether node is plainly a logger: a name bound to one, getLogger(), or the root."""
+    match node:
+        case ast.Name(id=name):
+            return name in loggers
+        case ast.Call(func=func):
+            return dotted(func) in GET_LOGGER
+        case _:
+            return dotted(node) == ROOT
 
 
 def test_only_main_configures_logging() -> None:
@@ -617,6 +714,21 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
             logger.propagate = False
             logging.getLogger("httpx2").handlers.clear()
             logging.disable(logging.INFO)
+            audit = logging.getLogger("shop.audit")
+            audit.disabled = True
+            logging.root.level = logging.DEBUG
+        ''',
+    )
+    write(
+        tmp_path,
+        "src/shop/order/priority.py",
+        '''
+        """How urgent an order is, from one to five."""
+
+
+        class Priority:
+            def __init__(self, level: int) -> None:
+                self.level = level
         ''',
     )
 
@@ -629,6 +741,8 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
         f"src/shop/payments/gateway.py:15: configures logging by setting logger.propagate: {FIX}",
         f"src/shop/payments/gateway.py:16: configures logging with logging.getLogger('httpx2').handlers.clear: {FIX}",
         f"src/shop/payments/gateway.py:17: configures logging with logging.disable: {FIX}",
+        f"src/shop/payments/gateway.py:19: configures logging by setting audit.disabled: {FIX}",
+        f"src/shop/payments/gateway.py:20: configures logging by setting logging.root.level: {FIX}",
     ]
 ```
 
