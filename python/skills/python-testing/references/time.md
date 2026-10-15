@@ -57,11 +57,7 @@ class FakeTime:
 
 @contextmanager
 def gateway(handler: Handler, time: FakeTime | None = None) -> Generator[Gateway]:
-    """A Gateway whose client answers every request with handler, on a fake clock.
-
-    rand returns 1, so each backoff is its whole bound: 0.5s, 1s, 2s. The client
-    closes as the block ends.
-    """
+    """A Gateway whose client answers every request with handler, on a fake clock."""
     time = time or FakeTime()
     retry = Retry(sleep=time.sleep, clock=time.clock, rand=lambda: 1.0)
     with httpx2.Client(
@@ -70,9 +66,7 @@ def gateway(handler: Handler, time: FakeTime | None = None) -> Generator[Gateway
         yield Gateway(client=client, retry=retry)
 ```
 
-The suite never sleeps, and the test can check the back-off itself. The jitter's `rand` is a seam too: fixed at 1, every wait is its whole bound, so a test asserts each one exactly.
-
-The retry loop is the adapter's ([python-protocols](../../python-protocols/SKILL.md)), so its tests run the adapter on `httpx2.MockTransport`, never a copy of the loop.
+The suite never sleeps, and the jitter's `rand` is a seam too: fixed at 1, every wait is its whole bound, so a test asserts each one exactly. The retry loop is the adapter's ([python-protocols](../../python-protocols/SKILL.md)), so its tests run the adapter on `httpx2.MockTransport`, never a copy of the loop.
 
 ## The three retry tests
 
@@ -119,8 +113,8 @@ def test_refund_never_retries_a_permanent_failure() -> None:
     assert time.slept == []
 ```
 
-- **Count the calls.** "It recovered" is three requests sent; "it stopped" is four sent, and `PaymentFailed` raised from the last error, which notes how many attempts it gave; "it didn't retry" is one sent and no wait.
-- **Check the waits** where the back-off is the behaviour: `[0.5, 1.0, 2.0]` pins the doubling. Were `rand` left real, the test could only check each wait's bounds.
+- **Count the calls.** "It recovered" is three requests sent; "it stopped" is four, and `PaymentFailed` raised from the last error; "it didn't retry" is one and no wait.
+- **Check the waits** where the back-off is the behaviour: `[0.5, 1.0, 2.0]` pins the doubling.
 - **Each other limit the policy keeps gets a test of its own:** a `Retry-After` header, where the wait recorded is the one it asked for, and a wait that would pass the deadline, where the call stops without waiting.
 
 ## asyncio on a virtual clock
@@ -144,22 +138,22 @@ async def test_settle_gives_up_on_a_payment_at_its_deadline() -> None:
 - **Mark the tests that wait,** with `@pytest.mark.looptime`, rather than switching it on for the whole run with `--looptime`: a test without the mark that waits is a test to look at.
 - **Exact equality holds,** as nothing else moves the virtual clock: `== 30`, not `>= 30`.
 - **It moves only the loop's clock.** `time.monotonic()`, a thread's wait and real I/O take real time; give those code paths an injected `sleep` or a fake.
-- **It's a pytest plugin** in the test dependency group (`uv add --group test looptime`), working beside pytest-asyncio in the drop-in's auto mode. It's pre-1.0 (0.9 on 2026-10-14), and the lockfile pins it.
-- **An interval is tested the same way:** a poller run every 60 seconds inside a body that sleeps 150 runs its job at 60 and 120, read from `loop.time()`.
+- **It's a pytest plugin** in the test dependency group, working beside pytest-asyncio in the drop-in's auto mode. It's pre-1.0 (0.9 on 2026-10-14), and the lockfile pins it.
+- **An interval is tested the same way,** its runs read from `loop.time()`.
 
 ## time-machine, and what it can't move
 
-time-machine is for code you don't own that reads the clock itself, where no `now` can be passed in. `with time_machine.travel(datetime(2026, 3, 1, 9, tzinfo=UTC), tick=False):` around the call moves `datetime.now()`, `time.time()` and the functions built on them, such as `email.utils.formatdate()`, to that instant, and `tick=False` holds it there.
+time-machine is for code you don't own that reads the clock itself, where no `now` can be passed in. `with time_machine.travel(datetime(2026, 3, 1, 9, tzinfo=UTC), tick=False):` around the call moves `datetime.now()`, `time.time()` and the functions built on them to that instant, and `tick=False` holds it there.
 
 - **Never for your own code.** Code you own takes `now`; travelling the whole process to test it hides the dependency the signature should show.
 - **It doesn't move `time.monotonic()`** (not since 3.0), so it can't speed up a timeout, a deadline or a wait.
-- **It doesn't reach a clock read outside Python.** pydantic's `FutureDate` and `PastDatetime` check against the system clock from Rust, and ignore a travel. Validate such a rule in your own code against `now`, or test with dates far enough from today that the real clock can't matter.
+- **It doesn't reach a clock read outside Python.** pydantic's `FutureDate` and `PastDatetime` check against the system clock from Rust, and ignore a travel. Validate such a rule in your own code against `now`.
 - **It's CPython only,** and the drop-in's dependency group already holds it. Never freezegun alongside: time-machine refuses to run while freezegun is active.
 
 ## Async tests
 
 - **`async def test_...` runs as it is.** The drop-in sets `asyncio_mode = "auto"`, so pytest-asyncio runs every async test and fixture on asyncio, each on a loop of its own. No `@pytest.mark.asyncio`.
 - **A test never calls `asyncio.run`,** and never reaches for a loop: `asyncio.get_running_loop()` inside the test when it needs `loop.time()`.
-- **An async resource is opened with `async with` in the test,** or in an async helper like `settlements(handler)` in [fakes-and-builders.md](fakes-and-builders.md), so it's closed on the loop that used it.
+- **An async resource is opened with `async with` in the test,** or in an async helper ([fakes-and-builders.md](fakes-and-builders.md)), so it's closed on the loop that used it.
 - **Concurrency is tested by what it guarantees,** not by timing: the fake counts the calls in flight, and the test checks `most_at_once == 2`. A test that sleeps to let tasks overlap is a test that sometimes doesn't.
-- **Code that starts tasks is tested for stopping them,** as the poller's tests do by leaving its `async with` and checking what the job did up to then, that a failed run is logged and the next still runs, and that a job that won't stop is reported.
+- **Code that starts tasks is tested for stopping them:** leave its `async with`, then check what the job did up to then.
