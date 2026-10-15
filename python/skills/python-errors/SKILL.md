@@ -15,9 +15,9 @@ An exception is handled once: raised with what the traceback lacks, caught where
 4. **Translate at a boundary you own: `raise PaymentFailed(payment_id) from err`.** An adapter or a store turns its library's exception into the domain's; `from None` only where hiding the cause is deliberate. *Otherwise every caller imports the library to catch it, and replacing it breaks them all; `from` keeps the cause for whoever reads the traceback.* Held by ruff's `B904`.
 5. **Context the traceback lacks goes on with `err.add_note(...)`** ([3.11](https://docs.python.org/3/whatsnew/3.11.html)), and the exception rises with its type unchanged. *A new exception per layer, to say "while reading order o-1", buries the original type and makes every caller catch the wrapper.*
 6. **Independent failures are reported together.** Validation collects every problem into one exception. Independent operations that each fail raise an `ExceptionGroup`, which a caller takes apart with `except*`. *Reporting one problem per run turns three mistakes into three runs, and stopping at the first failure leaves the rest untried.*
-7. **An exception becomes an exit code or a status in one function per edge.** Domain exceptions carry no HTTP status or exit code. `except Exception` appears only there, as the edge's last resort, which logs the traceback. *The domain stays free of transports, each edge's mapping is one table to read, and a bug reaches the one place that reports it whole.* [python-actions](../python-actions/SKILL.md) holds the CLI's codes.
+7. **An exception becomes an exit code or a status in one function per edge.** Domain exceptions carry no HTTP status or exit code. `except Exception` appears only there, as the edge's last resort, and in a loop that must outlive one failed run, as the poller's; each logs the traceback. *The domain stays free of transports, each edge's mapping is one table to read, and a bug reaches the one place that reports it whole.* [python-actions](../python-actions/SKILL.md) holds the CLI's codes.
 8. **`assert` only in tests.** `python -O` strips every `assert` statement. *A check that vanishes under a flag isn't a check: raise instead.* Held by ruff's `S101`, lifted for `tests/`.
-9. **Logging is configured once, in the wiring `main` supplies; a module only names its logger,** `logger = logging.getLogger(__name__)`. A library adds no handler. Nothing logs through the root logger. *Configuration in a module runs for whoever imports it and fights the application's own, and a module logger is a name the application's configuration can reach.* Held by ruff's `LOG015` (a root-logger call), `LOG001` and `LOG002`, and a source guard on `basicConfig`, `dictConfig` and `addHandler`, in [python-quality](../python-quality/SKILL.md).
+9. **Logging is configured once, in the wiring `main` supplies; a module only names its logger,** `logger = logging.getLogger(__name__)`. A library adds no handler. Nothing logs through the root logger. *Configuration in a module runs for whoever imports it and fights the application's own, and a module logger is a name the application's configuration can reach.* Held by ruff's `LOG015` (a root-logger call), `LOG001` and `LOG002`, and a source guard on each call or setting that configures logging, from `basicConfig` to `setLevel` and `propagate`, in [python-quality](../python-quality/SKILL.md).
 10. **A log line is a constant message with its values as `%`-style arguments or in `extra`, never an f-string.** `logger.exception` only where the exception stops. ERROR is for what someone must act on; an expected outcome, such as an order that can't be cancelled, is INFO. No `print` for diagnostics. *A constant message is one string to search for, its values are formatted only if the line is emitted, and an ERROR stays worth reading.* Held by ruff's `G`, `TRY400`, `TRY401`, `LOG004` and `T201`.
 
 ## Pattern
@@ -61,6 +61,10 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
         code = app(args=argv, prog_name="shop", standalone_mode=False)
     except typer.TyperException as err:
         ...
+    except typer.Abort:
+        # A prompt declined, or its input closed with Ctrl-D.
+        typer.echo("shop: aborted", err=True)
+        return 1
     except (SettingsError, OrderError, SettlementError) as err:
         typer.echo(f"shop: {_said(err)}", err=True)
         return 1
@@ -70,13 +74,14 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
     ...
 ```
 
-A `SettingsError`, an `OrderError` or a `SettlementError` is an outcome the user reads, printed once with its notes and no traceback. Anything else is a bug, logged once with its traceback: a pydantic `ValidationError` too, as the wiring turns the settings' into `SettingsError` and an edge turns its input's into an answer of its own.
+A `SettingsError`, an `OrderError` or a `SettlementError` is an outcome the user reads, printed once with its notes and no traceback. Anything else is a bug, logged once with its traceback: a pydantic `ValidationError` too, as the wiring turns the settings' into `SettingsError` and an edge turns its input's into an answer of its own. So an outcome the user must be told is a domain exception, as a reorder with nothing still on sale raises `OrderError`; a builtin such as `ValueError` is for a bug, or a value refusing its own rule.
 
 ## Decision table
 
 | The caller | Raise |
 |---|---|
-| only reports it | the package's base exception, or a builtin such as `ValueError`, with a message |
+| is told an outcome, and only reports it | the package's base exception, with a message |
+| meets a bug, or a value refusing its own rule | a builtin: `ValueError`, `TypeError` |
 | branches on which failure it was | a subclass of the package's base |
 | needs data from it | that subclass, with the data as attributes |
 | sits past a library you wrap | your exception, `from` the library's |

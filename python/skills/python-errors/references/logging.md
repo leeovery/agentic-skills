@@ -23,7 +23,7 @@ logging.basicConfig(
 - **The handler writes to stderr,** so log lines never mix with the data a command writes to stdout ([python-actions](../../python-actions/SKILL.md)).
 - **`basicConfig` does nothing when the root logger already has handlers,** unless given `force=True`. Configured twice, the second call is silently ignored; needing `force` means something configured logging before `main` did.
 - **A larger setup is one `logging.config.dictConfig(...)` call,** in the same place, under the same rule.
-- **Nowhere else.** A module that calls `basicConfig`, `dictConfig` or `addHandler` configures logging for every program that imports it, at import or at whatever moment it runs. The source guard in [python-quality](../../python-quality/SKILL.md) fails on each call outside the module that holds `main`.
+- **Nowhere else.** A module that calls `basicConfig`, `dictConfig`, `addHandler`, `setLevel` or `logging.disable`, or sets a logger's `propagate` or `handlers`, configures logging for every program that imports it, at import or at whatever moment it runs. The source guard in [python-quality](../../python-quality/SKILL.md) fails on each one outside the module that holds `main`.
 
 ## A logger per module
 
@@ -145,7 +145,8 @@ pytest's `caplog` holds the records each test logged. Check the level and the me
 def test_each_retry_is_logged_as_a_warning(caplog: pytest.LogCaptureFixture) -> None:
     handler, _ = answers(httpx2.Response(502), httpx2.Response(201))
 
-    gateway(handler).refund(REFUND)
+    with gateway(handler) as payments:
+        payments.refund(REFUND)
 
     [record] = caplog.records
     assert record.levelname == "WARNING"

@@ -51,7 +51,7 @@ class PaymentFailed(OrderError):
 - **The base lets an edge take every expected failure in one clause:** `run` catches `OrderError` and prints it.
 - **Each subclass is there because a caller branches on it.** The sweeper keeps going past `NotCancellable` and `PaymentFailed`; a refund that failed needs someone to act on its `payment_id`. A failure nobody tells apart stays the base with a message.
 - **What a caller branches on is an attribute, typed, set in `__init__`,** and the message is built from the same values. The message is for people; no code reads it.
-- **A builtin where it fits:** `ValueError` for a value that breaks a rule as it's built (`Order` with no lines), `TimeoutError` for a program that ran too long. A caller catching those knows them already.
+- **A builtin for a bug, or a value refusing its own rule:** `ValueError` for a value that breaks a rule as it's built (`Order` with no lines), `TimeoutError` from the process seam for a program that ran too long. `run` logs a builtin as a crash, so whatever the user must be told is the package's own: `reordered` raises `OrderError` when nothing is still on sale, and the labeller turns the runner's `TimeoutError` into a `ShippingError`.
 - `TRY003` is off: with a subclass only where a caller branches, a message written at the raise is the normal case.
 
 ## Translating
@@ -148,7 +148,7 @@ Each edge has one function from exception to answer: `run` for the CLI, a handle
 
 - **Expected failures are answered and not logged:** a `SettingsError`, an `OrderError` or a `SettlementError` prints `shop: <message>`, each note on a line beneath it, and exits 1. The user reads it, and there's nothing for anyone else to fix.
 - **A library's exception is mapped where it's expected, never at the last resort.** The wiring turns the settings' `ValidationError` into `SettingsError`, and the HTTP edge answers a body's with 422. `run` doesn't catch `ValidationError` itself: one that reaches it came from a bug, and needs its traceback.
-- **Anything else is a bug, logged once with its traceback** by the last resort, `except Exception: logger.exception("shop failed")`. This is the only `except Exception` in the program; ruff's `BLE001` accepts it because it logs the traceback.
+- **Anything else is a bug, logged once with its traceback** by the last resort, `except Exception: logger.exception("shop failed")`. Beside it, the program has one other `except Exception`: the poller's loop, where a failed run stops so the next can go ahead ([python-concurrency](../../python-concurrency/SKILL.md)). ruff's `BLE001` accepts both because each logs the traceback.
 - **Domain exceptions carry no status or exit code.** An HTTP edge maps `OrderNotFound` to 404 and `NotCancellable` to 409 in its own function; the CLI maps both to 1 in `run`.
 
 ## Interrupts and cancellation
@@ -157,7 +157,7 @@ Each edge has one function from exception to answer: `run` for the CLI, a handle
 
 - **Ctrl-C is a `KeyboardInterrupt`,** which typer turns into exit code 130, the shell's own for an interrupt, and `run` returns it like any other code.
 - **`CancelledError` is how asyncio stops a task:** cleanup runs in `finally` or `async with`, and the error rises on ([python-concurrency](../../python-concurrency/SKILL.md)).
-- **`except BaseException` only to clean up and re-raise.** Cleanup that runs however the block ends needs no `except` at all: it goes in `finally`, as the lock file's `held` removes its file ([python-concurrency](../../python-concurrency/SKILL.md)).
+- **`except BaseException` only to clean up and re-raise.** Cleanup that can't fail goes in `finally`, which needs no `except` at all. Cleanup that can fail goes in `except BaseException`, notes its own failure on the exception with `add_note`, and re-raises it, as the lock file's `held` does when its lock won't go and the store's transaction when its `ROLLBACK` fails ([python-concurrency](../../python-concurrency/SKILL.md)). Raised in `finally`, the cleanup's exception would take the place of the one the caller is waiting for.
 
 ## Suppressing
 
