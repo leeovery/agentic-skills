@@ -55,23 +55,6 @@ class Status(StrEnum):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Line:
-    """One product on an order, at the price it sold for."""
-
-    sku: str
-    quantity: int
-    unit_price: Money
-
-    def __post_init__(self) -> None:
-        if self.quantity < 1:
-            raise ValueError(f"a line's quantity is at least 1, not {self.quantity}")
-        if self.unit_price.minor < 0:
-            raise ValueError("a line's unit price is zero or more")
-
-    ...
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class Order:
     """A customer's order, from placing it to shipping or cancelling it."""
 
@@ -92,7 +75,7 @@ class Order:
     ...
 ```
 
-`Line` holds a `Money`, an integer of minor units and a `Currency`; [values.md](references/values.md) has both.
+`Line` holds a `Money`, an integer of minor units and a `Currency`, and its `__post_init__` asks for a quantity of at least one at a price of zero or more; [values.md](references/values.md) has all three.
 
 ## Decision table
 

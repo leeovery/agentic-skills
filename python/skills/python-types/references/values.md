@@ -99,11 +99,32 @@ class Money:
 
 A rule the type can't say is checked when the value is built, so every value built keeps it:
 
-- **`__post_init__`** when the fields are already typed and the rule is about them: an order has at least one line, all priced in one currency, and a line a quantity of at least one at a price of zero or more. `Order` and `Line` check them, in the [SKILL.md](../SKILL.md#pattern) pattern. A rule nothing checks holds nowhere: the export's lines and the reorder's prices reach `Order` from outside, and its `total` would raise on two currencies.
+- **`__post_init__`** when the fields are already typed and the rule is about them: an order has at least one line, all priced in one currency, and a line a quantity of at least one at a price of zero or more. `Order` checks its own in the [SKILL.md](../SKILL.md#pattern) pattern, and `Line` its own, below. A rule nothing checks holds nowhere: the export's lines and the reorder's prices reach `Order` from outside, and its `total` would raise on two currencies.
 - **A `parse` classmethod** when the value is read from text: `Money.parse("12.50 GBP")`. It returns `Self`, raises `ValueError` naming the text and the shape it wanted, and hands typed fields to the constructor.
 - **`copy.replace(order, status=Status.CANCELLED)`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) is how a value changes: it builds a new one through `__init__`, so `__post_init__` runs again, and `copy.replace(order, lines=())` raises. It works on any dataclass, named tuple or `datetime`; `dataclasses.replace` only on dataclasses.
 - **No `__init__` by hand.** A default goes on the field; a derived value is a `@property` (`Order.total`), computed when read, never a field that can disagree with the others.
 - **Not for a value with no rules.** A dataclass around one unconstrained string is ceremony: a `NewType` does the job.
+
+`Line` checks its own the same way:
+
+```python
+# src/shop/order/order.py
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Line:
+    """One product on an order, at the price it sold for."""
+
+    sku: str
+    quantity: int
+    unit_price: Money
+
+    def __post_init__(self) -> None:
+        if self.quantity < 1:
+            raise ValueError(f"a line's quantity is at least 1, not {self.quantity}")
+        if self.unit_price.minor < 0:
+            raise ValueError("a line's unit price is zero or more")
+
+    ...
+```
 
 ## Frozen is shallow
 
