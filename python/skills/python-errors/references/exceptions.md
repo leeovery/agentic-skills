@@ -84,9 +84,12 @@ except KeyError:
 `err.add_note(...)` ([3.11](https://docs.python.org/3/whatsnew/3.11.html)) adds a line the traceback prints under the message, and the exception keeps its type, so every `except` that matched it still does:
 
 ```python
-# src/shop/storage/sqlite.py, in SqliteOrders._read, which get and the claim share
+# src/shop/storage/sqlite.py, in _order, which every read of an order goes through
 try:
-    return _order(order_id, row, lines)
+    return Order(
+        id=OrderId(order_id),
+        ...
+    )
 except ValueError as err:
     err.add_note(f"reading order {order_id} from the database")
     raise
