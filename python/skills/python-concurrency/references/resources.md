@@ -17,24 +17,47 @@ Files, database connections, HTTP clients, pools, locks and temporary directorie
 
 Write one as a generator with `@contextmanager`, or `@asynccontextmanager` for an async one, and annotate it `-> Generator[T]` or `-> AsyncGenerator[T]`. typeshed marks the `Iterator` and `AsyncIterator` forms deprecated, and the drop-in's pyrefly fails on a deprecated call. Use a class only when the object lives on between uses, as a pool does.
 
-The body's exception is raised inside the generator, at the `yield`. Cleanup after a bare `yield` runs only when the body succeeds, so it goes in `finally`:
+The body's exception is raised inside the generator, at the `yield`. Cleanup after a bare `yield` runs only when the body succeeds, so cleanup that can't fail goes in `finally`, as `_release` closes its file. Cleanup that can fail goes in an `except BaseException` that notes its failure on the body's exception and re-raises, then runs once more after a clean body:
 
 ```python
 # src/shop/storage/lock.py
 @contextmanager
 def held(lock: Path) -> Generator[None]:
-    """Hold the lock file while the body runs, and remove it however the body ends.
+    """Hold the lock file while the body runs, then remove it if it's still this run's.
 
-    Raises FileExistsError when another run holds it.
+    Raises FileExistsError when another run holds it. What the body raises goes
+    on as it was, with a failure to remove the lock as a note.
     """
-    lock.touch(exist_ok=False)
+    fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         yield
+    except BaseException as err:
+        try:
+            _release(lock, fd)
+        except OSError as failure:
+            err.add_note(f"removing the lock failed too: {failure!r}")
+        raise
+    _release(lock, fd)
+
+
+def _release(lock: Path, fd: int) -> None:
+    """Remove the lock if it's still the file fd opened, then close fd.
+
+    One removed meanwhile, or replaced by another run's, is left as it is.
+    """
+    try:
+        with suppress(FileNotFoundError):
+            # Compared while fd is open, so no file made since can share its inode.
+            if os.path.samestat(os.fstat(fd), lock.stat()):
+                lock.unlink()
     finally:
-        lock.unlink()
+        os.close(fd)
 ```
 
-- **Acquire before the `try`.** If `touch` fails, there's nothing to release, and `finally` mustn't delete another run's lock.
+- **Acquire before the `try`.** If `os.open` fails, another run holds the lock, and there's nothing of this run's to release.
+- **Release only what this run made.** `_release` removes the lock only while it's still the file this run created, compared by `samestat` while the descriptor is open, so no file made since can share its inode. A lock another run took over, after this one's went, stays.
+- **Cleanup never hides the body's exception.** An exception raised in `finally` replaces the one in flight, so a lock that couldn't be removed would turn the body's `LookupError` into a `PermissionError`, and the caller's `except` would miss it. The failure goes on as a note; after a clean body it's raised itself.
+- **A run killed outright leaves its lock behind,** as no Python runs to remove it. The next run is refused until someone removes it by hand; an OS lock (`fcntl.flock`), released when the process ends, is the alternative where that matters and the platform has one.
 - **Test the failing path,** as it's the one `finally` exists for:
 
 ```python

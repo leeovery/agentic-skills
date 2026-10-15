@@ -85,7 +85,7 @@ A `TaskGroup` ([3.11](https://docs.python.org/3/whatsnew/3.11.html)) owns the ta
 
 The pattern's `Semaphore` lets `limit` settlements run at once and parks the rest. It suits work already in hand: a task per payment is cheap, and the semaphore caps the connections, not the tasks.
 
-The limit is a number with a reason, written beside it, once. The provider takes ten connections per token, and settling and `refund_all` share the token, so `shop.payments`, which knows the provider, splits the ten in one place: `SETTLEMENTS_AT_ONCE = 8`, which `main` hands the settler, and `REFUNDS_AT_ONCE = 2`, which `refund_all` reads. A limit with no reason gets doubled by the next person who finds the run slow, and one each side sets for itself gets spent twice: eight and eight is sixteen.
+The limit is a number with a reason, written beside it, once. The provider takes ten connections per token, and settling and `refund_all` share the token, so `shop.payments.limits`, beside the adapters that know the provider, splits the ten in one place: `SETTLEMENTS_AT_ONCE = 8`, which `main` hands the settler, and `REFUNDS_AT_ONCE = 2`, which `refund_all` reads. A limit with no reason gets doubled by the next person who finds the run slow, and one each side sets for itself gets spent twice: eight and eight is sixteen.
 
 ## Workers over a queue
 
@@ -149,6 +149,9 @@ A `TaskGroup` fits work that ends inside one function. A job that runs beside ot
 
 ```python
 # src/shop/settlement/poll.py
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def polling(
     job: Callable[[], Awaitable[object]],
@@ -160,52 +163,54 @@ async def polling(
 ) -> AsyncGenerator[None]:
     """Run job every interval while the body runs; on exit, stop it and wait for it.
 
-    A job that failed, or didn't stop within stop_within, is raised once the
-    body ends. If the body raised, or was cancelled, that goes on as it was,
-    with the job's failure as a note.
+    A run that raises is logged with its traceback, and the next runs on time.
+    A job still running stop_within after it was cancelled is reported once the
+    body ends: as a TimeoutError, or as a note on what the body raised, which
+    goes on as it was.
 
     The task is held here, not in a TaskGroup: a group around the yield would
     wrap whatever the body raises in an ExceptionGroup.
     """
     task = asyncio.create_task(_every(job, every), name="poll")
+    stuck = f"polled job {job!r} still running {stop_within} after it was cancelled"
     try:
         yield
     except BaseException as err:
-        if failure := await _stopped(task, within=stop_within):
-            err.add_note(f"the polled job {job!r} failed too: {failure!r}")
+        if not await _stopped(task, within=stop_within):
+            err.add_note(stuck)
         raise
-    if failure := await _stopped(task, within=stop_within):
-        failure.add_note(f"from the polled job {job!r}")
-        raise failure
+    if not await _stopped(task, within=stop_within):
+        raise TimeoutError(stuck)
 
 
-async def _stopped(
-    task: asyncio.Task[None], *, within: timedelta
-) -> BaseException | None:
-    """Cancel task and wait for it to end; return what it failed with, if anything.
+async def _stopped(task: asyncio.Task[None], *, within: timedelta) -> bool:
+    """Cancel task and wait for it to end; say whether it ended within that long.
 
-    One still running after within comes back as a TimeoutError. Nothing more
-    can stop it from here.
+    Nothing more can stop one that didn't from here.
     """
     task.cancel()
     try:
         async with asyncio.timeout(within.total_seconds()):
             await asyncio.wait([task])
     except TimeoutError:
-        return TimeoutError(f"still running {within} after it was cancelled")
-    return None if task.cancelled() else task.exception()
+        return False
+    return True
 
 
 async def _every(job: Callable[[], Awaitable[object]], every: timedelta) -> None:
     while True:
         await asyncio.sleep(every.total_seconds())
-        await job()
+        try:
+            await job()
+        except Exception:
+            # The loop is where a run's exception stops: logged, so none goes
+            # unseen, and the next run goes ahead on time.
+            logger.exception("polled job %r failed", job)
 ```
 
 - **`asyncio.wait([task])`** waits without raising the task's own `CancelledError` into the caller, so a cancellation of the caller still propagates, and the task's isn't mistaken for it.
-- **A job that failed is raised once the body ends,** rather than lost. When the body raised, or was cancelled, that exception goes on and the job's failure becomes a note on it: raising the job's in its place would hide the body's, and would turn a cancellation into an error the caller's `asyncio.timeout` or `TaskGroup` doesn't recognise as its own.
-- **The stop has a deadline, `stop_within`,** like every other wait. A cancelled job ends at its next `await`, so five seconds is ample; one still running after that swallowed its cancellation, or is stuck in its cleanup. Nothing can stop it from outside, so the poller reports it: a `TimeoutError` with a note naming the job once the body ends, or a note on what the body raised.
-- **The job's own failures** (a refused settlement, a timeout) are caught inside `job`, as the settler's are, so the loop runs on; only a bug ends it.
+- **A run that raises is logged, and the next runs on time.** The loop is where a run's exception stops, as `run` is for a command: `logger.exception` records it with its traceback, so no failure goes unseen, and one failed run doesn't end polling for the rest of the process. A job catches the failures it expects itself (a refused settlement, a timeout), as the settler does, so what reaches the log is a bug. `except Exception` lets a cancellation through, so the stop still ends the loop.
+- **The stop has a deadline, `stop_within`,** like every other wait. A cancelled job ends at its next `await`, so five seconds is ample; one still running after that swallowed its cancellation, or is stuck in its cleanup. Nothing can stop it from outside, so the poller reports it once the body ends: a `TimeoutError` naming the job, or, when the body raised or was cancelled, a note on that exception, which goes on as it was. Raising the `TimeoutError` in its place would hide the body's exception, and would turn a cancellation into an error the caller's `asyncio.timeout` or `TaskGroup` doesn't recognise as its own.
 - **Order at shutdown** comes from nesting: the body's work stops first, then the poller, then the client it settles through. [resources.md](resources.md) covers close order.
 
 ## Blocking calls

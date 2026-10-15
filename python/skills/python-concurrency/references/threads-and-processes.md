@@ -20,7 +20,7 @@ In the default build only one thread runs Python at a time. Threads help while t
 
 ```python
 # src/shop/payments/refunds.py
-from shop.payments import REFUNDS_AT_ONCE
+from shop.payments.limits import REFUNDS_AT_ONCE
 
 ...
 
@@ -55,9 +55,9 @@ def _refunded(refunder: Refunder, refund: Refund) -> bool:
 - **Each call returns its result through its future,** read once the pool has closed. Nothing is shared between the threads, so nothing needs a lock.
 - **A pool's threads don't copy the caller's context.** `submit` runs the call in the worker thread's own context, so a `ContextVar` the caller set, such as the correlation id, isn't set there. `copy_context().run` carries it across, a copy per call, as one `Context` can't be entered on two threads at once. `asyncio.to_thread` makes that copy itself; `loop.run_in_executor` doesn't.
 - **The expected failure is caught inside the call,** as a `TaskGroup` task's is. `future.result()` re-raises anything else, a bug, in the caller.
-- **What the threads share must be safe to share.** `httpx2.Client` says it can be shared between threads. A `sqlite3.Connection` can't: it raises `ProgrammingError` when used from a thread other than the one that made it.
+- **What the threads share must be safe to share.** `httpx2.Client` says it can be shared between threads. A `sqlite3.Connection` can't: sqlite3's `check_same_thread`, on by default, makes it raise `ProgrammingError` when used from a thread other than the one that made it, which `test_sqlite.py` pins. Each thread opens its own ([python-protocols](../../python-protocols/SKILL.md)).
 - **A running call can't be stopped from outside.** Its client's timeout bounds each step of it, the connect, each send and each wait for more of the answer, but not the call: a provider that trickles its answer holds the call, and the pool's close, for as long as it trickles. A call that needs a deadline on the whole of it goes through async code, under `asyncio.timeout` ([asyncio.md](asyncio.md#deadlines)).
-- **The size has a reason, and one owner.** `refund_all` lives with the adapter, in `shop.payments`, because the provider's ten connections per token are its limit, not the domain's; `REFUNDS_AT_ONCE` is split from them beside the settler's share ([asyncio.md](asyncio.md#bounded-fan-out)).
+- **The size has a reason, and one owner.** `refund_all` lives with the adapter, in `shop.payments`, because the provider's ten connections per token are its limit, not the domain's; `REFUNDS_AT_ONCE` is split from them in `shop.payments.limits`, beside the settler's share ([asyncio.md](asyncio.md#bounded-fan-out)).
 
 ## A process pool for CPU
 
