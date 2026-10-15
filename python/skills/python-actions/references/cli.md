@@ -115,6 +115,12 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
     # With standalone_mode off, the app returns the code of --help, of a
     # typer.Exit, and 130 for an interrupt; a command itself returns None.
     return code if isinstance(code, int) else 0
+
+
+def _said(err: Exception) -> str:
+    """The error's message, then each note added to it on the way up, a line each."""
+    notes = err.__notes__ if hasattr(err, "__notes__") else []
+    return "\n".join([str(err), *notes])
 ```
 
 - **`standalone_mode=False`** makes typer return or raise instead of printing and calling `sys.exit` itself. Usage errors arrive as `typer.TyperException` subclasses carrying `exit_code`, 2 for each of them; `typer.Exit(n)` and `--help` come back as the return value; an interrupt, while typer parses or the command runs, comes back as 130, so `run` needs no clause for it.
@@ -134,6 +140,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     with CORRELATION_ID.set(str(uuid.uuid7())):
         return run(build_app(from_environment), argv)
 ```
+
+`CORRELATION_ID` is the context variable each of the run's log lines is stamped from, in `shop/correlation.py` ([python-errors](../../python-errors/SKILL.md)).
 
 - **`[project.scripts]` names it:** `shop = "shop.cli:main"`. The script uv installs calls `sys.exit(main())`, and `shop/__main__.py` does the same for `python -m shop` with `raise SystemExit(main())`. Nothing else exits.
 - **`from_environment` is the composition root's wiring:** it reads the settings, configures logging, and returns each command's openers, with the values they need bound in ([python-architecture](../../python-architecture/SKILL.md)).

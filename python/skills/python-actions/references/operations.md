@@ -105,6 +105,8 @@ class Withdrawer:
         )
 ```
 
+`OrdersByProduct` declares the one query it asks, `containing(sku)`: every order with a line for the product, whatever its status, so the withdrawer asks `cancellable` itself.
+
 The trap this avoids: a `withdraw` that saves each order as cancelled itself, and forgets the refund, because the refund lives in `cancel`.
 
 - **The field is a one-method Protocol,** `Cancels`, declaring `cancel(order_id, *, reason) -> Order` beside `Withdrawer`. Its tests pass a hand-written fake of it, `FakeCanceller`, which records "cancel `o-1`, out of stock" for each cancel it makes, or raises instead what the test sets for an order, so they check what the withdrawer asks and none of the canceller's own steps.
@@ -163,6 +165,8 @@ class SqliteOrders:
         with _transaction(self.db, writes=True):
             yield SqliteTransaction(db=self.db)
 ```
+
+`_transaction` is the module's one `BEGIN` and `COMMIT`, rolling back if the block raises; [python-protocols](../../python-protocols/SKILL.md) shows it.
 
 - **Every write in the block goes through `tx`,** never the store's own `save`, which opens a transaction of its own. SQLite refuses a `BEGIN` inside another, so that mistake fails at once rather than committing part way through.
 - **A call that leaves the process can't roll back.** A refund or an email sent inside the block has happened even when the commit fails. Make it outside, keyed so a retry is safe: `Canceller` claims the order, refunds, then saves. Or record it in the transaction and send it after the commit.
@@ -260,6 +264,8 @@ def start_cancelling(self, order_id: OrderId) -> Order:
     return order
 ```
 
+`_transaction` holds the `UPDATE` and the read after it in one transaction, and `_read` loads the order and its lines inside it ([python-protocols](../../python-protocols/SKILL.md)).
+
 - **The write is the check.** The `UPDATE` changes the status only where the current one allows cancelling, the statuses `_cancellable()` reads from `Status.cancellable`, and its row count says whether it won. 0 means the order can't be cancelled now, whatever it was when someone loaded it, and the store raises `NotCancellable` with the status it found.
 - **The claim is a state of its own, `CANCELLING`,** and the refund waits for it. A shipment written the same way, `UPDATE orders SET status = 'shipped' WHERE id = ? AND status = 'paid'`, misses a claimed order, so nothing ships under the refund.
 - **`CANCELLING` still allows cancelling,** so a cancel that stopped after the claim, at a crash, a refused refund or a redelivered message, runs again and finishes. Its refund carries the same key, so the provider refunds once.
@@ -311,6 +317,8 @@ def cancel_requested(canceller: Canceller, body: bytes) -> None:
         # The queue delivers a message at least once: this one was handled before.
         logger.info("order %s already cancelled", message.order_id)
 ```
+
+`CancelRequested` is the message's pydantic model, with `extra="forbid"`: the order's id and a `Reason`.
 
 - **Returning acknowledges the message; raising leaves it on the queue.** A message that can never succeed, such as one for a shipped order, ends in the dead-letter queue, where someone looks at it.
 - **A redelivery is success.** The order already cancelled is the state the message asked for, so the consumer acknowledges it rather than failing forever. An order a delivery left `CANCELLING`, stopped after its claim, the next delivery finishes.
