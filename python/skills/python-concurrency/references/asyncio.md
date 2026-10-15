@@ -38,7 +38,7 @@ async def _settle(
     async with client() as http:
         settler = Settler(
             provider=Settlements(client=http),
-            limit=SETTLE_AT_ONCE,
+            limit=SETTLEMENTS_AT_ONCE,
             deadline=SETTLE_DEADLINE,
         )
         return await settler.settle(payment_ids)
@@ -85,7 +85,7 @@ A `TaskGroup` ([3.11](https://docs.python.org/3/whatsnew/3.11.html)) owns the ta
 
 The pattern's `Semaphore` lets `limit` settlements run at once and parks the rest. It suits work already in hand: a task per payment is cheap, and the semaphore caps the connections, not the tasks.
 
-The limit is a number with a reason, written beside it where `main` sets it: `SETTLE_AT_ONCE = 8`, under the comment that the provider takes ten connections per token. A limit with no reason gets doubled by the next person who finds the run slow.
+The limit is a number with a reason, written beside it, once. The provider takes ten connections per token, and settling and `refund_all` share the token, so `shop.payments`, which knows the provider, splits the ten in one place: `SETTLEMENTS_AT_ONCE = 8`, which `main` hands the settler, and `REFUNDS_AT_ONCE = 2`, which `refund_all` reads. A limit with no reason gets doubled by the next person who finds the run slow, and one each side sets for itself gets spent twice: eight and eight is sixteen.
 
 ## Workers over a queue
 
@@ -99,27 +99,40 @@ async def settle_stream(
     """Settle payments as they arrive, and return those that failed.
 
     `limit` workers take them from a queue that holds `limit` more, so a long
-    stream never sits in memory whole.
+    stream never sits in memory whole. A payment that arrives again while it's
+    being settled is skipped, as two calls for it at once would race at the
+    provider.
     """
     queue: asyncio.Queue[PaymentId] = asyncio.Queue(maxsize=self.limit)
+    settling: set[PaymentId] = set()
     unsettled: list[PaymentId] = []
     async with asyncio.TaskGroup() as tg:
         for _ in range(self.limit):
-            tg.create_task(self._work(queue, unsettled))
+            tg.create_task(self._work(queue, settling, unsettled))
         async for payment_id in payment_ids:
             await queue.put(payment_id)
         queue.shutdown()
     return unsettled
 
 async def _work(
-    self, queue: asyncio.Queue[PaymentId], unsettled: list[PaymentId]
+    self,
+    queue: asyncio.Queue[PaymentId],
+    settling: set[PaymentId],
+    unsettled: list[PaymentId],
 ) -> None:
     while True:
         try:
             payment_id = await queue.get()
         except asyncio.QueueShutDown:
             return
-        if not await self._settled(payment_id):
+        # One that arrives once this call is done is settled again, and the
+        # provider's idempotency key makes that second settlement a no-op.
+        if payment_id in settling:
+            continue
+        settling.add(payment_id)
+        settled = await self._settled(payment_id)
+        settling.discard(payment_id)
+        if not settled:
             unsettled.append(payment_id)
 ```
 
@@ -127,7 +140,8 @@ async def _work(
 - **`Queue.shutdown()`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) ends the workers. After it, `put` raises `QueueShutDown`, and `get` hands out what's left, then raises `QueueShutDown` once the queue is empty. `shutdown(immediate=True)` drops what's left instead.
 - **No sentinels.** One `None` per worker has to match the number of workers, and a worker that died leaves its `None` for nobody. `shutdown` is one call, and it wakes every waiter.
 - **The drain is bounded:** at most `limit` payments are queued at shutdown, each under its deadline.
-- **Shared state between tasks needs no lock** when nothing awaits between reading and writing it, as with `unsettled.append`. A read, an `await`, then a write is a race between tasks too.
+- **A payment that arrives again while it's being settled is skipped.** An at-least-once stream repeats one, and two calls for it at once would race at the provider. One that arrives once its call is done is settled again: the provider's idempotency key makes that a no-op, and a set of every id seen would grow with the stream. A test sends one payment twice while the first call hangs, and checks it comes back unsettled once while the worker that skipped the repeat settles the next payment; another sends it again after its call is done, and checks it was settled twice.
+- **Shared state between tasks needs no lock** when nothing awaits between reading and writing it, as with `unsettled.append` and the check and add on `settling`. A read, an `await`, then a write is a race between tasks too.
 
 ## A task that outlives its starter
 

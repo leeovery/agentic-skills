@@ -19,19 +19,22 @@ In the default build only one thread runs Python at a time. Threads help while t
 ## A thread pool for blocking calls
 
 ```python
-# src/shop/order/refunds.py
-# The provider takes ten connections per token; two stay free for other calls.
-AT_ONCE = 8
+# src/shop/payments/refunds.py
+from shop.payments import REFUNDS_AT_ONCE
+
+...
 
 
 def refund_all(refunder: Refunder, refunds: Iterable[Refund]) -> list[Refund]:
-    """Make each refund, eight at a time, and return those that failed.
+    """Make each refund, REFUNDS_AT_ONCE at a time, and return those that failed.
 
     A pool's threads don't see the caller's context variables, so each call runs
     in a copy of them, and its log lines keep the correlation id. A copy each, as
     one context can't run on two threads at once.
     """
-    with ThreadPoolExecutor(max_workers=AT_ONCE, thread_name_prefix="refund") as pool:
+    with ThreadPoolExecutor(
+        max_workers=REFUNDS_AT_ONCE, thread_name_prefix="refund"
+    ) as pool:
         outcomes = [
             (refund, pool.submit(copy_context().run, _refunded, refunder, refund))
             for refund in refunds
@@ -53,8 +56,8 @@ def _refunded(refunder: Refunder, refund: Refund) -> bool:
 - **A pool's threads don't copy the caller's context.** `submit` runs the call in the worker thread's own context, so a `ContextVar` the caller set, such as the correlation id, isn't set there. `copy_context().run` carries it across, a copy per call, as one `Context` can't be entered on two threads at once. `asyncio.to_thread` makes that copy itself; `loop.run_in_executor` doesn't.
 - **The expected failure is caught inside the call,** as a `TaskGroup` task's is. `future.result()` re-raises anything else, a bug, in the caller.
 - **What the threads share must be safe to share.** `httpx2.Client` says it can be shared between threads. A `sqlite3.Connection` can't: it raises `ProgrammingError` when used from a thread other than the one that made it.
-- **A running call can't be stopped from outside.** Each one is bounded by its client's timeout, so the pool's close is bounded too.
-- **The size has a reason,** written beside it.
+- **A running call can't be stopped from outside.** Its client's timeout bounds each step of it, the connect, each send and each wait for more of the answer, but not the call: a provider that trickles its answer holds the call, and the pool's close, for as long as it trickles. A call that needs a deadline on the whole of it goes through async code, under `asyncio.timeout` ([asyncio.md](asyncio.md#deadlines)).
+- **The size has a reason, and one owner.** `refund_all` lives with the adapter, in `shop.payments`, because the provider's ten connections per token are its limit, not the domain's; `REFUNDS_AT_ONCE` is split from them beside the settler's share ([asyncio.md](asyncio.md#bounded-fan-out)).
 
 ## A process pool for CPU
 
@@ -129,7 +132,7 @@ A worker process starts from a fresh interpreter, so it has none of the parent's
 Share as little as you can: a pool that returns results needs none. State that several threads must update, such as a running total a reporter reads, sits behind a lock:
 
 ```python
-# src/shop/order/refunds.py
+# src/shop/payments/refunds.py
 @dataclass(slots=True)
 class Tally:
     """What the refund threads have paid back so far, in each currency."""
