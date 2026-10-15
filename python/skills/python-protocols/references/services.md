@@ -16,7 +16,7 @@ src/shop/cli.py                the wiring: builds the client and the policy, pic
 
 ## The Protocol
 
-Domain types in and out: `PaymentId`, `Money`, the order package's exceptions. No `httpx2.Response`, vendor dict or request model appears in it. Once the vendor's names are in the signature, the Protocol is the SDK by another name, and replacing the vendor rewrites every caller.
+Domain types in and out: the order package's `Refund`, made of a `PaymentId`, `Money` and a key, and its exceptions. No `httpx2.Response`, vendor dict or request model appears in it. Once the vendor's names are in the signature, the Protocol is the SDK by another name, and replacing the vendor rewrites every caller.
 
 ## The adapter
 
@@ -33,23 +33,23 @@ class Gateway:
     client: httpx2.Client
     retry: Retry
 
-    def refund(self, payment_id: PaymentId, amount: Money) -> None:
-        """Refund amount of the payment, keyed so a repeat refunds once.
+    def refund(self, refund: Refund) -> None:
+        """Make the refund, under its key, so a repeat refunds once.
 
         Raises PaymentFailed, from httpx2's error, when the provider refuses, or
         can't be reached in the attempts the policy allows.
         """
         request = self.client.build_request(
             "POST",
-            f"/payments/{payment_id}/refunds",
-            json={"amount": amount.minor, "currency": amount.currency},
+            f"/payments/{refund.payment_id}/refunds",
+            json={"amount": refund.amount.minor, "currency": refund.amount.currency},
             # The key makes the refund safe to send twice, so _send may retry it.
-            headers={"Idempotency-Key": f"refund-{payment_id}"},
+            headers={"Idempotency-Key": refund.key},
         )
         try:
             self._send(request)
         except httpx2.HTTPError as err:
-            raise PaymentFailed(payment_id) from err
+            raise PaymentFailed(refund.payment_id) from err
 
     def _send(self, request: httpx2.Request) -> httpx2.Response:
         """Send request, and again while it fails in passing and the policy allows.
@@ -85,7 +85,7 @@ class Gateway:
 ```
 
 - **`Gateway` is concrete,** and nothing in it names `Refunder`. pyrefly checks the fit where the wiring passes it to `Canceller`.
-- **The refund carries an idempotency key from the payment,** so the provider refunds once however often it's asked. That is what makes the write safe to retry, and why `Canceller` can refund before its own write ([python-actions](../../python-actions/SKILL.md)).
+- **The refund carries its idempotency key, derived by the caller from the work:** the canceller's is `cancel-{order_id}`. The provider refunds once per key however often it's asked, and a later refund of the same payment, for another reason, comes with a key of its own. That is what makes the write safe to retry, and why `Canceller` can refund before its own write ([python-actions](../../python-actions/SKILL.md)).
 - **No decisions.** Whether an order may be refunded is the order package's question. The adapter refunds.
 - **The body is the wire's shape,** built here and nowhere else; a response worth reading is parsed here into domain types ([python-types](../../python-types/SKILL.md)).
 
@@ -177,7 +177,7 @@ The retry is twenty lines in the adapter, not a dependency. Weighed on 2026-10-1
 
 ## Translating failures
 
-- **`except httpx2.HTTPError as err: raise PaymentFailed(payment_id) from err`.** `HTTPError` is the base of the transport and status errors. Callers branch on `PaymentFailed` and its `payment_id`, and never import httpx2; the cause stays on `__cause__` for the log. ruff's `B904` flags a raise in an `except` without `from`.
+- **`except httpx2.HTTPError as err: raise PaymentFailed(refund.payment_id) from err`.** `HTTPError` is the base of the transport and status errors. Callers branch on `PaymentFailed` and its `payment_id`, and never import httpx2; the cause stays on `__cause__` for the log. ruff's `B904` flags a raise in an `except` without `from`.
 - **A failure a caller acts on differently gets its own subclass,** translated here: an unknown payment, a card the issuer refused. [python-errors](../../python-errors/SKILL.md) holds when one is worth it.
 
 ## Testing the adapter, and its callers
@@ -215,7 +215,7 @@ def test_refund_recovers_after_passing_failures() -> None:
         httpx2.Response(201),
     )
 
-    gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
+    gateway(handler, time).refund(REFUND)
 
     assert len(sent) == 3
     assert time.slept == [0.5, 1.0]
@@ -226,7 +226,7 @@ def test_refund_stops_at_the_attempt_cap() -> None:
     handler, sent = answers(*[httpx2.Response(503)] * 4)
 
     with pytest.raises(PaymentFailed) as failed:
-        gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
+        gateway(handler, time).refund(REFUND)
 
     assert len(sent) == 4
     assert time.slept == [0.5, 1.0, 2.0]
@@ -239,7 +239,7 @@ def test_refund_never_retries_a_permanent_failure() -> None:
     handler, sent = answers(httpx2.Response(400))
 
     with pytest.raises(PaymentFailed):
-        gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
+        gateway(handler, time).refund(REFUND)
 
     assert len(sent) == 1
     assert time.slept == []

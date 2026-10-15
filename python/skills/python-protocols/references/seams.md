@@ -10,7 +10,7 @@ Contents: the seams · callable field or Protocol · the clock · waits · the e
 |---|---|---|---|
 | the instant | `now: Callable[[], datetime]` | `partial(datetime.now, UTC)` | `lambda: NOW` |
 | a wait, and its deadline | `sleep: Callable[[float], None]`, `clock: Callable[[], float]` | `time.sleep`, `time.monotonic` | the bound methods of a fake that moves its clock when slept on |
-| settings | the parsed values, as fields | values read from `Settings()` | the values themselves |
+| settings | the parsed values, as fields | values from `read_settings()` | the values themselves |
 | files | a base directory, `labels: Path` | the configured path | `tmp_path` |
 | an HTTP API | an `httpx2.Client` with base URL, auth and timeout set | the client the wiring builds and closes | a client on `httpx2.MockTransport` |
 | another program | a runner Protocol | `ProcessRunner(timeout=...)` | a fake runner |
@@ -81,7 +81,7 @@ No test sleeps, and each asserts the exact waits. Waits inside asyncio are [pyth
 
 ## The environment
 
-- **Only `main` reads it,** through one `Settings` built there ([python-architecture](../../python-architecture/SKILL.md)). Below `main`, a component takes the values it uses as fields (a path, a URL, a timeout), never the `Settings` object, so a test passes the values and builds no settings at all.
+- **Only `main` reads it,** through the one `read_settings()` its wiring calls ([python-architecture](../../python-architecture/SKILL.md)). Below `main`, a component takes the values it uses as fields (a path, a URL, a timeout), never the `Settings` object, so a test passes the values and builds no settings at all.
 - **`BaseSettings` reads the environment for any field left out,** even when given keyword arguments. A test that must build one passes every field; a test that runs `main` scopes the environment with `CliRunner().isolation(env={...})` ([python-actions](../../python-actions/SKILL.md)).
 - **The home directory, a state directory and a config path** are resolved in `main` and passed as `Path`s. A test passes `tmp_path`, and the real ones are never touched.
 
@@ -93,24 +93,28 @@ No test sleeps, and each asserts the exact waits. Waits inside asyncio are [pyth
 
 ## HTTP
 
-- **Pass an `httpx2.Client` with its base URL, auth and timeout set,** built by the wiring `main` supplies and closed by its `with`:
+- **Pass an `httpx2.Client` with its base URL, auth and timeout set,** built in the wiring `main` supplies and closed by the `with` that opened it. `from_environment` binds the settings into a factory, and `_canceller` opens the client in its `with` only when `cancel` runs:
 
 ```python
-# src/shop/cli.py: the client from_environment opens, and the headers it sends
-    with (
-        closing(connect(settings.database)) as db,
-        httpx2.Client(
-            base_url=str(settings.gateway_url),
-            headers=_authorised(settings),
-            timeout=settings.gateway_timeout.total_seconds(),
-        ) as http,
-    ):
+# src/shop/cli.py: the client from_environment binds, and the headers it sends
+    url = str(settings.gateway_url)
+    headers = _authorised(settings.gateway_token)
+    timeout = settings.gateway_timeout.total_seconds()
+    return Deps(
+        canceller=partial(
+            _canceller,
+            database=settings.database,
+            client=partial(
+                httpx2.Client, base_url=url, headers=headers, timeout=timeout
+            ),
+        ),
         ...
+    )
 
 
-def _authorised(settings: Settings) -> dict[str, str]:
+def _authorised(token: SecretStr) -> dict[str, str]:
     """The headers that authorise a request to the payment gateway."""
-    return {"Authorization": f"Bearer {settings.gateway_token.get_secret_value()}"}
+    return {"Authorization": f"Bearer {token.get_secret_value()}"}
 ```
 
 - **Never `httpx2.post(...)`,** which opens a client per call with no shared settings, **and never a client built inside the adapter or at import.** The adapter then can't be pointed at a test transport, and nobody closes the client.
@@ -222,7 +226,7 @@ The adapter's own tests run this interpreter as the child, `Path(sys.executable)
 
 - **A value a test must predict is a seam.** The retry policy's jitter comes from `rand`, and its tests pass `lambda: 1.0` to make every wait exact. An id minted with `uuid.uuid7()` ([3.14](https://docs.python.org/3/whatsnew/3.14.html)) that a test checks comes from `new_id`.
 - **One nothing asserts on needs no seam.** `main` mints the run's correlation id with `uuid.uuid7()` itself.
-- **An id derived from data needs none either:** the refund's idempotency key is `refund-{payment_id}`, the same on every retry.
+- **An id derived from data needs none either:** the canceller's refund key is `cancel-{order_id}`, the same on every retry of that cancel.
 - ruff's `S311` flags a call to `random.random()` as unfit for secrets. Passing the function as a seam calls nothing, so it isn't flagged, and jitter is no secret. A token or a key comes from `secrets`.
 
 ## No defaults

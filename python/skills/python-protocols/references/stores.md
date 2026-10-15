@@ -34,7 +34,7 @@ class OrderStore(Protocol):
         ...
 ```
 
-The sweeper, which cancels every order a customer can still have cancelled, asks one question of the store and hands each answer to the canceller it holds:
+The sweeper, which cancels every order a customer can still have cancelled, asks one question of the store and hands each answer to the canceller it holds. It calls one method of that too, so it declares that one:
 
 ```python
 # src/shop/order/sweep.py
@@ -46,12 +46,20 @@ class CancellableOrders(Protocol):
         ...
 
 
+class Cancels(Protocol):
+    """Cancels one order, as the order package's Canceller does."""
+
+    def cancel(self, order_id: OrderId, *, reason: Reason) -> Order:
+        """Cancel the order for reason, refunding it if it was paid."""
+        ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Sweeper:
     """Cancels each of a customer's cancellable orders through the canceller."""
 
     orders: CancellableOrders
-    canceller: Canceller
+    canceller: Cancels
 ```
 
 The restorer saves a batch of orders that must land together, so its slice is a transaction and the one write it makes inside:
@@ -74,7 +82,7 @@ class TransactionalOrders(Protocol):
         ...
 ```
 
-`SqliteOrders` fills all three without knowing any of them exists, and a fake of `CancellableOrders` needs one method, not the store's four.
+`SqliteOrders` fills all three without knowing any of them exists, as `Canceller` fills `Cancels`, and a fake of `CancellableOrders` needs one method, not the store's four.
 
 ## Rows stay inside
 
@@ -128,13 +136,47 @@ Writes that must land together go through one transaction; [python-actions](../.
 
 ```python
 # src/shop/storage/sqlite.py
+def connect(path: Path) -> sqlite3.Connection:
+    """Open the database at path, creating its tables if they're missing.
+
+    In SQLite's autocommit mode, a statement outside a transaction is one of its
+    own, so a read holds no lock once it's done and never blocks another
+    connection's write. Statements that belong together go through _transaction.
+    """
+    db = sqlite3.connect(path, autocommit=True)
+    db.executescript(SCHEMA)
+    return db
+
+
+@contextmanager
+def _transaction(db: sqlite3.Connection) -> Generator[None]:
+    """Run the block in one transaction: committed when it ends, rolled back if it raises.
+
+    SQLite refuses a BEGIN inside another, so a transaction can't nest unseen.
+    """
+    db.execute("BEGIN")
+    try:
+        yield
+        db.execute("COMMIT")
+    except BaseException:
+        # A COMMIT that fails, as when another connection holds the file, leaves
+        # the transaction open; one SQLite ended itself has nothing to roll back.
+        if db.in_transaction:
+            db.execute("ROLLBACK")
+        raise
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SqliteOrders:
     """Orders in SQLite, as the order package's OrderStore. No row leaves it."""
 
     db: sqlite3.Connection
 
-    ...
+    def get(self, order_id: OrderId) -> Order:
+        """Load the order with its lines, or raise OrderNotFound."""
+        # One transaction, so the order and its lines come from one state of the file.
+        with _transaction(self.db):
+            ...
 
     def save(self, order: Order) -> None:
         """Write the order and its lines in one transaction, replacing any under its id."""
@@ -145,10 +187,10 @@ class SqliteOrders:
     def transaction(self) -> Generator[SqliteTransaction]:
         """Open a transaction: committed when the block ends, rolled back if it raises.
 
-        Every write in the block goes through the writer it yields: this store's
-        own save would commit, part way through.
+        Every write in the block goes through the writer it yields. This store's
+        own save opens a transaction of its own, which SQLite refuses in here.
         """
-        with self.db:
+        with _transaction(self.db):
             yield SqliteTransaction(db=self.db)
 
 
@@ -164,8 +206,8 @@ class SqliteTransaction:
 ```
 
 - **The store's own `save` is one write in a transaction of its own,** so a consumer that writes one thing, as the canceller does, declares `save` and calls it. Only a consumer that writes several things declares `transaction()`.
-- **sqlite3's `with db:` doesn't nest:** an inner block commits on its way out, and the outer block's later failure can't take that back. So nothing inside a transaction calls the store's own `save`; every write in the block goes through the writer, which holds the connection and never commits.
-- **The connection is opened with `autocommit=False`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)), so a transaction is always open and nothing lands until a commit.
+- **A transaction doesn't nest.** SQLite refuses a `BEGIN` inside another, so the store's own `save` called in the block raises `OperationalError: cannot start a transaction within a transaction` and the block rolls back, rather than commit part way. Every write in the block goes through the writer, which holds the connection and opens nothing; a read the block needs comes before it.
+- **The connection is opened with `autocommit=True`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)): a statement outside a transaction is a transaction of its own, and one that spans statements is an explicit `BEGIN` and `COMMIT`. Under `autocommit=False` one is always open, so a read leaves its lock behind, and another connection's write fails with `database is locked` until the reader next commits.
 - **The operation sees only the context manager and its writer:** `with self.orders.transaction() as tx: tx.save(order)`. It never holds a connection or a cursor, and never learns how the store keeps its promise.
 - **A call to another service stays outside the transaction.** A refund can't roll back, so the canceller refunds before it saves, keyed so a retry refunds once.
 
@@ -254,6 +296,19 @@ def test_a_saved_order_is_seen_by_another_connection(
         assert SqliteOrders(db=other).get(OrderId("o-1")) == make_order()
 
 
+def test_a_read_holds_nothing_open_to_block_another_connections_write(
+    orders: SqliteOrders, path: Path
+) -> None:
+    orders.save(make_order())
+    orders.get(OrderId("o-1"))
+    paid = make_order(status=Status.PAID, payment_id="pay-1")
+
+    with closing(connect(path)) as other:
+        SqliteOrders(db=other).save(paid)
+
+    assert orders.get(OrderId("o-1")) == paid
+
+
 ...
 
 
@@ -270,8 +325,23 @@ def test_a_transaction_that_raises_keeps_none_of_its_writes(
         save_then_fail()
 
     assert orders.cancellable_for(CustomerId("c-1")) == []
+
+
+def test_a_save_inside_a_transaction_fails_rather_than_commit_part_way(
+    orders: SqliteOrders,
+) -> None:
+    def save_inside() -> None:
+        with orders.transaction() as tx:
+            tx.save(make_order(order_id="o-1"))
+            orders.save(make_order(order_id="o-2"))
+
+    with pytest.raises(sqlite3.OperationalError, match="within a transaction"):
+        save_inside()
+
+    assert orders.cancellable_for(CustomerId("c-1")) == []
 ```
 
 - **A commit is checked from a second connection.** The connection that wrote reads its own uncommitted writes, so a read through it passes whether or not anything was committed.
+- **So is a lock left behind.** A read that leaves its transaction open passes every test on one connection, and fails the first write from another. A further test holds a read open on a second connection, so the store's `COMMIT` fails, and checks the next save still works: SQLite leaves a transaction open when its `COMMIT` fails.
 - **Each query gets a test that puts the records it must skip beside the ones it must find:** a shipped order and another customer's, for `cancellable_for`.
 - **A server database** (Postgres, MySQL) runs in a container the test session starts, with a schema per test or a transaction rolled back after each; the same tests run against it.

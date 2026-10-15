@@ -34,11 +34,24 @@ A Protocol belongs to the code that calls it, and it exists to be swapped: in `m
 
 ```python
 # src/shop/order/cancel.py: the consumer declares what it calls.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Refund:
+    """Money going back to a payment, under a key the caller derives from the work.
+
+    The provider refunds once per key, so a retry of the same work refunds once,
+    and two refunds of one payment, for two reasons, each happen.
+    """
+
+    payment_id: PaymentId
+    amount: Money
+    key: str
+
+
 class Refunder(Protocol):
     """What refunds a payment, raising PaymentFailed when it can't."""
 
-    def refund(self, payment_id: PaymentId, amount: Money) -> None:
-        """Refund amount of the payment. A second refund of one payment does nothing."""
+    def refund(self, refund: Refund) -> None:
+        """Make the refund. A second refund under the same key does nothing."""
         ...
 
 
@@ -53,19 +66,15 @@ class Canceller:
 
 ```python
 # src/shop/cli.py, in the wiring main supplies: pyrefly checks each fit here.
-yield Deps(
-    canceller=Canceller(
+with closing(connect(database)) as db, client() as http:
+    yield Canceller(
         orders=SqliteOrders(db=db),
         payments=Gateway(
             client=http,
-            retry=Retry(
-                sleep=time.sleep, clock=time.monotonic, rand=random.random
-            ),
+            retry=Retry(sleep=time.sleep, clock=time.monotonic, rand=random.random),
         ),
         now=partial(datetime.now, UTC),
-    ),
-    ...
-)
+    )
 ```
 
 ```python
@@ -74,12 +83,12 @@ yield Deps(
 class FakeRefunder:
     """A Refunder that records each refund and raises error, when it's set."""
 
-    refunded: list[tuple[PaymentId, Money]] = field(default_factory=list)
+    refunded: list[Refund] = field(default_factory=list)
     error: Exception | None = None
 
-    def refund(self, payment_id: PaymentId, amount: Money) -> None:
+    def refund(self, refund: Refund) -> None:
         """Record the refund, then raise the error the test set, if any."""
-        self.refunded.append((payment_id, amount))
+        self.refunded.append(refund)
         if self.error is not None:
             raise self.error
 ```
