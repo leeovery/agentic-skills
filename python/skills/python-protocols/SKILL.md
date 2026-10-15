@@ -109,7 +109,7 @@ No class names `Refunder`. A `refund` that drifts from it fails `pyrefly check` 
 ## References
 
 - **[seams.md](references/seams.md)** — read when code needs the clock, the environment, files, the network, a process, ids or randomness: each seam, what `main` passes, what a test passes, callable field or Protocol, and why no seam has a default.
-- **[services.md](references/services.md)** — read when integrating an outside API or SDK: the adapter, timeouts, the retry policy and its tests, translating httpx2's exceptions, testing on `MockTransport`, and SDKs.
+- **[services.md](references/services.md)** — read when integrating an outside API or SDK: the adapter, timeouts, the retry policy and why it's a loop, translating httpx2's exceptions, testing on `MockTransport`, choosing in the wiring, and SDKs.
 - **[stores.md](references/stores.md)** — read when adding persistence: naming, each consumer's slice, rows kept inside, transactions, the fake, and testing the real store on `tmp_path`.
 
 ## Related skills

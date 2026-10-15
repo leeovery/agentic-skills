@@ -22,12 +22,12 @@ Contents: the seams · callable field or Protocol · the clock · waits · the e
 
 - **One function is a callable field,** typed `Callable[[...], R]`. `main` passes the function itself, or a `partial` of one, and a test passes a lambda or a bound method of its fake. No class is declared for it.
 - **An object of several methods is a Protocol,** faked by one class: a runner that finds a program and runs it, a store that loads and saves.
-- Three functions that travel together, such as a retry policy's `sleep`, `clock` and `rand`, stay three fields on the one dataclass that uses them. A test that needs two of them to agree passes two bound methods of one fake.
+- Functions that travel together, such as a retry policy's `sleep`, `clock` and `rand`, stay separate fields on the one dataclass that uses them. A test that needs two of them to agree passes two bound methods of one fake.
 
 ## The clock
 
 - **A decision about an instant takes `now`:** a 14-day return window, a token's expiry, the time an order was cancelled. A pure function takes the instant as an argument instead, and the operation that calls it reads `now` once.
-- **`main` passes `partial(datetime.now, UTC)`,** so every instant is aware and in UTC ([python-types](../../python-types/SKILL.md)). ruff's `banned-api` keeps `datetime.now` and `time.time` out of every module but the one that holds `main` and the process adapter, whose lift is for `subprocess`, and its `DTZ` rules flag a naive one there.
+- **`main` passes `partial(datetime.now, UTC)`,** so every instant is aware and in UTC ([python-types](../../python-types/SKILL.md)). ruff's `DTZ` rules flag a naive one.
 - **A test stops the clock where it cares:**
 
 ```python
@@ -62,24 +62,9 @@ class FakeTime:
     def clock(self) -> float:
         """The seconds slept so far."""
         return self.now
-
-
-@contextmanager
-def gateway(handler: Handler, time: FakeTime | None = None) -> Generator[Gateway]:
-    """A Gateway whose client answers every request with handler, on a fake clock.
-
-    rand returns 1, so each backoff is its whole bound: 0.5s, 1s, 2s. The client
-    closes as the block ends.
-    """
-    time = time or FakeTime()
-    retry = Retry(sleep=time.sleep, clock=time.clock, rand=lambda: 1.0)
-    with httpx2.Client(
-        base_url="https://pay.example", transport=httpx2.MockTransport(handler)
-    ) as client:
-        yield Gateway(client=client, retry=retry)
 ```
 
-No test sleeps, and each asserts the exact waits. Waits inside asyncio are [python-concurrency](../../python-concurrency/SKILL.md)'s. `Handler` is `Callable[[httpx2.Request], httpx2.Response]`, the mock transport's answer to each request ([services.md](services.md)).
+The tests build the gateway with `Retry(sleep=time.sleep, clock=time.clock, rand=lambda: 1.0)`, so no test sleeps, and each asserts the exact waits ([python-testing](../../python-testing/SKILL.md)). Waits inside asyncio are [python-concurrency](../../python-concurrency/SKILL.md)'s.
 
 ## The environment
 
@@ -95,7 +80,7 @@ No test sleeps, and each asserts the exact waits. Waits inside asyncio are [pyth
 
 ## HTTP
 
-- **Pass an `httpx2.Client` with its base URL, auth and timeout set,** built in the wiring `main` supplies and closed by the `with` that opened it. `from_environment` binds the settings into a factory, and `_canceller` opens the client in its `with` only when `cancel` runs:
+- **Pass an `httpx2.Client` with its base URL, auth and timeout set,** built in the wiring `main` supplies and closed by the `with` that opened it. `from_environment` binds the settings into a factory, opened only when `cancel` runs:
 
 ```python
 # src/shop/cli.py: the client from_environment binds, and the headers it sends
@@ -120,7 +105,6 @@ def _authorised(token: SecretStr) -> dict[str, str]:
 ```
 
 - **Never `httpx2.post(...)`,** which opens a client per call with no shared settings, **and never a client built inside the adapter or at import.** The adapter then can't be pointed at a test transport, and nobody closes the client.
-- **A test builds the client on `httpx2.MockTransport(handler)`,** so no socket opens. [services.md](services.md) has the adapter and its tests.
 
 ## Processes
 
@@ -154,17 +138,6 @@ One adapter runs real programs. It is the only module besides `main`'s allowed `
 
 ```python
 # src/shop/processes.py
-"""Programs run as child processes, as the shipping package's Runner."""
-
-import shutil
-import subprocess
-from dataclasses import dataclass
-from datetime import timedelta
-from pathlib import Path
-
-from shop.shipping.label import Finished
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ProcessRunner:
     """Runs each program to its end, killing any that runs past the timeout."""
@@ -177,11 +150,7 @@ class ProcessRunner:
         return None if found is None else Path(found)
 
     def run(self, program: Path, *args: str) -> Finished:
-        """Run program with args, never through a shell, and say how it ended.
-
-        Only stderr is kept, read as UTF-8 with each byte that doesn't decode shown
-        as U+FFFD, so a program that writes another encoding still says how it ended.
-        """
+        """Run program with args, never through a shell, and say how it ended."""
         try:
             done = subprocess.run(  # noqa: S603  # no shell, and the caller names the program
                 [program, *args],
@@ -198,7 +167,7 @@ class ProcessRunner:
 ```
 
 - **A list of arguments, never `shell=True`,** so an order id can't become a command. `subprocess.run` kills the child when the timeout passes, before it raises.
-- **Only stderr is kept, decoded as UTF-8 with `errors="replace"`.** `text=True` decodes both streams strictly, in the locale's encoding, so one byte of Latin-1 raises `UnicodeDecodeError` and hides how the program ended; the test writes `\xff` to both. stdout, which nothing reads, goes to `DEVNULL` rather than into memory.
+- **Only stderr is kept, decoded as UTF-8 with `errors="replace"`.** `text=True` decodes strictly, in the locale's encoding, so one byte of Latin-1 raises `UnicodeDecodeError` and hides how the program ended.
 - **The ban lifts for this file alone, with its reason.** `per-file-ignores` lifts all of `TID251` at once ([python-quality](../../python-quality/SKILL.md)), so the file holds the adapter and nothing that reads the clock or the environment:
 
 ```toml
@@ -234,14 +203,14 @@ class FakeRunner:
         return Finished(code=self.code, stderr=self.stderr)
 ```
 
-The adapter's own tests run this interpreter as the child, `Path(sys.executable)`, so they need no tool installed. Until the wiring hands a `ProcessRunner` to its consumer, nothing proves it fits `Runner`, so its test module holds it as one: `RUNNER: Runner = ProcessRunner(timeout=timedelta(seconds=5))`. Once `main` wires it in, that line goes.
+The adapter's own tests run this interpreter as the child, `Path(sys.executable)`, so they need no tool installed.
 
 ## Ids and randomness
 
-- **A value a test must predict is a seam.** The retry policy's jitter comes from `rand`, and its tests pass `lambda: 1.0` to make every wait exact. An id minted with `uuid.uuid7()` ([3.14](https://docs.python.org/3/whatsnew/3.14.html)) that a test checks comes from a `new_id` field. An id a second try must repeat isn't minted at all: the reorderer takes the new order's from its caller, so a request sent twice places one order ([python-actions](../../python-actions/SKILL.md)).
+- **A value a test must predict is a seam.** The retry policy's jitter comes from `rand`, and an id minted with `uuid.uuid7()` ([3.14](https://docs.python.org/3/whatsnew/3.14.html)) that a test checks comes from a `new_id` field. An id a second try must repeat isn't minted at all: the reorderer takes the new order's from its caller ([python-actions](../../python-actions/SKILL.md)).
 - **One nothing asserts on needs no seam.** `main` mints the run's correlation id with `uuid.uuid7()` itself.
 - **An id derived from data needs none either:** the canceller's refund key is `cancel-{order_id}`, the same each time that cancel runs.
-- ruff's `S311` flags a call to `random.random()` as unfit for secrets. Passing the function as a seam calls nothing, so it isn't flagged, and jitter is no secret. A token or a key comes from `secrets`.
+- ruff's `S311` flags a call to `random.random()` as unfit for secrets; passing the function as a seam isn't flagged, and jitter is no secret. A token or a key comes from `secrets`.
 
 ## No defaults
 
