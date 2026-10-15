@@ -23,23 +23,19 @@ Sync is the default because async isn't local. A function that awaits is `async 
 ```python
 # src/shop/cli.py
 def settle_payments(
-    settings: Settings, payment_ids: Sequence[PaymentId]
+    client: Callable[[], httpx2.AsyncClient], payment_ids: Iterable[PaymentId]
 ) -> list[PaymentId]:
     """Settle the payments, and return those that weren't.
 
     The program's one way into asyncio: the loop starts here and closes here.
     """
-    return asyncio.run(_settle(settings, payment_ids))
+    return asyncio.run(_settle(client, payment_ids))
 
 
 async def _settle(
-    settings: Settings, payment_ids: Sequence[PaymentId]
+    client: Callable[[], httpx2.AsyncClient], payment_ids: Iterable[PaymentId]
 ) -> list[PaymentId]:
-    async with httpx2.AsyncClient(
-        base_url=str(settings.gateway_url),
-        headers=_authorised(settings),
-        timeout=settings.gateway_timeout.total_seconds(),
-    ) as http:
+    async with client() as http:
         settler = Settler(
             provider=Settlements(client=http),
             limit=SETTLE_AT_ONCE,
@@ -48,10 +44,10 @@ async def _settle(
         return await settler.settle(payment_ids)
 ```
 
-`settle_payments` returns a plain list, so the `settle` command, its tests and `main` stay sync; the command reaches it through the `Deps` that `main` builds, and a test of the command passes a lambda in its place.
+`settle_payments` returns a plain list, so the `settle` command, its tests and `main` stay sync; the command reaches it through the `Deps` that `main`'s wiring returns, and a test of the command passes a lambda in its place.
 
 - **Nothing below it calls `asyncio.run`.** Inside a running loop it raises `RuntimeError: asyncio.run() cannot be called from a running event loop`, so a library function that calls it can never be called from async code.
-- **Async clients open inside the coroutine it runs,** with `async with`. `AsyncClient.aclose()` is a coroutine, so sync wiring can't close one, and only the loop that used its connections can.
+- **Async clients open inside the coroutine it runs,** with `async with`. `AsyncClient.aclose()` is a coroutine, so sync wiring can't close one, and only the loop that used its connections can. The wiring passes a factory with the URL, headers and timeout bound in, `partial(httpx2.AsyncClient, ...)`, and `_settle` calls it.
 - **`asyncio.get_running_loop()`** inside a coroutine, when an API wants the loop: `loop.time()` for the loop's clock. Never `get_event_loop()`, which raises on 3.14 when no loop is running, and which the drop-in bans.
 - **Ctrl-C cancels the main task.** `asyncio.run` turns the first SIGINT into a cancellation, lets the tasks unwind through their `finally` blocks, then raises `KeyboardInterrupt`, which typer turns into exit code 130 as it does for any command ([python-actions](../../python-actions/SKILL.md)). A second Ctrl-C raises at once. A task that swallows the cancellation keeps the program running after the first.
 
@@ -145,17 +141,28 @@ async def polling(
 ) -> AsyncGenerator[None]:
     """Run job every interval while the body runs; on exit, stop it and wait for it.
 
+    A job that failed is raised once the body ends. If the body raised, or was
+    cancelled, that goes on as it was, with the job's failure as a note.
+
     The task is held here, not in a TaskGroup: a group around the yield would
     wrap whatever the body raises in an ExceptionGroup.
     """
     task = asyncio.create_task(_every(job, every), name="poll")
     try:
         yield
-    finally:
-        task.cancel()
-        await asyncio.wait([task])
-        if not task.cancelled():
-            task.result()  # an exception that ended it early surfaces here
+    except BaseException as err:
+        if failure := await _stopped(task):
+            err.add_note(f"the polled job had failed too: {failure!r}")
+        raise
+    if failure := await _stopped(task):
+        raise failure
+
+
+async def _stopped(task: asyncio.Task[None]) -> BaseException | None:
+    """Cancel task and wait for it to end; return what it failed with, if anything."""
+    task.cancel()
+    await asyncio.wait([task])
+    return None if task.cancelled() else task.exception()
 
 
 async def _every(job: Callable[[], Awaitable[object]], every: timedelta) -> None:
@@ -165,7 +172,7 @@ async def _every(job: Callable[[], Awaitable[object]], every: timedelta) -> None
 ```
 
 - **`asyncio.wait([task])`** waits without raising the task's own `CancelledError` into the caller, so a cancellation of the caller still propagates, and the task's isn't mistaken for it.
-- **`task.result()`** re-raises an exception that stopped the job before the exit, rather than losing it.
+- **A job that failed is raised once the body ends,** rather than lost. When the body raised, or was cancelled, that exception goes on and the job's failure becomes a note on it: raising the job's in its place would hide the body's, and would turn a cancellation into an error the caller's `asyncio.timeout` or `TaskGroup` doesn't recognise as its own.
 - **The job's own failures** (a refused settlement, a timeout) are caught inside `job`, as the settler's are, so the loop runs on; only a bug ends it.
 - **Order at shutdown** comes from nesting: the body's work stops first, then the poller, then the client it settles through. [resources.md](resources.md) covers close order.
 
@@ -174,7 +181,7 @@ async def _every(job: Callable[[], Awaitable[object]], every: timedelta) -> None
 `await asyncio.to_thread(fn, *args)` runs a blocking function on the loop's default thread pool and awaits its result. Reach for it for a library you can't replace with an async one, and for file work big enough to matter.
 
 - **A thread can't be cancelled.** Cancelling the awaiting task, or its deadline passing, leaves the thread running to the end. Give the blocking call its own timeout where it takes one.
-- **Context variables are copied** into the thread, so a request id set in a `ContextVar` is still there.
+- **Context variables are copied** into the thread, so a request id set in a `ContextVar` is still there. `loop.run_in_executor` and a pool's `submit` copy nothing ([threads-and-processes.md](threads-and-processes.md)).
 - **A `sqlite3` connection belongs to the thread that made it,** and raises `ProgrammingError` when used from another. Open the connection inside the function you send to the thread.
 - **The default pool** has `min(32, os.process_cpu_count() + 4)` threads, shared by every `to_thread` in the program.
 

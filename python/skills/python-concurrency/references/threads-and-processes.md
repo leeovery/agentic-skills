@@ -24,29 +24,33 @@ In the default build only one thread runs Python at a time. Threads help while t
 AT_ONCE = 8
 
 
-def refund_all(
-    refunder: Refunder, refunds: Mapping[PaymentId, Money]
-) -> list[PaymentId]:
-    """Refund each payment its amount, eight at a time, and return those that failed."""
+def refund_all(refunder: Refunder, refunds: Iterable[Refund]) -> list[Refund]:
+    """Make each refund, eight at a time, and return those that failed.
+
+    A pool's threads don't see the caller's context variables, so each call runs
+    in a copy of them, and its log lines keep the correlation id. A copy each, as
+    one context can't run on two threads at once.
+    """
     with ThreadPoolExecutor(max_workers=AT_ONCE, thread_name_prefix="refund") as pool:
-        outcomes = {
-            payment_id: pool.submit(_refunded, refunder, payment_id, amount)
-            for payment_id, amount in refunds.items()
-        }
-    return [payment_id for payment_id, ok in outcomes.items() if not ok.result()]
+        outcomes = [
+            (refund, pool.submit(copy_context().run, _refunded, refunder, refund))
+            for refund in refunds
+        ]
+    return [refund for refund, ok in outcomes if not ok.result()]
 
 
-def _refunded(refunder: Refunder, payment_id: PaymentId, amount: Money) -> bool:
+def _refunded(refunder: Refunder, refund: Refund) -> bool:
     try:
-        refunder.refund(payment_id, amount)
+        refunder.refund(refund)
     except PaymentFailed:
-        logger.warning("refund of payment %s failed", payment_id, exc_info=True)
+        logger.warning("refund of payment %s failed", refund.payment_id, exc_info=True)
         return False
     return True
 ```
 
 - **The `with` owns the threads.** Leaving it waits for every call, so nothing outlives `refund_all`.
 - **Each call returns its result through its future,** read once the pool has closed. Nothing is shared between the threads, so nothing needs a lock.
+- **A pool's threads don't copy the caller's context.** `submit` runs the call in the worker thread's own context, so a `ContextVar` the caller set, such as the correlation id, isn't set there. `copy_context().run` carries it across, a copy per call, as one `Context` can't be entered on two threads at once. `asyncio.to_thread` makes that copy itself; `loop.run_in_executor` doesn't.
 - **The expected failure is caught inside the call,** as a `TaskGroup` task's is. `future.result()` re-raises anything else, a bug, in the caller.
 - **What the threads share must be safe to share.** `httpx2.Client` says it can be shared between threads. A `sqlite3.Connection` can't: it raises `ProgrammingError` when used from a thread other than the one that made it.
 - **A running call can't be stopped from outside.** Each one is bounded by its client's timeout, so the pool's close is bounded too.

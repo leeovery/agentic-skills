@@ -36,12 +36,16 @@ class Settler:
     deadline: timedelta
 
     async def settle(self, payment_ids: Iterable[PaymentId]) -> list[PaymentId]:
-        """Settle every payment, and return those that failed or ran out of time."""
+        """Settle every payment once, and return those that failed or ran out of time.
+
+        A payment named twice is settled once, as two calls for it at once would
+        race at the provider.
+        """
         gate = asyncio.Semaphore(self.limit)
         async with asyncio.TaskGroup() as tg:
             tasks = {
                 payment_id: tg.create_task(self._settle(payment_id, gate))
-                for payment_id in payment_ids
+                for payment_id in dict.fromkeys(payment_ids)
             }
         return [payment_id for payment_id, task in tasks.items() if not task.result()]
 
@@ -59,7 +63,7 @@ class Settler:
         return True
 ```
 
-Each task catches the failures it expects, so the group raises only for a bug, and then as an `ExceptionGroup`. `except SettlementFailed, TimeoutError:` is [3.14](https://docs.python.org/3/whatsnew/3.14.html)'s form without brackets. The composition root enters asyncio once, `asyncio.run(_settle(settings, payment_ids))`, and opens the `AsyncClient` inside it: [asyncio.md](references/asyncio.md) has it whole.
+Each task catches the failures it expects, so the group raises only for a bug, and then as an `ExceptionGroup`. `except SettlementFailed, TimeoutError:` is [3.14](https://docs.python.org/3/whatsnew/3.14.html)'s form without brackets. The composition root enters asyncio once, `asyncio.run(_settle(client, payment_ids))`, and opens the `AsyncClient` inside it, from a factory the wiring bound its settings into: [asyncio.md](references/asyncio.md) has it whole.
 
 ## Decision table
 
@@ -72,7 +76,7 @@ Each task catches the failures it expects, so the group raises only for a bug, a
 | A deadline on a call or a block of calls | `asyncio.timeout` |
 | A blocking library inside async code | `asyncio.to_thread` |
 | Tens of blocking calls in sync code | `ThreadPoolExecutor`, each result returned |
-| CPU-bound work | `ProcessPoolExecutor`, at module level, its state passed in |
+| CPU-bound work | a `ProcessPoolExecutor` opened where it's used, running a module-level function, its state passed in |
 | A file, client, connection or lock | `with` or `async with`; `ExitStack` when the number is known only at runtime |
 | A total several threads update | a `threading.Lock` field beside it |
 

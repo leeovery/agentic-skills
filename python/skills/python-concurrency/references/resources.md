@@ -8,9 +8,9 @@ Contents: `with` owns it · writing a context manager · a number known at runti
 
 Files, database connections, HTTP clients, pools, locks and temporary directories are each opened in a `with` or `async with`, in the function that owns them. The `with` closes them on a return, an exception and a cancellation alike; a `close()` further down runs only on the path that reaches it. ruff's `SIM115` flags `open()`, `Path.open()`, `tempfile.TemporaryFile()` and the rest when no `with` holds them.
 
-- **A function that returns an open resource hands it over,** and its caller takes it with `with`. `shop.storage.sqlite.connect` returns a connection; `main`'s wiring takes it as `closing(connect(settings.database))`.
+- **A function that returns an open resource hands it over,** and its caller takes it with `with`. `shop.storage.sqlite.connect` returns a connection; the wiring's `_canceller` takes it as `closing(connect(database))`.
 - **`contextlib.closing(x)`** for anything with a `close()` and no context manager of its own, or the wrong one.
-- **A `sqlite3.Connection` used as a context manager commits or rolls back; it doesn't close.** `with db:` is a transaction ([python-actions](../../python-actions/SKILL.md)); `with closing(db):` is the close.
+- **A `sqlite3.Connection` used as a context manager never closes.** Opened with the default `autocommit`, `with db:` commits or rolls back. The shop's connection is opened with `autocommit=True`, where it does nothing at all, so its store groups writes in an explicit `BEGIN` and `COMMIT` ([python-actions](../../python-actions/SKILL.md)). `with closing(db):` is the close.
 - **A fixture that opens something yields inside its `with`,** so pytest closes it after the test, pass or fail.
 
 ## Writing a context manager
@@ -84,7 +84,7 @@ A truthy return from `__exit__` swallows the body's exception, whatever it is: `
 
 Resources close in the reverse of the order they opened, which is the order shutdown needs: what takes work in stops first, then what does it, then what it writes to.
 
-- **Nested or bracketed `with`** closes last-opened first. `main`'s wiring opens the database, then the gateway's client, in one `with (... as db, ... as http):`, so the client closes before the database.
+- **Nested or bracketed `with`** closes last-opened first. The wiring's `_canceller` opens the database, then the gateway's client, in one `with closing(connect(database)) as db, client() as http:`, so the client closes before the database.
 - **An `AsyncExitStack`** gives the same order when the components are decided at runtime: enter the client, then the workers, then the intake, and the stack stops the intake first and closes the client last.
 - **Each close is bounded.** A component whose exit drains work (workers finishing what's queued, a buffer flushing) bounds the drain with `asyncio.timeout`, so one stuck call can't hold the process open. [asyncio.md](asyncio.md) has the queue workers and the poller.
 
