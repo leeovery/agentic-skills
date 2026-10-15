@@ -121,7 +121,7 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
 - **`typer.Abort` is caught before `Exception`.** It isn't a `TyperException`, and without its own clause a declined `typer.confirm(..., abort=True)` would be logged as a crash, traceback and all.
 - **Expected failures print their message and exit 1:** the `SettingsError` that `read_settings` makes of the settings' `ValidationError`, naming every missing or bad variable at once, and the domain's `OrderError` and `SettlementError`. `_said` adds each note the error picked up on the way, a line each. Only the unexpected is logged with its traceback, once, here ([python-errors](../../python-errors/SKILL.md)).
 - **`ValidationError` itself is not among them.** The wiring turns the settings' into `SettingsError`, and an edge that parses outside input turns its own into an answer or a domain error; one that still reaches `run` came from a bug, so it gets the traceback.
-- **A command never exits by itself:** no `sys.exit`, which the drop-in bans outside `shop/cli.py`, and no `raise typer.Exit(1)` for a failure. It raises the domain's exception, and `run` prints it and picks the code.
+- **A command never exits by itself:** no `sys.exit`, which the drop-in bans outside `shop/cli.py` and `shop/processes.py`, whose lift is for `subprocess`, and no `raise typer.Exit(1)` for a failure. It raises the domain's exception, and `run` prints it and picks the code.
 
 ## main
 

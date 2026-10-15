@@ -14,7 +14,8 @@ def reordered(
 ) -> Order:
     """A new pending order for previous's products still on sale, at today's prices.
 
-    Raises ValueError when none of them is still on sale.
+    Raises ValueError when none of them is still on sale, or when today's prices
+    are in more than one currency.
     """
     return Order(
         id=order_id,
@@ -63,7 +64,7 @@ A call's state is local to the call: `Restorer.restore`, below, counts in a loca
 
 - **The module is the job, the class its doer, the method the verb:** `shop/order/cancel.py`, `Canceller`, `cancel`. A reader writes `from shop.order.cancel import Canceller` and `canceller.cancel(order_id, reason=reason)`.
 - **A pure function is named for what it returns** (`reordered`, `total`); a method that acts, for the act (`reorder`).
-- **No `Service`, `Manager`, `Handler` or `Processor`** on a class in a domain package, and no `cancel_order` in `shop.order`. Guard 6 in [python-quality](../../python-quality/SKILL.md)'s source guards holds the suffixes.
+- **No `Service`, `Manager`, `Handler` or `Processor`** on a class in a domain package, and no function named `cancel_order` in `shop.order`. Guard 6 in [python-quality](../../python-quality/SKILL.md)'s source guards holds both, over the packages import-linter's `forbidden` contract names: it reports a class with one of the suffixes, and a function whose name holds its package's last word.
 
 ## Guards
 
@@ -103,7 +104,7 @@ class Withdrawer:
 The trap this avoids: a `withdraw` that saves each order as cancelled itself, and forgets the refund, because the refund lives in `cancel`.
 
 - **The field is a one-method Protocol,** `Cancels`, declaring `cancel(order_id, *, reason) -> Order` beside `Withdrawer`. Its tests pass a hand-written fake of it, `FakeCanceller`, which records "cancel `o-1`, out of stock" and raises what the test sets, so they check what the withdrawer asks and none of the canceller's own steps.
-- **`main` wires the chain:** `Withdrawer(orders=store, canceller=canceller)`, the same `Canceller` the edges call.
+- **The wiring builds the chain:** `Withdrawer(orders=store, canceller=canceller)`, with the `SqliteOrders` and the `Canceller` the edges get. No command withdraws yet, so `main` builds none; `test_sqlite.py` holds the store as `OrdersByProduct`, and pyrefly checks it fits.
 
 ## Transactions
 
@@ -167,8 +168,13 @@ class SqliteOrders:
 A file something else reads is never written in place. `Path.write_bytes` and `open(path, "w")` truncate it first, so a crash midway leaves it empty or cut short. Write a temporary file in the same directory, get it to disk, then rename it over the target: a rename within one filesystem is atomic, so a reader sees the old file or the new one.
 
 ```python
-def replace(path: Path, data: bytes, *, mode: int = 0o644) -> None:
-    """Replace the file at path with data.
+# A new file is its owner's alone, as mkstemp makes it: who else may read the
+# data is the caller's to say.
+NEW_FILE_MODE = 0o600
+
+
+def replace(path: Path, data: bytes, *, mode: int | None = None) -> None:
+    """Replace the file at path with data, in mode, or in the mode path has now.
 
     The data goes to a temporary file beside path, reaches the disk, then is
     renamed over path: a rename within one filesystem is atomic. On any
@@ -177,9 +183,8 @@ def replace(path: Path, data: bytes, *, mode: int = 0o644) -> None:
     with tempfile.NamedTemporaryFile(
         dir=path.parent, prefix=f".{path.name}.", delete_on_close=False
     ) as temp:
-        # mkstemp makes the file readable by its owner alone. Set before the fsync,
-        # so the mode reaches the disk with the data.
-        os.fchmod(temp.fileno(), mode)
+        # Set before the fsync, so the mode reaches the disk with the data.
+        os.fchmod(temp.fileno(), _mode_of(path) if mode is None else mode)
         temp.write(data)
         temp.flush()
         os.fsync(temp.fileno())
@@ -187,6 +192,14 @@ def replace(path: Path, data: bytes, *, mode: int = 0o644) -> None:
         Path(temp.name).replace(path)
     if os.name == "posix":
         _sync_directory(path.parent)
+
+
+def _mode_of(path: Path) -> int:
+    """The permission bits of the file at path, or NEW_FILE_MODE when there's none."""
+    try:
+        return stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        return NEW_FILE_MODE
 
 
 def _sync_directory(directory: Path) -> None:
@@ -200,6 +213,7 @@ def _sync_directory(directory: Path) -> None:
 
 - **The same directory,** never `/tmp`: a rename can't cross filesystems, and `Path.replace` raises `OSError` when asked to.
 - **`delete_on_close=False`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)) keeps the file through `close()`, and the `with` deletes it on the way out if anything failed. After the rename there's nothing under its name, which it ignores.
+- **The file keeps its mode.** `replace` reads it before writing and gives it to the new file, so a private file stays private; a caller passes `mode` to change it. A new file is `0o600`, as `mkstemp` makes it, since who else may read the data is the caller's to say. `test_atomic.py` replaces a `0o600` file and a `0o644` one, and checks each kept its mode.
 - **`fchmod`, then `fsync`, then the rename,** or a crash can leave the new name pointing at data, or a mode, that never reached the disk. **Then `fsync` the directory** on POSIX, where the rename is an entry in the directory: without it, a crash can bring back the old file.
 - **It lives in one module, `shop/storage/atomic.py`,** called as `atomic.replace(path, data)`, so the steps are written once.
 
@@ -224,13 +238,11 @@ def start_cancelling(self, order_id: OrderId) -> Order:
     lands first is refused. Raises NotCancellable with the status it found,
     or OrderNotFound.
     """
-    # The statuses come from Status, the rule's owner, bound as one JSON list.
-    cancellable = json.dumps([status for status in Status if status.cancellable])
     with _transaction(self.db, writes=True):
         claimed = self.db.execute(
             "UPDATE orders SET status = ?"
             " WHERE id = ? AND status IN (SELECT value FROM json_each(?))",
-            (Status.CANCELLING, order_id, cancellable),
+            (Status.CANCELLING, order_id, _cancellable()),
         ).rowcount
         order = self._read(order_id)
     if not claimed:
@@ -238,7 +250,7 @@ def start_cancelling(self, order_id: OrderId) -> Order:
     return order
 ```
 
-- **The write is the check.** The `UPDATE` changes the status only where the current one allows cancelling, and its row count says whether it won. 0 means the order can't be cancelled now, whatever it was when someone loaded it, and the store raises `NotCancellable` with the status it found.
+- **The write is the check.** The `UPDATE` changes the status only where the current one allows cancelling, the statuses `_cancellable()` reads from `Status.cancellable`, and its row count says whether it won. 0 means the order can't be cancelled now, whatever it was when someone loaded it, and the store raises `NotCancellable` with the status it found.
 - **The claim is a state of its own, `CANCELLING`,** and the refund waits for it. A shipment written the same way, `UPDATE orders SET status = 'shipped' WHERE id = ? AND status = 'paid'`, misses a claimed order, so nothing ships under the refund.
 - **`CANCELLING` still allows cancelling,** so a cancel that stopped after the claim, at a crash, a refused refund or a redelivered message, runs again and finishes. Its refund carries the same key, so the provider refunds once.
 - **The last write needs no condition.** Nothing else moves a claimed order, so `save` writes it `CANCELLED`, with the time and the reason, whole.
