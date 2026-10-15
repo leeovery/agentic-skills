@@ -24,7 +24,6 @@ PaymentId = NewType("PaymentId", str)
 An amount is a count of a currency's minor unit, such as pence, held as an `int`:
 
 ```python
-# [0-9], not \d, which takes any script's digits.
 AMOUNT = re.compile(
     r"(?P<sign>-?)(?P<units>[0-9]+)\.(?P<cents>[0-9]{2}) (?P<code>[A-Z]{3})"
 )
@@ -48,11 +47,7 @@ class Money:
 
     @classmethod
     def parse(cls, text: str) -> Self:
-        """Read an amount written as "12.50 GBP", or "-12.50 GBP" for a refund.
-
-        Digits, a point, two decimals, one space and a currency's code, and nothing
-        else: no "+", no separators, no exponent.
-        """
+        """Read an amount written as "12.50 GBP", or "-12.50 GBP" for a refund."""
         found = AMOUNT.fullmatch(text)
         if found is None or found["code"] not in Currency:
             raise ValueError(f"{text!r} is not an amount like '12.50 GBP'")
@@ -82,26 +77,26 @@ class Money:
 
 - **Never a `float`.** `0.1 + 0.2 != 0.3`, and a total that's out by a penny is a refund that doesn't match its payment.
 - **Amounts add only within one currency;** across two, it raises. It multiplies only by an `int`, a quantity.
-- **Dividing goes through `split`,** which hands the pennies left over to the first parts, so the parts sum to the whole, which a property test checks for any amount and any number of parts. A rate, such as a 15% discount, is a function that does its arithmetic in integers and states how it rounds.
+- **Dividing goes through `split`,** which hands the pennies left over to the first parts, so the parts sum to the whole. A rate, such as a 15% discount, is a function that does its arithmetic in integers and states how it rounds.
 - **`sum` needs a start:** `0 + Money` fails, so `Order.total` starts from its first line.
-- **`parse` matches the whole text against one pattern,** `AMOUNT`, written for exactly the form its docstring gives. `Decimal(text)` would also take `1_000.00`, `12E-2`, `+12.50` and `.50`, and `\d` matches any script's digits. Its tests try each of those, and a property writes amounts of every size out and reads them back. No `Decimal` as a field either: the domain's arithmetic stays in integers.
+- **`parse` matches the whole text against one pattern,** `AMOUNT`. `Decimal(text)` would also take `1_000.00`, `12E-2`, `+12.50` and `.50`, and `\d` matches any script's digits. No `Decimal` as a field either: the domain's arithmetic stays in integers.
 - **How an amount reads to people** ("1,234.50 GBP") is `shop.display.money`'s job ([python-architecture](../../python-architecture/SKILL.md)). How it's stored or sent is the format's own encoder: here, `minor` and `currency` as two fields ([boundaries.md](boundaries.md)).
-- **A currency with other than two decimals** (yen has none) needs the digits on `Currency`, and display and `parse` reading them. The shop sells in none, so it doesn't carry them.
+- **A currency with other than two decimals** (yen has none) needs the digits on `Currency`, and display and `parse` reading them.
 
 ## Time
 
-- **An instant is an aware `datetime` in UTC.** Code that needs the time takes `now: Callable[[], datetime]`; `main` passes `partial(datetime.now, UTC)`, and a test passes a fixed instant ([python-protocols](../../python-protocols/SKILL.md)). ruff's `DTZ` reports a naive `now()`, `today()`, `fromtimestamp()` or `strptime()`, and the drop-in bans `datetime.now` outside `shop/cli.py` and `shop/processes.py`, whose lift is for `subprocess`.
+- **An instant is an aware `datetime` in UTC.** Code that needs the time takes `now: Callable[[], datetime]`; `main` passes `partial(datetime.now, UTC)`, and a test passes a fixed instant ([python-protocols](../../python-protocols/SKILL.md)). ruff's `DTZ` reports a naive `now()`, `today()`, `fromtimestamp()` or `strptime()`, and the drop-in bans `datetime.now` outside the module that holds `main`.
 - **Convert at the edge:** an aware value from outside becomes UTC with `.astimezone(UTC)` in the mapper. A naive one is refused there, not guessed at: pydantic's `AwareDatetime` refuses it ([boundaries.md](boundaries.md)).
-- **A span is a `timedelta`,** never an `int` of seconds. Where a format forces a number, its field names the unit (`timeout_seconds`) and the mapper converts it. `Settings` reads `SHOP_GATEWAY_TIMEOUT` as an ISO 8601 duration, `PT10S`.
+- **A span is a `timedelta`,** never an `int` of seconds. Where a format forces a number, its field names the unit (`timeout_seconds`) and the mapper converts it.
 - **A calendar day is a `date`,** taken from an instant in a named zone: `now().astimezone(ZoneInfo("Europe/London")).date()`. Which day it is depends on where; `date.today()` asks the machine (`DTZ011`).
 
 ## Values with rules
 
 A rule the type can't say is checked when the value is built, so every value built keeps it:
 
-- **`__post_init__`** when the fields are already typed and the rule is about them: an order has at least one line, all priced in one currency, and a line a quantity of at least one at a price of zero or more. What a status implies about the other fields is a rule too: a paid or shipped order holds its payment's id (`Status.paid`), a pending one holds none, and a cancelled one, and no other, holds the time and the reason; a cancelling or cancelled order may hold a payment id or not, as it was paid or not before the claim. `Order` checks the first in the [SKILL.md](../SKILL.md#pattern) pattern and the rest beside it, and `Line` its own, below. A rule nothing checks holds nowhere: the export's lines and the reorder's prices reach `Order` from outside, its `total` would raise on two currencies, and a paid order with no payment id would be cancelled without its refund, as the canceller refunds by that id.
+- **`__post_init__`** when the fields are already typed and the rule is about them: an order has at least one line, and a line a quantity of at least one. What a status implies about the other fields is a rule too: a paid order holds its payment's id (`Status.paid`). `Order` checks its rules in the [SKILL.md](../SKILL.md#pattern) pattern, and `Line` its own, below. A rule nothing checks holds nowhere: a paid order with no payment id would be cancelled without its refund.
 - **A `parse` classmethod** when the value is read from text: `Money.parse("12.50 GBP")`. It returns `Self`, raises `ValueError` naming the text and the shape it wanted, and hands typed fields to the constructor.
-- **`copy.replace(order, status=Status.CANCELLED, cancelled_at=now, cancel_reason=reason)`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) is how a value changes: it builds a new one through `__init__`, so `__post_init__` runs again, and `copy.replace(order, lines=())` raises, as does a cancel that forgets the time. It works on any dataclass, named tuple or `datetime`; `dataclasses.replace` only on dataclasses.
+- **`copy.replace(order, status=Status.CANCELLED, cancelled_at=now, cancel_reason=reason)`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) is how a value changes: it builds a new one through `__init__`, so `__post_init__` runs again, and `copy.replace(order, lines=())` raises. It works on any dataclass, named tuple or `datetime`; `dataclasses.replace` only on dataclasses.
 - **No `__init__` by hand.** A default goes on the field; a derived value is a `@property` (`Order.total`), computed when read, never a field that can disagree with the others.
 - **Not for a value with no rules.** A dataclass around one unconstrained string is ceremony: a `NewType` does the job.
 
@@ -144,11 +139,11 @@ class Basket:
 
 ## Parameters
 
-- **Keyword-only after the first:** `cancel(order_id, *, reason)`, `reordered(previous, *, order_id, prices)`. The subject comes first; anything that could be confused with it, or with another, is named at the call.
+- **Keyword-only after the first:** `cancel(order_id, *, reason)`. The subject comes first; anything that could be confused with it, or with another, is named at the call.
 - **No positional `bool`:** `ship(order, express=True)`. ruff's `FBT001` reports a `bool` parameter before the `*`, `FBT002` a positional one with a default, and `FBT003` a `True` passed positionally.
-- **Three or more related values** travel as an input dataclass, frozen and keyword-only like any value, and the next one has a place to go. `PLR0913` stops a signature past five.
-- **Take the widest type you use:** `Iterable[Order]` for one pass (`Restorer.restore`), `Sequence[Order]` to index it or go through it twice, `Mapping[str, Money]` to look things up (`reordered`'s `prices`). A caller then passes a list, a tuple, a generator or a dict without converting.
-- **Return a concrete type:** `tuple[Order, ...]` (`Withdrawer.withdraw`), `list[Order]` (`export.read`). A caller can index it, take its length and keep it; an `Iterable` return makes every caller wrap it in `list()` to find out.
+- **Three or more related values** travel as an input dataclass, frozen and keyword-only like any value. `PLR0913` stops a signature past five.
+- **Take the widest type you use:** `Iterable[Order]` for one pass, `Sequence[Order]` to index it or go through it twice, `Mapping[str, Money]` to look things up. A caller then passes a list, a tuple, a generator or a dict without converting.
+- **Return a concrete type:** `tuple[Order, ...]`, `list[Order]`. A caller can index it, take its length and keep it; an `Iterable` return makes every caller wrap it in `list()` to find out.
 
 ## Secrets
 
@@ -157,10 +152,7 @@ At the edge a secret is pydantic's `SecretStr` ([boundaries.md](boundaries.md)).
 ```python
 @dataclass(frozen=True, slots=True, kw_only=True, repr=False)
 class Secret:
-    """A credential, shown as ******** wherever it's printed, formatted or logged.
-
-    secret.value is the one way to it, written where the value is sent.
-    """
+    """A credential, shown as ******** wherever it's printed, formatted or logged."""
 
     value: str
 
@@ -174,7 +166,7 @@ class Secret:
 - **`str`, `repr`, an f-string, `%s` in a log line, and a list holding it** all show `********`; a test checks each.
 - **`json.dumps` refuses it,** so it can't land in a payload by accident. `dataclasses.asdict` does reach the value: a dataclass holding a `Secret` is never dumped whole.
 - **It never goes into an exception's message,** which is printed and logged further than the code that raised it can see.
-- **Most secrets never enter the domain.** The gateway's token goes from `Settings` to the client's `Authorization` header in `main`, and nothing else holds it.
+- **Most secrets never enter the domain.** The gateway's token goes from `Settings` to the client's header in `main`.
 
 ## `Self`, `TypeIs`, `@override` and generics
 
@@ -182,7 +174,7 @@ class Secret:
 - **`TypeIs[X]`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) is the return type of a predicate that narrows: `def is_order(value: object) -> TypeIs[Order]`. It narrows both branches, where `TypeGuard` narrows only the true one, and a plain `bool` narrows neither.
 - **`@override`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)) goes on every method that overrides a parent's; pyrefly strict reports a missing one as `missing-override-decorator`, so a renamed parent method can't leave an orphan behind. It doesn't ask for one on `__repr__`, `__str__` or `__eq__` overriding `object`'s.
 - **A generic earns its place** when one body serves several types: `def first[T](items: Sequence[T]) -> T` ([3.12](https://docs.python.org/3/whatsnew/3.12.html)), never `TypeVar("T")`. A domain type is never generic for one use.
-- **A `type` alias** names a long annotation once: `type Settle = Callable[[Iterable[PaymentId]], list[PaymentId]]` in `shop/cli.py`.
+- **A `type` alias** names a long annotation once: `type Settle = Callable[[Iterable[PaymentId]], list[PaymentId]]`.
 - **`cast`** is a claim the checker takes on trust: narrow with `isinstance`, a mapper or `TypeIs` instead, and where nothing else will do, say why on the line.
 
 ## Checklist

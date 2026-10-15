@@ -31,10 +31,7 @@ class Status(StrEnum):
 
     @property
     def paid(self) -> bool:
-        """Whether an order in this status has been paid for, so holds its payment's id.
-
-        A cancelling or cancelled order may have been paid or not: its payment id says.
-        """
+        """Whether an order in this status has been paid for, so holds its payment's id."""
         match self:
             case Status.PAID | Status.SHIPPED:
                 return True
@@ -44,9 +41,9 @@ class Status(StrEnum):
                 assert_never(self)
 ```
 
-- **A member is its value as a string:** `str(Status.PAID)`, an f-string and `json.dumps` all give `paid`, SQLite stores `paid`, and `Status.PAID == "paid"`. A stored or sent value is a name that reads in a log and survives the members being reordered.
+- **A member is its value as a string:** `str(Status.PAID)`, an f-string and `json.dumps` all give `paid`, and `Status.PAID == "paid"`. A stored or sent value is a name that reads in a log and survives the members being reordered.
 - **`class Status(str, Enum)` is the old spelling,** and its `str()` and f-string give `Status.PAID`, not `paid`. ruff's `UP042` flags it ([3.11](https://docs.python.org/3/whatsnew/3.11.html)).
-- **Never `IntEnum` for anything stored or sent.** Its numbers mean nothing outside the program, `auto()` renumbers every member after one inserted above them, and a member equals a plain int, so a bare `2` compared with a status runs and means nothing to a reader.
+- **Never `IntEnum` for anything stored or sent.** Its numbers mean nothing outside the program, and `auto()` renumbers every member after one inserted above them.
 - **A set kept only in memory is a `StrEnum` too.** It still prints in logs and errors, and the day it's stored nothing needs to change.
 - **The members are the class:** `list(Status)`, `tuple(Status)`, and `"lost" in Status` is `False`. No separate table of them to fall out of step.
 
@@ -70,16 +67,16 @@ class Reason(StrEnum):
     FRAUD = "fraud"
 ```
 
-Two members with one value make the second an alias of the first: `Reason.STOCK_OUT = "out-of-stock"` would be `Reason.OUT_OF_STOCK` under a second name, and a `match` naming both would never reach the second. `@unique` raises `ValueError` as the class is made. ruff's `PIE796` catches a duplicate in a class based on `Enum` directly, but not in a `StrEnum`, so the decorator is the check.
+Two members with one value make the second an alias of the first, and a `match` naming both would never reach the second. `@unique` raises `ValueError` as the class is made. ruff's `PIE796` catches a duplicate in a class based on `Enum` directly, but not in a `StrEnum`, so the decorator is the check.
 
 ## Behaviour
 
 What a member means is a property, with a `match` that names every member:
 
 - **Every member is named,** even those that answer like another. When a member is added, pyrefly reports, through `assert_never`, each `match` that hasn't decided about it, instead of the new member falling into a default.
-- **Callers ask the property,** never `order.status in (Status.PENDING, Status.PAID)` inline: that copy of the rule drifts the day a member is added. `CANCELLING` joined the cancellable set in one line of the property, and every caller asking it followed. `Status.paid` is the same for which statuses mean an order was paid for: `Order` asks it to require a payment id, and the test builder asks it to give one by default.
+- **Callers ask the property,** never `order.status in (Status.PENDING, Status.PAID)` inline: that copy of the rule drifts the day a member is added. `CANCELLING` joined the cancellable set in one line of the property, and every caller asking it followed.
 - **A label for people is `shop.display`'s,** not a property: wording lives in one module ([python-architecture](../../python-architecture/SKILL.md)).
-- **Each change of status with side effects is its own operation** (`Canceller`, `Withdrawer`), guarded by a property such as `cancellable`, which the store's conditional claim asks too ([python-actions](../../python-actions/SKILL.md)). There's no state-machine library: the property says what's allowed, and the operation says what happens.
+- **Each change of status with side effects is its own operation** (`Canceller`), guarded by a property such as `cancellable` ([python-actions](../../python-actions/SKILL.md)). There's no state-machine library: the property says what's allowed, and the operation says what happens.
 
 ## `match` and `assert_never`
 
@@ -89,7 +86,7 @@ A `match` over an enum ends `case _: assert_never(x)`. In that branch `x` has th
 ERROR Argument `Literal[Status.CANCELLED]` is not assignable to parameter `arg` with type `Never` in function `typing.assert_never` [bad-argument-type]
 ```
 
-- **Without it, the drop-in still fails the gap.** pyrefly reports a `match` that leaves out a member as `non-exhaustive-match`, a warning the gate doesn't show by default, and python-quality's drop-in raises it to an error. `assert_never` says the `match` means to cover every member, and checks it at run time too.
+- **Without it, the drop-in still fails the gap.** pyrefly's `non-exhaustive-match` is a warning, and python-quality's drop-in raises it to an error. `assert_never` says the `match` means to cover every member, and checks it at run time too.
 - **At run time it raises** `AssertionError` with the value, if one outside the set ever arrives.
 - **Never `case _: return False`** as the last case: it answers for every member added later, unasked.
 

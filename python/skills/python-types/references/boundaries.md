@@ -36,12 +36,12 @@ class ExportedOrder(BaseModel):
     cancel_reason: Reason | None
 ```
 
-- **`extra="forbid"`** turns a key the model doesn't know into an error. pydantic's default ignores it, so a misspelt `cancel_reson` is dropped without a word, and a field with a default reads as unset.
-- **`frozen=True`:** assigning to a field raises `ValidationError`. What was checked stays checked. It's shallow like a dataclass's, so collections are tuples.
+- **`extra="forbid"`** turns a key the model doesn't know into an error. pydantic's default ignores it, so a misspelt `cancel_reson` is dropped without a word.
+- **`frozen=True`:** what was checked stays checked. It's shallow like a dataclass's, so collections are tuples.
 - **Fields are the wire's types,** with the domain's enums where the wire holds one of their values: the model then refuses an unknown status and lists the valid ones ([enums.md](enums.md)). Ids stay `str` here; the mapper makes them `OrderId`.
 - **`AwareDatetime`, never `datetime`,** for a time from outside: plain `datetime` accepts `2026-10-14T09:30:00` with no zone, and nobody knows which wall clock it was.
-- **A rule the domain holds is said in the model too,** `Field(gt=0)` on a quantity and `Field(ge=0)` on a price, so a bad line is reported with every other problem in it, by field. `Line` still checks both, for every other way a line is built.
-- **No defaults on a field the wire must send.** An optional field is `X | None` with no default when the format always writes it, as the export's are, so a line missing it is refused.
+- **A rule the domain holds is said in the model too,** `Field(gt=0)` on a quantity, so a bad line is reported with every other problem in it, by field. `Line` still checks it, for every other way a line is built.
+- **No defaults on a field the wire must send.** An optional field is `X | None` with no default when the format always writes it, so a line missing it is refused.
 
 ## `strict`
 
@@ -55,8 +55,8 @@ A model that parses JSON sets `strict=True`. Checked on pydantic 2.14 with `mode
 | `"at": "2026-10-14T09:30:00Z"` | a `datetime` | a `datetime` |
 | `"status": "paid"` | `Status.PAID` | `Status.PAID` |
 
-- **Why:** the wire's types are the contract. Lax mode accepts a string where a number belongs and an integer as a time, and a sender comes to rely on it; strict reports the day a sender changes a type, at the edge, by field.
-- **Fed JSON, never a `dict`.** In strict mode `model_validate` on a Python `dict` refuses `"paid"` for a `Status` and an ISO string for a `datetime`, which JSON mode accepts. A strict model is fed `model_validate_json(raw)`, never `model_validate(json.loads(raw))`.
+- **Why:** the wire's types are the contract. A sender comes to rely on what lax mode accepts; strict reports the day a sender changes a type, at the edge, by field.
+- **Fed JSON, never a `dict`.** In strict mode `model_validate` on a `dict` refuses `"paid"` for a `Status` and an ISO string for a `datetime`. A strict model is fed `model_validate_json(raw)`, never `model_validate(json.loads(raw))`.
 
 ## The mapper
 
@@ -85,7 +85,7 @@ def order_from_export(exported: ExportedOrder) -> Order:
     )
 ```
 
-- **One mapper per source:** `order_from_export`, the SQLite store's row mapping, `order_reply` going out. One shared by two sources carries the first's quirks into the second.
+- **One mapper per source.** One shared by two sources carries the first's quirks into the second.
 - **It maps and does nothing else:** no I/O, no logging, no settings, no business rule. A rule found while mapping belongs to an operation ([python-actions](../../python-actions/SKILL.md)); a rule of the value runs in its `__post_init__` as the mapper builds it.
 - **Times become UTC here.** `.astimezone(UTC)` also swaps pydantic's own `tzinfo` class for `datetime.UTC`, so nothing in the domain holds a pydantic type.
 - **A round-trip test with every field set** catches a field added to `Order` that the mapper forgets: `kw_only` makes a missing field a `TypeError` only when it has no default.
@@ -96,12 +96,7 @@ def order_from_export(exported: ExportedOrder) -> Order:
 
 ```python
 def read(path: Path) -> list[Order]:
-    """Every order in the export at path.
-
-    Raises ValueError, noting the line, for the first line that isn't a valid
-    order: a ValidationError, with every problem on the line, when it doesn't
-    parse.
-    """
+    """Every order in the export at path."""
     orders: list[Order] = []
     with path.open("rb") as file:
         for number, line in enumerate(file, start=1):
@@ -133,7 +128,6 @@ class OrderReply(BaseModel):
     status: Status
     total_minor: int
     currency: Currency
-    cancelled_at: AwareDatetime | None
 
 
 def order_reply(order: Order) -> OrderReply:
@@ -143,21 +137,17 @@ def order_reply(order: Order) -> OrderReply:
         status=order.status,
         total_minor=order.total.minor,
         currency=order.total.currency,
-        cancelled_at=None
-        if order.cancelled_at is None
-        else order.cancelled_at.astimezone(UTC),
     )
 ```
 
-- **The domain's `Order` is never the body.** Once it's serialised directly, renaming a field renames the API, and the API's quirks (`total_minor`, a field a client needs) bend the domain.
+- **The domain's `Order` is never the body.** Once it's serialised directly, renaming a field renames the API, and the API's quirks bend the domain.
 - **The shape names its units:** `total_minor`, an integer, beside `currency`. Never a float of pounds.
 - **A test of a reply compares parsed JSON;** nothing stores it. A stored format pins its bytes, below.
 
 ## ORM and vendor types
 
 - **Rows never leave the store.** `SqliteOrders.get` builds an `Order` from its row and returns that; no `sqlite3.Row`, ORM object or cursor crosses into the domain ([python-protocols](../../python-protocols/SKILL.md)).
-- **A vendor's response is a wire shape.** The adapter parses it into a model of its own, or reads the one field it needs, and returns the domain's type or raises the domain's exception. An SDK's objects stay inside the adapter.
-- **A generated client's types** are wire shapes too: mapped at the edge, never passed inward.
+- **A vendor's response is a wire shape,** and so are an SDK's objects and a generated client's types. The adapter parses it into a model of its own, or reads the one field it needs, and returns the domain's type.
 
 ## Pinned formats
 
@@ -206,21 +196,21 @@ def test_encode_pins_the_line_format() -> None:
     )
 ```
 
-- **Never through `shop.display`.** If the export called the function that words money for the screen, rewording "25.00 GBP" as "£25.00" would rewrite every file written after it.
+- **Never through `shop.display`,** or rewording money for the screen rewrites every file written after it.
 - **Every key is written by name, in order,** so renaming a dataclass field can't rename the file's key, and the encoder fixes the separators and the zone.
 - **The test's input sits in another zone,** so the bytes prove the encoder converts to UTC.
-- **The reader is tested against the writer:** a round trip with every field set. Once an older format is still on disk somewhere, a sample of it joins the tests.
+- **The reader is tested against the writer:** a round trip with every field set. Once an older format is on disk somewhere, a sample of it joins the tests.
 - **Long output is a snapshot** ([python-testing](../../python-testing/SKILL.md)); a line format this short is a literal.
 
 ## Secrets at the edge
 
-- **`SecretStr` in the settings:** `Settings.gateway_token`. Its `repr`, its `str` and `model_dump_json()` all give `**********`; `get_secret_value()` is the one way to the value, called once, where it's sent: `main` puts it in the gateway client's `Authorization` header.
+- **`SecretStr` in the settings.** Its `repr`, its `str` and `model_dump_json()` all give `**********`; `get_secret_value()` is the one way to the value, called once, where it's sent.
 - **`hide_input_in_errors=True`** on the settings, so a bad value isn't echoed in the error that reports it. A request model's 422 body leaves the input out with `include_input=False`.
 - **Inside the domain, a secret is a `Secret`** ([values.md](values.md)), since the domain can't import pydantic.
 
 ## Where a model lives
 
-In the edge module that parses or sends it: `CancelRequest` and `OrderReply` in `shop/api.py`, `CancelRequested` in `shop/consumers.py`, `ExportedOrder` in `shop/storage/export.py`, `Settings` in `shop/settings.py`. Never in the domain, which import-linter enforces:
+In the edge module that parses or sends it: `OrderReply` in `shop/api.py`, `ExportedOrder` in `shop/storage/export.py`. Never in the domain, which import-linter enforces:
 
 ```toml
 [[tool.importlinter.contracts]]
