@@ -40,7 +40,7 @@ class NotCancellable(OrderError):
         self.status = status
 ```
 
-The adapter translates at its boundary, and the edge maps what reaches it, in one place:
+The adapter translates at its boundary, where `_send` makes the request and its retries, and the edge maps what reaches it, in one place:
 
 ```python
 # src/shop/payments/gateway.py, in Gateway.refund
@@ -72,6 +72,12 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
         logger.exception("shop failed")
         return 1
     ...
+
+
+def _said(err: Exception) -> str:
+    """The error's message, then each note added to it on the way up, a line each."""
+    notes = err.__notes__ if hasattr(err, "__notes__") else []
+    return "\n".join([str(err), *notes])
 ```
 
 A `SettingsError`, an `OrderError` or a `SettlementError` is an outcome the user reads, printed once with its notes and no traceback. Anything else is a bug, logged once with its traceback: a pydantic `ValidationError` too, as the wiring turns the settings' into `SettingsError` and an edge turns its input's into an answer of its own. So an outcome the user must be told is a domain exception, as a reorder with nothing still on sale raises `OrderError`; a builtin such as `ValueError` is for a bug, or a value refusing its own rule.

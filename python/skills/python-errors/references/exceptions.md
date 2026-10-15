@@ -66,6 +66,8 @@ except httpx2.HTTPError as err:
     raise PaymentFailed(refund.payment_id) from err
 ```
 
+`_send` makes the request, retrying a passing failure under the adapter's policy, and raises httpx2's error once it gives up; [python-protocols](../../python-protocols/SKILL.md) has the adapter whole.
+
 - **`from err` sets `__cause__`,** and the traceback prints the httpx2 error first, then "The above exception was the direct cause of the following exception". Without `from`, Python still links them, as `__context__`, and prints "During handling of the above exception, another exception occurred", which reads as a second bug. ruff's `B904` flags a `raise` inside `except` with neither.
 - **`from None` hides the cause, and only on purpose,** where it's a detail of how the code works, not why it failed. The fake store's `KeyError` says nothing `OrderNotFound` doesn't:
 
@@ -136,6 +138,8 @@ def sweep(self, customer_id: CustomerId, *, reason: Reason) -> tuple[Order, ...]
         raise ExceptionGroup(f"sweeping {customer_id}'s orders", failed)
     return tuple(cancelled)
 ```
+
+`cancellable_for` is the one store query the sweeper declares: the customer's orders whose status still allows cancelling.
 
 - **It catches only the failures it expects of one order.** Anything else, a store that's down, stops the sweep at once: the next order would fail the same way.
 - **A caller takes the group apart with `except*`.** `except* NotCancellable as shipped:` handles `shipped.exceptions`, and the kinds it doesn't name rise on, still in a group. `return`, `break` and `continue` can't appear in an `except*` block, and `except* ExceptionGroup` is a `TypeError`.

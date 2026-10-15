@@ -20,6 +20,8 @@ logging.basicConfig(
 )
 ```
 
+`read_settings` builds the settings, reporting every missing or bad variable at once ([python-architecture](../../python-architecture/SKILL.md)).
+
 - **The handler writes to stderr,** so log lines never mix with the data a command writes to stdout ([python-actions](../../python-actions/SKILL.md)).
 - **`basicConfig` does nothing when the root logger already has handlers,** unless given `force=True`. Configured twice, the second call is silently ignored; needing `force` means something configured logging before `main` did.
 - **A larger setup is one `logging.config.dictConfig(...)` call,** in the same place, under the same rule.
@@ -129,6 +131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run(build_app(from_environment), argv)
 ```
 
+`build_app` builds the command line over a wiring, and `from_environment` is the wiring the program runs, read from the `SHOP_` variables ([python-actions](../../python-actions/SKILL.md)).
+
 - **The filter goes on the handler,** as the wiring above does. A filter on a logger sees only the records logged through that logger, not its children's, so one on the root would miss every module's lines.
 - **The token `set` returns resets the variable when its `with` ends** ([3.14](https://docs.python.org/3/whatsnew/3.14.html)), so no id outlives its work.
 - **The `ContextVar` is declared at module level,** as the `contextvars` docs require; the import-time guard counts `ContextVar` as a declaration.
@@ -154,6 +158,8 @@ def test_each_retry_is_logged_as_a_warning(caplog: pytest.LogCaptureFixture) -> 
         "retrying POST /payments/pay-1/refunds in 0.5s, after attempt 1:"
     )
 ```
+
+`answers` gives a handler that returns each answer in turn, with the requests it saw, and `gateway` the adapter over a mock transport on a fake clock, closed as the `with` ends; `REFUND` is £10 back to `pay-1`. All three are the gateway tests' own ([python-protocols](../../python-protocols/SKILL.md)).
 
 - **The root logger stops at WARNING** until something sets it lower. A test of an INFO line calls `caplog.set_level(logging.INFO)` first.
 - **A logged traceback is checked as `record.exc_info is not None`,** as the CLI's test of its last resort does.
