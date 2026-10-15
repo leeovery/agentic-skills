@@ -55,17 +55,19 @@ class FakeTime:
         return self.now
 
 
-def gateway(handler: Handler, time: FakeTime | None = None) -> Gateway:
+@contextmanager
+def gateway(handler: Handler, time: FakeTime | None = None) -> Generator[Gateway]:
     """A Gateway whose client answers every request with handler, on a fake clock.
 
-    rand returns 1, so each backoff is its whole bound: 0.5s, 1s, 2s.
+    rand returns 1, so each backoff is its whole bound: 0.5s, 1s, 2s. The client
+    closes as the block ends.
     """
     time = time or FakeTime()
-    client = httpx2.Client(
-        base_url="https://pay.example", transport=httpx2.MockTransport(handler)
-    )
     retry = Retry(sleep=time.sleep, clock=time.clock, rand=lambda: 1.0)
-    return Gateway(client=client, retry=retry)
+    with httpx2.Client(
+        base_url="https://pay.example", transport=httpx2.MockTransport(handler)
+    ) as client:
+        yield Gateway(client=client, retry=retry)
 ```
 
 The suite never sleeps, and the test can check the back-off itself. The jitter's `rand` is a seam too: fixed at 1, every wait is its whole bound, so a test asserts each one exactly.
@@ -86,7 +88,8 @@ def test_refund_recovers_after_passing_failures() -> None:
         httpx2.Response(201),
     )
 
-    gateway(handler, time).refund(REFUND)
+    with gateway(handler, time) as payments:
+        payments.refund(REFUND)
 
     assert len(sent) == 3
     assert time.slept == [0.5, 1.0]
@@ -96,8 +99,8 @@ def test_refund_stops_at_the_attempt_cap() -> None:
     time = FakeTime()
     handler, sent = answers(*[httpx2.Response(503)] * 4)
 
-    with pytest.raises(PaymentFailed) as failed:
-        gateway(handler, time).refund(REFUND)
+    with gateway(handler, time) as payments, pytest.raises(PaymentFailed) as failed:
+        payments.refund(REFUND)
 
     assert len(sent) == 4
     assert time.slept == [0.5, 1.0, 2.0]
@@ -109,8 +112,8 @@ def test_refund_never_retries_a_permanent_failure() -> None:
     time = FakeTime()
     handler, sent = answers(httpx2.Response(400))
 
-    with pytest.raises(PaymentFailed):
-        gateway(handler, time).refund(REFUND)
+    with gateway(handler, time) as payments, pytest.raises(PaymentFailed):
+        payments.refund(REFUND)
 
     assert len(sent) == 1
     assert time.slept == []
@@ -159,4 +162,4 @@ time-machine is for code you don't own that reads the clock itself, where no `no
 - **A test never calls `asyncio.run`,** and never reaches for a loop: `asyncio.get_running_loop()` inside the test when it needs `loop.time()`.
 - **An async resource is opened with `async with` in the test,** or in an async helper like `settlements(handler)` in [fakes-and-builders.md](fakes-and-builders.md), so it's closed on the loop that used it.
 - **Concurrency is tested by what it guarantees,** not by timing: the fake counts the calls in flight, and the test checks `most_at_once == 2`. A test that sleeps to let tasks overlap is a test that sometimes doesn't.
-- **Code that starts tasks is tested for stopping them,** as the poller's tests do by leaving its `async with` and checking what the job did up to then, and that a failure inside it surfaces.
+- **Code that starts tasks is tested for stopping them,** as the poller's tests do by leaving its `async with` and checking what the job did up to then, that a failed run is logged and the next still runs, and that a job that won't stop is reported.

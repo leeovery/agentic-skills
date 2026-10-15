@@ -42,10 +42,11 @@ PAID_IN_FULL = Refund(
     [
         pytest.param(make_order(), [], id="cancels a pending order without a refund"),
         pytest.param(
-            make_order(status=Status.PAID, payment_id="pay-1"),
+            make_order(status=Status.PAID),
             [PAID_IN_FULL],
             id="refunds a paid order in full",
         ),
+        ...
     ],
 )
 def test_cancel_refunds_only_a_paid_order(order: Order, refunded: list[Refund]) -> None:

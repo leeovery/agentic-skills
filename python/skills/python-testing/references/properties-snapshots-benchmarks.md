@@ -16,13 +16,21 @@ lines = st.builds(
     quantity=st.integers(min_value=1, max_value=10_000),
     unit_minor=st.integers(min_value=0, max_value=10**9),
 )
-orders = st.builds(
-    make_order,
-    customer_id=st.text(min_size=1, max_size=20),
-    status=st.sampled_from(Status),
-    payment_id=st.none() | st.text(min_size=1, max_size=20),
-    lines=st.lists(lines, min_size=1, max_size=5).map(tuple),
-)
+
+
+def orders_in(status: Status) -> st.SearchStrategy[Order]:
+    """Orders in status, each with any payment id the status allows."""
+    payment_ids = st.text(min_size=1, max_size=20)
+    return st.builds(
+        make_order,
+        customer_id=st.text(min_size=1, max_size=20),
+        status=st.just(status),
+        payment_id=st.none() if status is Status.PENDING else st.none() | payment_ids,
+        lines=st.lists(lines, min_size=1, max_size=5).map(tuple),
+    )
+
+
+orders = st.sampled_from(Status).flatmap(orders_in)
 
 
 @given(first=orders, then=orders)

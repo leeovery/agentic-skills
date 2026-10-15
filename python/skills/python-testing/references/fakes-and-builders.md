@@ -30,18 +30,27 @@ def make_order(
     payment_id: str | None = None,
     lines: tuple[Line, ...] | None = None,
 ) -> Order:
-    """A pending order of one line, unless told otherwise."""
+    """A pending order of one line, unless told otherwise.
+
+    One whose status says it's paid has the payment pay-1, unless given another,
+    and a cancelled one was cancelled at NOW, for its customer.
+    """
+    if payment_id is None and status.paid:
+        payment_id = "pay-1"
+    cancelled = status is Status.CANCELLED
     return Order(
         id=OrderId(order_id),
         customer_id=CustomerId(customer_id),
         status=status,
         lines=(make_line(),) if lines is None else lines,
         payment_id=None if payment_id is None else PaymentId(payment_id),
+        cancelled_at=NOW if cancelled else None,
+        cancel_reason=Reason.CUSTOMER if cancelled else None,
     )
 ```
 
-- **`make_order(status=Status.PAID, payment_id="pay-1")` reads as the case it builds.** A literal with every field hides the one that matters among those that don't.
-- **Keyword-only, and every default valid.** The value passes the type's own checks (`Order` refuses an order with no lines), so a test that doesn't mention a field never trips on it.
+- **`make_order(status=Status.PAID)` reads as the case it builds.** A literal with every field hides the one that matters among those that don't.
+- **Keyword-only, and every default valid, whatever else the test asks for.** The value passes the type's own checks (`Order` refuses an order with no lines, a paid one with no payment id, a cancelled one with no time or reason), so a test that doesn't mention a field never trips on it: a paid or shipped order gets `pay-1` unless the test names another, and a cancelled one `NOW` and the customer's reason. A test of a refusal breaks a valid value on purpose, `copy.replace(make_order(status=Status.PAID), payment_id=None)`.
 - **A default stands in for `None` alone, never through `or`.** `make_order(lines=())` must reach `Order`, so the test of its refusal tests something; `lines or ...` would swap the empty tuple for a line, and that test would pass by building a valid order.
 - **Plain strings in, typed values out.** The builder wraps `OrderId` and `PaymentId`, so tests write `"pay-1"`.
 - **Each test builds its own value.** A module-level `PAID_ORDER` that tests share is fine only while it's frozen; a fixture returning one hides it in another file.
@@ -109,23 +118,24 @@ class FakeOrders:
 
 @dataclass(slots=True)
 class FakeRefunder:
-    """A Refunder that records each refund, once per key, and raises error, when it's set."""
+    """A Refunder that records each refund it makes, once per key, or raises error, if set."""
 
     refunded: list[Refund] = field(default_factory=list)
     error: Exception | None = None
 
     def refund(self, refund: Refund) -> None:
-        """Record the refund, once per key as the provider makes it, then raise error, if set."""
-        if all(made.key != refund.key for made in self.refunded):
-            self.refunded.append(refund)
+        """Raise error, if set; or record the refund, once per key as the provider makes it."""
         if self.error is not None:
             raise self.error
+        if all(made.key != refund.key for made in self.refunded):
+            self.refunded.append(refund)
 ```
 
 - **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, and its claim refuses with `NotCancellable` what the SQLite store's conditional `UPDATE` refuses, asking the same `status.cancellable`, so the code under test meets the same exceptions in a test as in production. Inside its transaction it refuses a call to itself with the `OperationalError` SQLite raises, through `_begin`, so code that writes past the transaction's writer fails in a test as it does in production. The methods left out above, the other consumers' queries and the transaction, answer as the real store does too, and `tests/order/test_fakes.py` checks the refusals and the queries' order against what `test_sqlite.py` checks of the real store ([python-protocols](../../python-protocols/SKILL.md)).
 - **It doesn't inherit from the Protocol.** It matches it by shape, and pyrefly checks the match where the test passes it to `Canceller`. A Protocol method the fake lacks fails the type check, not a test run.
 - **Check what it recorded as a value:** `assert payments.refunded == [PAID_IN_FULL]`, the `Refund` of £25 to `pay-1` under the key `cancel-o-1`. Check the order or the number of calls only when they are the behaviour.
 - **It keeps the Protocol's promises and holds no other logic.** `FakeRefunder` records one refund per key because `Refunder` promises a second does nothing, so a test of a cancel run twice sees whether both runs used one key. Once a fake needs logic past its promises, a memory implementation that lives beside the real one is the better tool ([python-protocols](../../python-protocols/SKILL.md)).
+- **It records only what happened.** `FakeRefunder` raises the error it was given before it records anything, as a provider that refuses a refund makes none, and `FakeCanceller` the same. A fake that records first tells the test a refund went back that never did.
 - **It's mutable**, unlike the domain's values: a fake is test equipment that collects what happened.
 
 An operation that holds another, as the sweeper and the withdrawer hold a `Cancels`, gets a fake of that one method, so its tests check what it asked for and none of the canceller's own steps:
@@ -134,20 +144,21 @@ An operation that holds another, as the sweeper and the withdrawer hold a `Cance
 # tests/order/fakes.py
 @dataclass(slots=True)
 class FakeCanceller:
-    """A Cancels that records each cancel, and raises the error the test set for its order."""
+    """A Cancels that records each cancel it makes, or raises the error set for its order."""
 
     errors: dict[OrderId, Exception] = field(default_factory=dict)
     cancelled: list[tuple[OrderId, Reason]] = field(default_factory=list)
 
     def cancel(self, order_id: OrderId, *, reason: Reason) -> Order:
-        """Record the cancel, then raise the order's error, or return it cancelled."""
-        self.cancelled.append((order_id, reason))
+        """Raise the error set for the order, if any; or record the cancel, and return it cancelled."""
         if order_id in self.errors:
             raise self.errors[order_id]
-        return make_order(order_id=order_id, status=Status.CANCELLED)
+        self.cancelled.append((order_id, reason))
+        cancelled = make_order(order_id=order_id, status=Status.CANCELLED)
+        return copy.replace(cancelled, cancel_reason=reason)
 ```
 
-`FakeCanceller(errors={OrderId("o-2"): NotCancellable(OrderId("o-2"), Status.SHIPPED)})` stands for an order that shipped after the sweep found it, and `canceller.cancelled == [(OrderId("o-1"), Reason.FRAUD)]` says what the sweeper asked.
+`FakeCanceller(errors={OrderId("o-2"): NotCancellable(OrderId("o-2"), Status.SHIPPED)})` stands for an order that shipped after the sweep found it, and `canceller.cancelled == [(OrderId("o-1"), Reason.FRAUD)]` says what the sweeper had cancelled. A cancel that raised isn't in it, as none was made.
 
 ## An async fake
 
@@ -223,7 +234,8 @@ def answers(
 def test_refund_posts_the_amount_under_the_callers_key() -> None:
     handler, sent = answers(httpx2.Response(201))
 
-    gateway(handler).refund(REFUND)
+    with gateway(handler) as payments:
+        payments.refund(REFUND)
 
     [request] = sent
     assert request.method == "POST"
@@ -233,7 +245,7 @@ def test_refund_posts_the_amount_under_the_callers_key() -> None:
 ```
 
 - **The handler is the provider.** `answers` gives each answer in turn, as the provider would: a 201, a 402, a 503, or an `httpx2.ConnectError` it raises for a provider that can't be reached. It keeps each request it was sent, for the test to read.
-- **`gateway(handler)` builds the adapter on a client over that transport,** its retry policy on a fake clock that never waits ([time.md](time.md)).
+- **`gateway(handler)` opens the adapter on a client over that transport, in a `with`,** so the client closes when the test's block ends, as production code closes what it opens ([python-concurrency](../../python-concurrency/SKILL.md)). Its retry policy runs on a fake clock that never waits ([time.md](time.md)).
 - **Test the translation** as well as the happy path: a refused refund raises `PaymentFailed` with the payment's id, its `__cause__` the `httpx2.HTTPStatusError`.
 - **An `AsyncClient` takes the same transport,** and the test closes it with `async with`:
 
