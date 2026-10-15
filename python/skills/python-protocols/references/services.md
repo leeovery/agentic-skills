@@ -16,7 +16,38 @@ src/shop/cli.py                the wiring: builds the client and the policy, pic
 
 ## The Protocol
 
-Domain types in and out: the order package's `Refund`, made of a `PaymentId`, `Money` and an `IdempotencyKey`, and its exceptions. No `httpx2.Response`, vendor dict or request model appears in it. Once the vendor's names are in the signature, the Protocol is the SDK by another name, and replacing the vendor rewrites every caller.
+Domain types in and out: the order package's `Refund`, made of a `PaymentId`, `Money` and an `IdempotencyKey`, and its exceptions:
+
+```python
+# src/shop/order/cancel.py
+IdempotencyKey = NewType("IdempotencyKey", str)
+
+
+...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Refund:
+    """Money going back to a payment, under a key the caller derives from the work.
+
+    The provider refunds once per key, so a retry of the same work refunds once,
+    and two refunds of one payment, for two reasons, each happen.
+    """
+
+    payment_id: PaymentId
+    amount: Money
+    key: IdempotencyKey
+
+
+class Refunder(Protocol):
+    """What refunds a payment, raising PaymentFailed when it can't."""
+
+    def refund(self, refund: Refund) -> None:
+        """Make the refund. A second refund under the same key does nothing."""
+        ...
+```
+
+No `httpx2.Response`, vendor dict or request model appears in `Refunder`. Once the vendor's names are in the signature, the Protocol is the SDK by another name, and replacing the vendor rewrites every caller.
 
 ## The adapter
 

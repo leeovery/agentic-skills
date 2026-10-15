@@ -34,25 +34,6 @@ A Protocol belongs to the code that calls it, and it exists to be swapped: in `m
 
 ```python
 # src/shop/order/cancel.py: the consumer declares what it calls.
-IdempotencyKey = NewType("IdempotencyKey", str)
-
-
-...
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Refund:
-    """Money going back to a payment, under a key the caller derives from the work.
-
-    The provider refunds once per key, so a retry of the same work refunds once,
-    and two refunds of one payment, for two reasons, each happen.
-    """
-
-    payment_id: PaymentId
-    amount: Money
-    key: IdempotencyKey
-
-
 class Refunder(Protocol):
     """What refunds a payment, raising PaymentFailed when it can't."""
 
@@ -93,14 +74,10 @@ class FakeRefunder:
     error: Exception | None = None
 
     def refund(self, refund: Refund) -> None:
-        """Record the refund, once per key as the provider makes it, then raise error, if set."""
-        if all(made.key != refund.key for made in self.refunded):
-            self.refunded.append(refund)
-        if self.error is not None:
-            raise self.error
+        ...
 ```
 
-No class names `Refunder`. A `refund` that drifts from it fails `pyrefly check` at the line that passes the `Gateway`, naming the parameter that no longer fits.
+No class names `Refunder`. A `refund` that drifts from it fails `pyrefly check` at the line that passes the `Gateway`, naming the parameter that no longer fits. `Refund`, the value it takes, is in [services.md](references/services.md#the-protocol), and the fake whole in [python-testing](../python-testing/SKILL.md).
 
 ## Decision table
 
