@@ -32,32 +32,18 @@ A report needs the cancellation rate that a summary already shows, and the summa
 
 ```python
 # ❌ src/shop/summary.py, before: the rule and its wording, inline
-"""A day's orders, summed up for the person running the shop."""
-
-from collections.abc import Sequence
-
-from shop.order.order import Order, Status
-
-
 def headline(orders: Sequence[Order]) -> str:
     """How many of the day's orders were cancelled."""
     cancelled = sum(1 for order in orders if order.status is Status.CANCELLED)
     return f"cancelled {100 * cancelled / len(orders):.1f}%"
 ```
 
-Copying this into the report makes two owners, and the first fix lands in one of them. This one already has a bug: on a day with no orders it raises `ZeroDivisionError`. python-quality's wording guard reports its last line, `src/shop/summary.py:11: words a value with a format spec: call shop.display`.
+Copying this into the report makes two owners, and the first fix lands in one of them. This one already has a bug: on a day with no orders it raises `ZeroDivisionError`. python-quality's wording guard reports its last line: `words a value with a format spec: call shop.display`.
 
 Lifted, the rule moves to `shop.order`, the wording to `shop.display`, and each caller shrinks to a call:
 
 ```python
 # src/shop/order/ratios.py
-"""Figures worked out over many orders."""
-
-from collections.abc import Collection
-
-from shop.order.order import Order, Status
-
-
 def cancel_ratio(orders: Collection[Order]) -> float:
     """The share of orders cancelled, from 0 to 1: 0 when there are none."""
     if not orders:
@@ -78,13 +64,6 @@ def percent(ratio: float) -> str:
 
 ```python
 # tests/order/test_ratios.py
-"""Figures over many orders, at their edges: none, and all of one kind."""
-
-from shop.order.order import Status
-from shop.order.ratios import cancel_ratio
-from tests.order.builders import make_order
-
-
 def test_the_cancel_ratio_of_no_orders_is_zero() -> None:
     assert cancel_ratio([]) == 0
 
