@@ -4,13 +4,14 @@
 
 **Opinionated development skills for AI coding agents**
 
-How I build Laravel, Nuxt and Go applications, refined over 20 years in the industry,
+How I build Laravel, Nuxt, Go and Python applications, refined over 20 years in the industry,
 <br>packaged as skills for any agent that reads the SKILL.md format.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Laravel](https://img.shields.io/badge/plugin-Laravel-FF2D20.svg)](laravel/)
 [![Nuxt](https://img.shields.io/badge/plugin-Nuxt-00DC82.svg)](nuxt/)
 [![Go](https://img.shields.io/badge/plugin-Go-00ADD8.svg)](go/)
+[![Python](https://img.shields.io/badge/plugin-Python-3776AB.svg)](python/)
 [![Agents: Claude Code | Codex | Cursor](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Cursor-lightgrey.svg)](#installation)
 
 [Plugins](#plugins) · [Installation](#installation) · [How a Skill Loads](#how-a-skill-loads) · [Contributing](#contributing) · [Related](#related)
@@ -35,6 +36,7 @@ Each plugin is a set of skills for one framework or language: how the code is st
 | [**laravel**](laravel/) | Laravel development: action-oriented architecture, strict typing, DTOs, and maintainability | 22 skills |
 | [**nuxt**](nuxt/) | Nuxt 4 + Vue 3: domain-driven, type-safe, composable-first architecture | 18 skills |
 | [**go**](go/) | Go: standard library first, small packages by concern, named types, errors handled once | 8 skills |
+| [**python**](python/) | Python 3.14: uv for everything, strict types as a gate, frozen values, Protocols as seams, nothing at import | 9 skills |
 
 Each plugin's README lists its skills.
 
@@ -52,6 +54,7 @@ You're asked which plugins to install. Or install one directly:
 npx agntc@latest add leeovery/agentic-skills/laravel
 npx agntc@latest add leeovery/agentic-skills/nuxt
 npx agntc@latest add leeovery/agentic-skills/go
+npx agntc@latest add leeovery/agentic-skills/python
 ```
 
 Update or remove them later:
@@ -71,6 +74,7 @@ The plugins also install with the [Vercel skills](https://github.com/vercel-labs
 npx skills add leeovery/agentic-skills/laravel
 npx skills add leeovery/agentic-skills/nuxt
 npx skills add leeovery/agentic-skills/go
+npx skills add leeovery/agentic-skills/python
 ```
 
 ## How a Skill Loads
