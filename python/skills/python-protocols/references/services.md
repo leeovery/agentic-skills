@@ -219,6 +219,18 @@ Against `httpx2.MockTransport`, so the test sees the request the provider would 
 
 ```python
 # tests/payments/test_gateway.py
+REFUND = Refund(
+    payment_id=PaymentId("pay-1"),
+    amount=Money(minor=1000, currency=Currency.GBP),
+    key=IdempotencyKey("cancel-o-1"),
+)
+
+type Handler = Callable[[httpx2.Request], httpx2.Response]
+
+
+...
+
+
 def answers(
     *responses: httpx2.Response | httpx2.HTTPError,
 ) -> tuple[Handler, list[httpx2.Request]]:

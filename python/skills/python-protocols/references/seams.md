@@ -79,7 +79,7 @@ def gateway(handler: Handler, time: FakeTime | None = None) -> Generator[Gateway
         yield Gateway(client=client, retry=retry)
 ```
 
-No test sleeps, and each asserts the exact waits. Waits inside asyncio are [python-concurrency](../../python-concurrency/SKILL.md)'s.
+No test sleeps, and each asserts the exact waits. Waits inside asyncio are [python-concurrency](../../python-concurrency/SKILL.md)'s. `Handler` is `Callable[[httpx2.Request], httpx2.Response]`, the mock transport's answer to each request ([services.md](services.md)).
 
 ## The environment
 

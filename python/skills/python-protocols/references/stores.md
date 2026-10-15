@@ -283,6 +283,8 @@ class SqliteTransaction:
         ...
 ```
 
+`_read` loads one order and its lines inside the caller's transaction, and `_row` and `_line_rows` give an order's rows: the mapping each way stays in the store, as [rows stay inside](#rows-stay-inside) has it. `SCHEMA` creates the two `STRICT` tables, `orders` and `lines`, where they're missing.
+
 - **The store's own `save` is one write in a transaction of its own,** so a consumer whose writes stand alone, as the canceller's claim and save do, declares `save` and calls it. Only a consumer that writes several things declares `transaction()`.
 - **A transaction doesn't nest.** SQLite refuses a `BEGIN` inside another, so the store's own `save`, `get` or `start_cancelling` called in the block raises `OperationalError: cannot start a transaction within a transaction` and the block rolls back, rather than commit part way. Every write in the block goes through the writer, which holds the connection and opens nothing; a read the block needs comes before it.
 - **The connection is opened with `autocommit=True`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)): a statement outside a transaction is a transaction of its own, and one that spans statements is an explicit `BEGIN` and `COMMIT`. Under `autocommit=False` one is always open, so a read leaves its lock behind, and another connection's write fails with `database is locked` until the reader next commits.
