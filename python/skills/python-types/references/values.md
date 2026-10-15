@@ -24,6 +24,12 @@ PaymentId = NewType("PaymentId", str)
 An amount is a count of a currency's minor unit, such as pence, held as an `int`:
 
 ```python
+# [0-9], not \d, which takes any script's digits.
+AMOUNT = re.compile(
+    r"(?P<sign>-?)(?P<units>[0-9]+)\.(?P<cents>[0-9]{2}) (?P<code>[A-Z]{3})"
+)
+
+
 @unique
 class Currency(StrEnum):
     """A currency the shop sells in, by its ISO 4217 code. Each has two decimal places."""
@@ -42,15 +48,18 @@ class Money:
 
     @classmethod
     def parse(cls, text: str) -> Self:
-        """Read an amount written as "12.50 GBP": two decimals, a space, the code."""
-        amount, _, code = text.partition(" ")
-        try:
-            number, currency = Decimal(amount), Currency(code)
-        except InvalidOperation, ValueError:
-            raise ValueError(f"{text!r} is not an amount like '12.50 GBP'") from None
-        if number.as_tuple().exponent != -2:
+        """Read an amount written as "12.50 GBP", or "-12.50 GBP" for a refund.
+
+        Digits, a point, two decimals, one space and a currency's code, and nothing
+        else: no "+", no separators, no exponent.
+        """
+        found = AMOUNT.fullmatch(text)
+        if found is None or found["code"] not in Currency:
             raise ValueError(f"{text!r} is not an amount like '12.50 GBP'")
-        return cls(minor=int(number.scaleb(2)), currency=currency)
+        minor = int(found["units"]) * 100 + int(found["cents"])
+        return cls(
+            minor=-minor if found["sign"] else minor, currency=Currency(found["code"])
+        )
 
     def __add__(self, other: Money) -> Money:
         if other.currency != self.currency:
@@ -73,24 +82,24 @@ class Money:
 
 - **Never a `float`.** `0.1 + 0.2 != 0.3`, and a total that's out by a penny is a refund that doesn't match its payment.
 - **Amounts add only within one currency;** across two, it raises. It multiplies only by an `int`, a quantity.
-- **Dividing goes through `split`,** which hands the pennies left over to the first parts, so the parts always sum to the whole. A rate, such as a 15% discount, is a function that does its arithmetic in integers and states how it rounds.
+- **Dividing goes through `split`,** which hands the pennies left over to the first parts, so the parts sum to the whole, which a property test checks for any amount and any number of parts. A rate, such as a 15% discount, is a function that does its arithmetic in integers and states how it rounds.
 - **`sum` needs a start:** `0 + Money` fails, so `Order.total` starts from its first line.
-- **`Decimal` only to read text,** as `parse` does, never as a field: the domain's arithmetic stays in integers.
+- **`parse` matches the whole text against one pattern,** `AMOUNT`, written for exactly the form its docstring gives. `Decimal(text)` would also take `1_000.00`, `12E-2`, `+12.50` and `.50`, and `\d` matches any script's digits. Its tests try each of those, and a property writes amounts of every size out and reads them back. No `Decimal` as a field either: the domain's arithmetic stays in integers.
 - **How an amount reads to people** ("1,234.50 GBP") is `shop.display.money`'s job ([python-architecture](../../python-architecture/SKILL.md)). How it's stored or sent is the format's own encoder: here, `minor` and `currency` as two fields ([boundaries.md](boundaries.md)).
 - **A currency with other than two decimals** (yen has none) needs the digits on `Currency`, and display and `parse` reading them. The shop sells in none, so it doesn't carry them.
 
 ## Time
 
-- **An instant is an aware `datetime` in UTC.** Code that needs the time takes `now: Callable[[], datetime]`; `main` passes `partial(datetime.now, UTC)`, and a test passes a fixed instant ([python-protocols](../../python-protocols/SKILL.md)). ruff's `DTZ` reports a naive `now()`, `today()`, `fromtimestamp()` or `strptime()`, and the drop-in bans `datetime.now` outside `shop/cli.py`.
+- **An instant is an aware `datetime` in UTC.** Code that needs the time takes `now: Callable[[], datetime]`; `main` passes `partial(datetime.now, UTC)`, and a test passes a fixed instant ([python-protocols](../../python-protocols/SKILL.md)). ruff's `DTZ` reports a naive `now()`, `today()`, `fromtimestamp()` or `strptime()`, and the drop-in bans `datetime.now` outside `shop/cli.py` and `shop/processes.py`, whose lift is for `subprocess`.
 - **Convert at the edge:** an aware value from outside becomes UTC with `.astimezone(UTC)` in the mapper. A naive one is refused there, not guessed at: pydantic's `AwareDatetime` refuses it ([boundaries.md](boundaries.md)).
 - **A span is a `timedelta`,** never an `int` of seconds. Where a format forces a number, its field names the unit (`timeout_seconds`) and the mapper converts it. `Settings` reads `SHOP_GATEWAY_TIMEOUT` as an ISO 8601 duration, `PT10S`.
 - **A calendar day is a `date`,** taken from an instant in a named zone: `now().astimezone(ZoneInfo("Europe/London")).date()`. Which day it is depends on where; `date.today()` asks the machine (`DTZ011`).
 
 ## Values with rules
 
-A rule the type can't say is checked when the value is built, so an invalid one can't exist:
+A rule the type can't say is checked when the value is built, so every value built keeps it:
 
-- **`__post_init__`** when the fields are already typed and the rule is about them: an order has at least one line. `Order` checks it, in the [SKILL.md](../SKILL.md#pattern) pattern.
+- **`__post_init__`** when the fields are already typed and the rule is about them: an order has at least one line, all priced in one currency, and a line a quantity of at least one at a price of zero or more. `Order` and `Line` check them, in the [SKILL.md](../SKILL.md#pattern) pattern. A rule nothing checks holds nowhere: the export's lines and the reorder's prices reach `Order` from outside, and its `total` would raise on two currencies.
 - **A `parse` classmethod** when the value is read from text: `Money.parse("12.50 GBP")`. It returns `Self`, raises `ValueError` naming the text and the shape it wanted, and hands typed fields to the constructor.
 - **`copy.replace(order, status=Status.CANCELLED)`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) is how a value changes: it builds a new one through `__init__`, so `__post_init__` runs again, and `copy.replace(order, lines=())` raises. It works on any dataclass, named tuple or `datetime`; `dataclasses.replace` only on dataclasses.
 - **No `__init__` by hand.** A default goes on the field; a derived value is a `@property` (`Order.total`), computed when read, never a field that can disagree with the others.

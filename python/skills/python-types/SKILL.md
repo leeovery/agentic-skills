@@ -12,7 +12,7 @@ A value's type says what it is: an id, an amount, a status. Wire shapes stop at 
 1. **Every signature is annotated, and `Any` appears only where a value really is anything.** *An unannotated parameter is `Any` to the checker, so every mistake that flows through it passes.* Held by ruff's `ANN` and `ANN401`, and pyrefly strict, which reports each implicit `Any`.
 2. **Ids and measures are their own types.** `OrderId = NewType("OrderId", str)`. Money is an integer count of minor units in a `Money`, never a `float`. An instant is an aware `datetime` in UTC, and a span a `timedelta`. *Swapped `customer_id, order_id` arguments pass as two strings, and pyrefly refuses them as `CustomerId` and `OrderId`; a float can't hold 0.10 exactly; a naive `datetime` reads one wall clock as another.* Held by pyrefly, and ruff's `DTZ`.
 3. **Two parameters of one type, or a `bool`, are keyword-only,** after a `*`. Three or more related values travel as an input dataclass. *`ship(order, True)` says nothing at the call, and two positional ids swap silently.* Held by ruff's `FBT001` to `FBT003`; `PLR0913` stops a signature past five parameters.
-4. **A value is `@dataclass(frozen=True, slots=True, kw_only=True)`.** One with rules checks them in `__post_init__`, or in a `parse` classmethod when it's read from text, so an invalid one can't exist. Collections inside are tuples and frozensets, as frozen is shallow, and a changed value is a new one from `copy.replace` ([3.13](https://docs.python.org/3/whatsnew/3.13.html)). *A value nothing can change is safe to share, and `copy.replace` runs `__post_init__` again, so every copy keeps the rules.*
+4. **A value is `@dataclass(frozen=True, slots=True, kw_only=True)`.** One with rules checks them in `__post_init__`, or in a `parse` classmethod when it's read from text, so every value built keeps them, and each rule has a test that builds a value breaking it. Collections inside are tuples and frozensets, as frozen is shallow, and a changed value is a new one from `copy.replace` ([3.13](https://docs.python.org/3/whatsnew/3.13.html)). *A value nothing can change is safe to share, and `copy.replace` runs `__post_init__` again, so every copy keeps the rules.*
 5. **Parameters take the widest abstract type they use** (`Iterable`, `Sequence`, `Mapping`); **returns are concrete** (`list`, `tuple`, `dict`). *A caller passes a list, a tuple or a generator alike, and gets back something it can index, compare and keep.*
 6. **An enum is a `StrEnum` with explicit values and `@unique`.** A `match` over one ends `case _: assert_never(x)`. Outside strings become members through the edge's parser, which lists the valid values in its error. *Stored and sent values are names that never renumber, and pyrefly names the member a `match` forgot.* Held by pyrefly, through `assert_never` and the drop-in's `non-exhaustive-match`, raised to an error.
 7. **Wire shapes are pydantic models at the edge, `frozen` and with `extra="forbid"`, mapped into the domain's dataclasses by one function per source.** ORM rows, vendor types and wire models never enter the domain. *The domain never bends to a payload, and a format change touches one function.* Held by import-linter, which forbids pydantic, pydantic-settings, httpx2 and typer in the domain packages, `shop.order` and `shop.money` among them.
@@ -55,6 +55,23 @@ class Status(StrEnum):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class Line:
+    """One product on an order, at the price it sold for."""
+
+    sku: str
+    quantity: int
+    unit_price: Money
+
+    def __post_init__(self) -> None:
+        if self.quantity < 1:
+            raise ValueError(f"a line's quantity is at least 1, not {self.quantity}")
+        if self.unit_price.minor < 0:
+            raise ValueError("a line's unit price is zero or more")
+
+    ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Order:
     """A customer's order, from placing it to shipping or cancelling it."""
 
@@ -69,6 +86,8 @@ class Order:
     def __post_init__(self) -> None:
         if not self.lines:
             raise ValueError("an order has at least one line")
+        if len({line.unit_price.currency for line in self.lines}) > 1:
+            raise ValueError("an order's lines are priced in one currency")
 
     ...
 ```

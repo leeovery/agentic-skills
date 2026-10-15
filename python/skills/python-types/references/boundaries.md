@@ -17,8 +17,8 @@ class ExportedLine(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     sku: str
-    quantity: int
-    unit_price: int
+    quantity: int = Field(gt=0)
+    unit_price: int = Field(ge=0)
 
 
 class ExportedOrder(BaseModel):
@@ -40,6 +40,7 @@ class ExportedOrder(BaseModel):
 - **`frozen=True`:** assigning to a field raises `ValidationError`. What was checked stays checked. It's shallow like a dataclass's, so collections are tuples.
 - **Fields are the wire's types,** with the domain's enums where the wire holds one of their values: the model then refuses an unknown status and lists the valid ones ([enums.md](enums.md)). Ids stay `str` here; the mapper makes them `OrderId`.
 - **`AwareDatetime`, never `datetime`,** for a time from outside: plain `datetime` accepts `2026-10-14T09:30:00` with no zone, and nobody knows which wall clock it was.
+- **A rule the domain holds is said in the model too,** `Field(gt=0)` on a quantity and `Field(ge=0)` on a price, so a bad line is reported with every other problem in it, by field. `Line` still checks both, for every other way a line is built.
 - **No defaults on a field the wire must send.** An optional field is `X | None` with no default when the format always writes it, as the export's are, so a line missing it is refused.
 
 ## `strict`
@@ -208,7 +209,7 @@ def test_encode_pins_the_line_format() -> None:
 - **Never through `shop.display`.** If the export called the function that words money for the screen, rewording "25.00 GBP" as "£25.00" would rewrite every file written after it.
 - **Every key is written by name, in order,** so renaming a dataclass field can't rename the file's key, and the encoder fixes the separators and the zone.
 - **The test's input sits in another zone,** so the bytes prove the encoder converts to UTC.
-- **The reader is tested against the writer:** a round trip with every field set, and a sample of the oldest format still on disk.
+- **The reader is tested against the writer:** a round trip with every field set. Once an older format is still on disk somewhere, a sample of it joins the tests.
 - **Long output is a snapshot** ([python-testing](../../python-testing/SKILL.md)); a line format this short is a literal.
 
 ## Secrets at the edge
