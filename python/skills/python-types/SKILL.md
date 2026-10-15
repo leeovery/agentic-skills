@@ -77,7 +77,7 @@ class Order:
     ...
 ```
 
-A status says what else an order holds: a paid or shipped one its payment's id, a pending one none, and a cancelled one, alone, the time and the reason. `Line` holds a `Money`, an integer of minor units and a `Currency`, and asks for a quantity of at least one at a price of zero or more; [values.md](references/values.md) has every rule.
+The `...` after `Status` holds its `paid` property, which `__post_init__` asks and [enums.md](references/enums.md) shows, then `Reason` and `Line`. A status says what else an order holds: a paid or shipped one its payment's id, a pending one none, and a cancelled one, alone, the time and the reason. `Line` holds a `Money`, an integer of minor units and a `Currency`, and asks for a quantity of at least one at a price of zero or more; [values.md](references/values.md) has every rule.
 
 ## Decision table
 

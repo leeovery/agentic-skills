@@ -28,6 +28,20 @@ class Status(StrEnum):
                 return False
             case _:
                 assert_never(self)
+
+    @property
+    def paid(self) -> bool:
+        """Whether an order in this status has been paid for, so holds its payment's id.
+
+        A cancelling or cancelled order may have been paid or not: its payment id says.
+        """
+        match self:
+            case Status.PAID | Status.SHIPPED:
+                return True
+            case Status.PENDING | Status.CANCELLING | Status.CANCELLED:
+                return False
+            case _:
+                assert_never(self)
 ```
 
 - **A member is its value as a string:** `str(Status.PAID)`, an f-string and `json.dumps` all give `paid`, SQLite stores `paid`, and `Status.PAID == "paid"`. A stored or sent value is a name that reads in a log and survives the members being reordered.
