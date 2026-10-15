@@ -78,6 +78,15 @@ class FakeOrders:
         except KeyError:
             raise OrderNotFound(order_id) from None
 
+    def start_cancelling(self, order_id: OrderId) -> Order:
+        """Move the order to CANCELLING and return it, refusing it as the real store does."""
+        order = self.get(order_id)
+        if not order.status.cancellable:
+            raise NotCancellable(order.id, order.status)
+        claimed = copy.replace(order, status=Status.CANCELLING)
+        self.orders[order.id] = claimed
+        return claimed
+
     ...
 
     def save(self, order: Order) -> None:
@@ -90,23 +99,45 @@ class FakeOrders:
 
 @dataclass(slots=True)
 class FakeRefunder:
-    """A Refunder that records each refund and raises error, when it's set."""
+    """A Refunder that records each refund, once per key, and raises error, when it's set."""
 
     refunded: list[Refund] = field(default_factory=list)
     error: Exception | None = None
 
     def refund(self, refund: Refund) -> None:
-        """Record the refund, then raise the error the test set, if any."""
-        self.refunded.append(refund)
+        """Record the refund, once per key as the provider makes it, then raise error, if set."""
+        if all(made.key != refund.key for made in self.refunded):
+            self.refunded.append(refund)
         if self.error is not None:
             raise self.error
 ```
 
-- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, so the code under test meets the same exception in a test as in production. The methods left out above, the other consumers' queries and the transaction, answer as the real store does too ([python-protocols](../../python-protocols/SKILL.md)).
+- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, and its claim refuses with `NotCancellable` what the SQLite store's conditional `UPDATE` refuses, asking the same `status.cancellable`, so the code under test meets the same exceptions in a test as in production. The methods left out above, the other consumers' queries and the transaction, answer as the real store does too ([python-protocols](../../python-protocols/SKILL.md)).
 - **It doesn't inherit from the Protocol.** It matches it by shape, and pyrefly checks the match where the test passes it to `Canceller`. A Protocol method the fake lacks fails the type check, not a test run.
-- **Check what it recorded as a value:** `assert payments.refunded == [Refund(payment_id=PaymentId("pay-1"), amount=Money(minor=2500, currency=Currency.GBP), key="cancel-o-1")]`. Check the order or the number of calls only when they are the behaviour.
-- **It holds no logic of its own.** Once a fake needs some, a memory implementation that lives beside the real one is the better tool ([python-protocols](../../python-protocols/SKILL.md)).
+- **Check what it recorded as a value:** `assert payments.refunded == [PAID_IN_FULL]`, the `Refund` of £25 to `pay-1` under the key `cancel-o-1`. Check the order or the number of calls only when they are the behaviour.
+- **It keeps the Protocol's promises and holds no other logic.** `FakeRefunder` records one refund per key because `Refunder` promises a second does nothing, so a test of a cancel run twice sees whether both runs used one key. Once a fake needs logic past its promises, a memory implementation that lives beside the real one is the better tool ([python-protocols](../../python-protocols/SKILL.md)).
 - **It's mutable**, unlike the domain's values: a fake is test equipment that collects what happened.
+
+An operation that holds another, as the sweeper and the withdrawer hold a `Cancels`, gets a fake of that one method, so its tests check what it asked for and none of the canceller's own steps:
+
+```python
+# tests/order/fakes.py
+@dataclass(slots=True)
+class FakeCanceller:
+    """A Cancels that records each cancel, and raises the error the test set for its order."""
+
+    errors: dict[OrderId, Exception] = field(default_factory=dict)
+    cancelled: list[tuple[OrderId, Reason]] = field(default_factory=list)
+
+    def cancel(self, order_id: OrderId, *, reason: Reason) -> Order:
+        """Record the cancel, then raise the order's error, or return it cancelled."""
+        self.cancelled.append((order_id, reason))
+        if order_id in self.errors:
+            raise self.errors[order_id]
+        return make_order(order_id=order_id, status=Status.CANCELLED)
+```
+
+`FakeCanceller(errors={OrderId("o-2"): NotCancellable(OrderId("o-2"), Status.SHIPPED)})` stands for an order that shipped after the sweep found it, and `canceller.cancelled == [(OrderId("o-1"), Reason.FRAUD)]` says what the sweeper asked.
 
 ## An async fake
 
@@ -153,7 +184,7 @@ The adapter is the one place that knows the provider's HTTP API, so it's tested 
 REFUND = Refund(
     payment_id=PaymentId("pay-1"),
     amount=Money(minor=1000, currency=Currency.GBP),
-    key="cancel-o-1",
+    key=IdempotencyKey("cancel-o-1"),
 )
 
 type Handler = Callable[[httpx2.Request], httpx2.Response]

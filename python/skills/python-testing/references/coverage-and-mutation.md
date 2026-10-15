@@ -19,13 +19,13 @@ src/shop/__main__.py               2      2      0      0     0%   3-5
 src/shop/api.py                   37      4      6      1    84%   83-86
 src/shop/cli.py                   91      4      4      0    96%   179, 185-191
 src/shop/money.py                 32      1      6      1    95%   48
-src/shop/order/order.py           45      2      6      1    94%   32-33
+src/shop/order/order.py           46      2      6      1    94%   34-35
 src/shop/order/refunds.py         35      1      0      0    97%   65
 src/shop/payments/reports.py      28      6      4      0    75%   57-64
 src/shop/processes.py             17      2      0      0    88%   20-21
 src/shop/storage/atomic.py        18      0      2      1    95%   26->exit
 --------------------------------------------------------------------------
-TOTAL                            757     22     78      4    96%
+TOTAL                            770     22     78      4    96%
 
 26 files skipped due to complete coverage.
 ```
@@ -41,7 +41,7 @@ Each entry in `Missing` is a question, and the answer is one of four things: a t
 | `26->exit` in `atomic.py` | the branch at line 26 never went the other way: `if os.name == "posix":` was never false | it runs only on Windows, where no job measures it: leave it |
 | `65` in `refunds.py` | `Tally.report`, which nothing calls | a test is missing, or the method is |
 | `48` in `money.py`, `83-86` in `api.py`, `20-21` in `processes.py` | a split into no parts; the 502 and 500 answers; `ProcessRunner.which` | tests are missing, each a few lines |
-| `32-33` in `order.py` | the `case _: assert_never(self)` arm | unreachable by design, and the type checker proves it: leave it |
+| `34-35` in `order.py` | the `case _: assert_never(self)` arm | unreachable by design, and the type checker proves it: leave it |
 | `57-64` in `reports.py` | the body of `report_totals`, run in worker processes | coverage can't see it yet: below |
 | `179`, `185-191` in `cli.py` | the wiring that enters asyncio and opens a real `AsyncClient` | runs only against the real provider; the parts it wires are tested apart |
 | `3-5` in `__main__.py` | `raise SystemExit(main())` | run by hand; `main` itself is tested |
@@ -99,4 +99,4 @@ The cheap version, for one change you've just made:
 3. Run the tests for that module: `uv run pytest tests/order/test_cancel.py`.
 4. Revert with `git checkout -- src/shop/order/cancel.py`, then the next. One at a time, never stacked.
 
-Delete `ensure_cancellable(order)` from `Canceller.cancel`, and `test_cancel_refuses_a_shipped_order` fails: the guard is held. A mutation that leaves every test green gets a test that fails on it, written before the revert, and seen to pass after.
+Swap the claim in `Canceller.cancel`, `self.orders.start_cancelling(order_id)`, for a plain `self.orders.get(order_id)`, and `test_cancel_refuses_a_shipped_order` and `test_cancel_leaves_the_order_cancelling_when_the_refund_fails` fail: the claim is held. A mutation that leaves every test green gets a test that fails on it, written before the revert, and seen to pass after.

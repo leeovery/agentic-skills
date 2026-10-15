@@ -24,6 +24,7 @@ A body that branches on a row's fields is several tests sharing one body, and ea
         pytest.param(Status.PENDING, True, id="pending can be cancelled"),
         pytest.param(Status.PAID, True, id="paid can be cancelled"),
         pytest.param(Status.SHIPPED, False, id="shipped can't"),
+        pytest.param(Status.CANCELLING, True, id="cancelling can, to finish"),
         pytest.param(Status.CANCELLED, False, id="cancelled can't"),
     ],
 )

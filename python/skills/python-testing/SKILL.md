@@ -26,19 +26,24 @@ Tests are pytest with plain asserts, a fake for each seam, and a failure that sa
 
 ```python
 # tests/order/test_cancel.py
+# The refund of make_order's two £12.50 mugs, paid as pay-1, keyed by cancelling o-1.
+PAID_IN_FULL = Refund(
+    payment_id=PaymentId("pay-1"),
+    amount=Money(minor=2500, currency=Currency.GBP),
+    key=IdempotencyKey("cancel-o-1"),
+)
+
+
+...
+
+
 @pytest.mark.parametrize(
     ("order", "refunded"),
     [
         pytest.param(make_order(), [], id="cancels a pending order without a refund"),
         pytest.param(
             make_order(status=Status.PAID, payment_id="pay-1"),
-            [
-                Refund(
-                    payment_id=PaymentId("pay-1"),
-                    amount=Money(minor=2500, currency=Currency.GBP),
-                    key="cancel-o-1",
-                )
-            ],
+            [PAID_IN_FULL],
             id="refunds a paid order in full",
         ),
     ],
@@ -55,15 +60,17 @@ def test_cancel_refunds_only_a_paid_order(order: Order, refunded: list[Refund]) 
 
 def test_cancel_refuses_a_shipped_order() -> None:
     orders = FakeOrders.holding(make_order(status=Status.SHIPPED, payment_id="pay-1"))
+    payments = FakeRefunder()
 
     with pytest.raises(NotCancellable) as refused:
-        canceller(orders).cancel(OrderId("o-1"), reason=Reason.CUSTOMER)
+        canceller(orders, payments).cancel(OrderId("o-1"), reason=Reason.CUSTOMER)
 
     assert refused.value.status is Status.SHIPPED
+    assert payments.refunded == []
     assert orders.saved == []
 ```
 
-`make_order`, `FakeOrders` and `FakeRefunder` are in [fakes-and-builders.md](references/fakes-and-builders.md); `canceller` builds a `Canceller` over them with its clock stopped at `NOW`. The refusal checks a different thing, so it's a test of its own.
+`make_order`, `FakeOrders` and `FakeRefunder` are in [fakes-and-builders.md](references/fakes-and-builders.md); `canceller` builds a `Canceller` over them with its clock stopped at `NOW`. The refusal checks a different thing, so it's a test of its own. `FakeRefunder` refunds once per key, as the provider does, so a test of a cancel run twice sees one refund in `refunded` only if both runs used the same key.
 
 ## Decision table
 
