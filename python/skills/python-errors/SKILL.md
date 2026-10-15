@@ -40,7 +40,7 @@ class NotCancellable(OrderError):
         self.status = status
 ```
 
-The adapter translates at its boundary, where `_send` makes the request and its retries, and the edge maps what reaches it, in one place:
+The adapter translates at its boundary, and the edge maps what reaches it, in one place:
 
 ```python
 # src/shop/payments/gateway.py, in Gateway.refund
@@ -53,18 +53,11 @@ except httpx2.HTTPError as err:
 ```python
 # src/shop/cli.py
 def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
-    """Run app on argv, and return the exit code for how it ended.
-
-    0 for success, 1 for a failure, 2 for a usage error, 130 for an interrupt.
-    """
+    """Run app on argv, and return the exit code for how it ended."""
     try:
         code = app(args=argv, prog_name="shop", standalone_mode=False)
     except typer.TyperException as err:
         ...
-    except typer.Abort:
-        # A prompt declined, or its input closed with Ctrl-D.
-        typer.echo("shop: aborted", err=True)
-        return 1
     except (SettingsError, OrderError, SettlementError) as err:
         typer.echo(f"shop: {_said(err)}", err=True)
         return 1
@@ -80,7 +73,7 @@ def _said(err: Exception) -> str:
     return "\n".join([str(err), *notes])
 ```
 
-A `SettingsError`, an `OrderError` or a `SettlementError` is an outcome the user reads, printed once with its notes and no traceback. Anything else is a bug, logged once with its traceback: a pydantic `ValidationError` too, as the wiring turns the settings' into `SettingsError` and an edge turns its input's into an answer of its own. So an outcome the user must be told is a domain exception, as a reorder with nothing still on sale raises `OrderError`; a builtin such as `ValueError` is for a bug, or a value refusing its own rule.
+A `SettingsError`, an `OrderError` or a `SettlementError` is an outcome the user reads, printed once with its notes and no traceback. Anything else is a bug, logged once with its traceback. So an outcome the user must be told is a domain exception; a builtin such as `ValueError` is for a bug, or a value refusing its own rule.
 
 ## Decision table
 
