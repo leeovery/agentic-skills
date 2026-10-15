@@ -152,7 +152,7 @@ class Secret:
 - **`TypeIs[X]`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) is the return type of a predicate that narrows: `def is_order(value: object) -> TypeIs[Order]`. It narrows both branches, where `TypeGuard` narrows only the true one, and a plain `bool` narrows neither.
 - **`@override`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)) goes on every method that overrides a parent's; pyrefly strict reports a missing one as `missing-override-decorator`, so a renamed parent method can't leave an orphan behind. It doesn't ask for one on `__repr__`, `__str__` or `__eq__` overriding `object`'s.
 - **A generic earns its place** when one body serves several types: `def first[T](items: Sequence[T]) -> T` ([3.12](https://docs.python.org/3/whatsnew/3.12.html)), never `TypeVar("T")`. A domain type is never generic for one use.
-- **A `type` alias** names a long annotation once: `type Wiring = Callable[[], AbstractContextManager[Deps]]` in `shop/cli.py`.
+- **A `type` alias** names a long annotation once: `type Settle = Callable[[Iterable[PaymentId]], list[PaymentId]]` in `shop/cli.py`.
 - **`cast`** is a claim the checker takes on trust: narrow with `isinstance`, a mapper or `TypeIs` instead, and where nothing else will do, say why on the line.
 
 ## Checklist
