@@ -69,7 +69,7 @@ if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
 ```
 
-- **The shebang** makes `./gateway_status.py https://pay.example` work on any machine with uv: `env -S` splits `uv run --script` into its words, and uv builds the environment the block declares, cached after the first run. `uv run gateway_status.py` works too.
+- **The shebang** makes `./gateway_status.py https://pay.example` work on any machine with uv: `env -S` splits `uv run --script` into its words, and uv builds the environment the block declares.
 - **The block is the whole project.** Inside a project's tree, `uv run` gives the script only what its block lists, never the project's dependencies.
 - **`main` returns the code and the last line exits with it,** the same shape as a project's `main` ([python-architecture](../../python-architecture/SKILL.md)): 0, 1 for a failure, 2 for usage.
 - **`requires-python`** in the block picks the interpreter, as it does for a project.
@@ -82,7 +82,7 @@ uv run --locked --script gateway_status.py https://pay.example
 ```
 
 - **A script that others run gets a lock,** committed beside it. `uv add --script` then updates both, and `uv run --locked --script` fails when the block and the lock disagree, as `uv sync --locked` does for a project.
-- **`exclude-newer` in the block's `[tool.uv]`** gives the script the project's week-long cooldown ([uv.md](uv.md)). The script's lock records it as a span, as a project's does.
+- **`exclude-newer` in the block's `[tool.uv]`** gives the script the project's week-long cooldown ([uv.md](uv.md)).
 - **A throwaway script needs neither.** Its lower bounds and `requires-python` are enough to run it again next week.
 
 ## Where it lives

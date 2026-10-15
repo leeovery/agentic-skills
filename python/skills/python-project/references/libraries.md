@@ -10,7 +10,7 @@ Contents: starting one · its surface · its Pythons · its dependencies · its 
 uv init --lib --python 3.11 shop-client
 ```
 
-It writes what `--package` does, with no `[project.scripts]`, and adds `src/shop_client/py.typed`: the [PEP 561](https://peps.python.org/pep-0561/) marker that tells type checkers to read the package's own annotations. Without it, a checker that follows PEP 561, mypy among them, treats the library as untyped, and reports each import of it as `import-untyped`. `uv_build` ships it in the wheel with no configuration; `unzip -l dist/*.whl` shows it after a build.
+It writes what `--package` does, with no `[project.scripts]`, and adds `src/shop_client/py.typed`: the [PEP 561](https://peps.python.org/pep-0561/) marker that tells type checkers to read the package's own annotations. Without it, mypy reports each import of the library as `import-untyped`. `uv_build` ships it in the wheel with no configuration.
 
 ## Its surface
 
@@ -34,7 +34,7 @@ done
 ## Its dependencies
 
 - **Lower bounds, never pins.** `uv add httpx2` writes `httpx2>=2.13.1`. A library pinned to `httpx2==2.13.1` can't be installed beside anything that needs 2.13.2, and its users can't take a security fix until you release.
-- **No upper bound** (`<3`) unless a release is known to break you; then the cap names it, with why, and goes when you've adapted. A cap set "just in case" blocks users from releases that would have worked.
+- **No upper bound** (`<3`) unless a release is known to break you; then the cap names it, with why, and goes when you've adapted. A cap "just in case" blocks releases that would have worked.
 - **Test the lower bounds,** or they're guesses. In CI:
 
 ```sh
@@ -60,7 +60,7 @@ license-files = ["LICENSE"]
 ## Its version
 
 - **`[project] version` is the only copy.** `uv version --bump minor` (or `patch`, `major`) raises it; `--dry-run` shows the result first.
-- **Code that needs it asks the installed metadata,** by the distribution's name: `importlib.metadata.version("shop-client")`, called where it's used. No `__version__ = "0.4.0"` beside it, which drifts at the first release that forgets it; no `__version__ = version(...)` at module level either, which runs at import.
+- **Code that needs it asks the installed metadata,** by the distribution's name: `importlib.metadata.version("shop-client")`, called where it's used. No `__version__` literal, which drifts, and no `__version__ = version(...)` at module level, which runs at import.
 
 ## Building
 
