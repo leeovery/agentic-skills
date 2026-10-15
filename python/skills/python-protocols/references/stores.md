@@ -203,6 +203,7 @@ def _transaction(db: sqlite3.Connection, *, writes: bool) -> Generator[None]:
     """Run the block in one transaction: committed when it ends, rolled back if it raises.
 
     SQLite refuses a BEGIN inside another, so a transaction can't nest unseen.
+    What the block raised goes on as it was, with a failed rollback as a note.
     """
     # One that writes takes the write lock as it begins, so a second writer
     # waits its turn rather than failing as it turns a read into a write.
@@ -210,11 +211,14 @@ def _transaction(db: sqlite3.Connection, *, writes: bool) -> Generator[None]:
     try:
         yield
         db.execute("COMMIT")
-    except BaseException:
+    except BaseException as err:
         # A COMMIT that fails, as when another connection holds the file, leaves
         # the transaction open; one SQLite ended itself has nothing to roll back.
         if db.in_transaction:
-            db.execute("ROLLBACK")
+            try:
+                db.execute("ROLLBACK")
+            except sqlite3.Error as failure:
+                err.add_note(f"rolling back failed too: {failure!r}")
         raise
 
 
@@ -236,6 +240,24 @@ class SqliteOrders:
         """Write the order and its lines in one transaction, replacing any under its id."""
         with self.transaction() as tx:
             tx.save(order)
+
+    def add(self, order: Order) -> Order:
+        """Write the order unless one has its id, and return the one stored under it.
+
+        The write is the check: an INSERT that does nothing where the id is taken,
+        so a second add of the id, as from a request sent twice, keeps the first.
+        """
+        with _transaction(self.db, writes=True):
+            added = self.db.execute(
+                "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (id) DO NOTHING",
+                _row(order),
+            ).rowcount
+            if added:
+                self.db.executemany(
+                    "INSERT INTO lines VALUES (?, ?, ?, ?, ?)", _line_rows(order)
+                )
+            return self._read(order.id)
 
     @contextmanager
     def transaction(self) -> Generator[SqliteTransaction]:
@@ -264,6 +286,9 @@ class SqliteTransaction:
 - **The store's own `save` is one write in a transaction of its own,** so a consumer whose writes stand alone, as the canceller's claim and save do, declares `save` and calls it. Only a consumer that writes several things declares `transaction()`.
 - **A transaction doesn't nest.** SQLite refuses a `BEGIN` inside another, so the store's own `save`, `get` or `start_cancelling` called in the block raises `OperationalError: cannot start a transaction within a transaction` and the block rolls back, rather than commit part way. Every write in the block goes through the writer, which holds the connection and opens nothing; a read the block needs comes before it.
 - **The connection is opened with `autocommit=True`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)): a statement outside a transaction is a transaction of its own, and one that spans statements is an explicit `BEGIN` and `COMMIT`. Under `autocommit=False` one is always open, so a read leaves its lock behind, and another connection's write fails with `database is locked` until the reader next commits.
+- **A failed rollback never hides what the block raised.** A `ROLLBACK` that raises would take the place of the block's exception, so its failure goes on that exception as a note, and the block's own type still reaches the caller. `test_sqlite.py` makes SQLite refuse the `ROLLBACK`, through an authorizer, and checks.
+- **`add` writes only under a free id, in one statement:** `INSERT … ON CONFLICT (id) DO NOTHING`, whose row count says whether it wrote, and the lines go in only then. It returns the order stored under the id, so a reorder sent twice gets the first's back and places one ([python-actions](../../python-actions/SKILL.md)). A `get` before an insert would let two calls both find the id free.
+- **A connection serves the thread that opened it.** sqlite3's `check_same_thread`, on by default, makes a connection used from any other thread raise `ProgrammingError`, which `test_sqlite.py` pins. So an operation over the store is shared only where its connection is: the CLI's wiring opens one per command, and an edge that serves on threads gives each thread a connection of its own, or each call one opened and closed around it, as `_canceller` does. Never `check_same_thread=False` over one shared connection: one thread's statements would land inside another's transaction.
 - **A transaction that writes begins `IMMEDIATE`,** taking the write lock at once. A second writer then waits its turn, up to the connection's five-second busy timeout, where after a plain `BEGIN` it could fail with `SQLITE_BUSY` as its read turned into a write.
 - **The operation sees only the context manager and its writer:** `with self.orders.transaction() as tx: tx.save(order)`. It never holds a connection or a cursor, and never learns how the store keeps its promise.
 - **A call to another service stays outside the transaction.** A refund can't roll back, so the canceller claims the order, refunds, then saves, each a write of its own, and the refund's key makes a second run refund once ([python-actions](../../python-actions/SKILL.md)).
@@ -324,6 +349,14 @@ class FakeOrders:
         self.orders[order.id] = order
         self.saved.append(order)
 
+    def add(self, order: Order) -> Order:
+        """Hold and record the order unless one has its id; return the one held under it."""
+        self._begin()
+        if order.id not in self.orders:
+            self.orders[order.id] = order
+            self.saved.append(order)
+        return self.orders[order.id]
+
     @contextmanager
     def transaction(self) -> Generator[FakeOrders]:
         """Stage the block's writes on a copy, and keep them only if it ends cleanly."""
@@ -348,7 +381,8 @@ class FakeOrders:
 - **The transaction's writer is a copy of the fake.** A block that raises never reaches the lines after the `try`, so the copy and its writes are dropped, and the `finally` only lowers `in_transaction`; one that ends cleanly hands them back.
 - **Its claim asks `status.cancellable`, as the real store's `UPDATE` does,** so a canceller test of a shipped order meets the same `NotCancellable`, and a claimed order reads back `CANCELLING`.
 - **Inside its transaction, a call to the store itself fails as SQLite's does,** with the same `OperationalError`, so a restorer that calls `orders.save` where it means `tx.save` fails its test, as it would in production, rather than lose the write. `tests/order/test_fakes.py` makes the calls `test_sqlite.py` makes of the real store, and checks the queries answer in its order.
-- **One fake fills `OrderStore`, `CancellableOrders` and `TransactionalOrders`.** It lives in `tests/order/fakes.py`, shared by every test that needs it, beside `FakeCanceller`, the fake of `Cancels` that the sweeper's and the withdrawer's tests pass; [python-testing](../../python-testing/SKILL.md) covers where fakes and builders go.
+- **Its `add` keeps the first order under an id,** as the real store's conditional `INSERT` does, so the reorderer's test of a request sent twice meets the same answer it would in production.
+- **One fake fills `OrderStore`, `CancellableOrders`, `TransactionalOrders` and the reorderer's `Orders`.** It lives in `tests/order/fakes.py`, shared by every test that needs it, beside `FakeCanceller`, the fake of `Cancels` that the sweeper's and the withdrawer's tests pass; [python-testing](../../python-testing/SKILL.md) covers where fakes and builders go.
 
 ## Testing the real store
 

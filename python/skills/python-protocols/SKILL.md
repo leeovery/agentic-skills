@@ -68,7 +68,7 @@ with closing(connect(database)) as db, client() as http:
 # tests/order/fakes.py: the fake records what it was asked and raises what it was told.
 @dataclass(slots=True)
 class FakeRefunder:
-    """A Refunder that records each refund, once per key, and raises error, when it's set."""
+    """A Refunder that records each refund it makes, once per key, or raises error, if set."""
 
     refunded: list[Refund] = field(default_factory=list)
     error: Exception | None = None

@@ -14,7 +14,7 @@ Contents: the seams · callable field or Protocol · the clock · waits · the e
 | files | a base directory, `labels: Path` | the configured path | `tmp_path` |
 | an HTTP API | an `httpx2.Client` with base URL, auth and timeout set | the client the wiring builds and closes | a client on `httpx2.MockTransport` |
 | another program | a runner Protocol | `ProcessRunner(timeout=...)` | a fake runner |
-| an id a test must predict | `new_id: Callable[[], OrderId]` | `lambda: OrderId(str(uuid.uuid7()))` | `lambda: OrderId("o-1")` |
+| an id the program mints, that a test must predict | `new_id: Callable[[], OrderId]` | `lambda: OrderId(str(uuid.uuid7()))` | `lambda: OrderId("o-1")` |
 | a random draw | `rand: Callable[[], float]` | `random.random` | `lambda: 1.0` |
 | logs | none: each module names its logger | the logging setup | pytest's `caplog` ([python-errors](../../python-errors/SKILL.md)) |
 
@@ -64,17 +64,19 @@ class FakeTime:
         return self.now
 
 
-def gateway(handler: Handler, time: FakeTime | None = None) -> Gateway:
+@contextmanager
+def gateway(handler: Handler, time: FakeTime | None = None) -> Generator[Gateway]:
     """A Gateway whose client answers every request with handler, on a fake clock.
 
-    rand returns 1, so each backoff is its whole bound: 0.5s, 1s, 2s.
+    rand returns 1, so each backoff is its whole bound: 0.5s, 1s, 2s. The client
+    closes as the block ends.
     """
     time = time or FakeTime()
-    client = httpx2.Client(
-        base_url="https://pay.example", transport=httpx2.MockTransport(handler)
-    )
     retry = Retry(sleep=time.sleep, clock=time.clock, rand=lambda: 1.0)
-    return Gateway(client=client, retry=retry)
+    with httpx2.Client(
+        base_url="https://pay.example", transport=httpx2.MockTransport(handler)
+    ) as client:
+        yield Gateway(client=client, retry=retry)
 ```
 
 No test sleeps, and each asserts the exact waits. Waits inside asyncio are [python-concurrency](../../python-concurrency/SKILL.md)'s.
@@ -146,6 +148,8 @@ class Runner(Protocol):
         ...
 ```
 
+The labeller turns the runner's `TimeoutError` into a `ShippingError`, `from` it, as it does a missing tool or a failed run, so whoever makes a label is told each as an outcome, never a crash ([python-errors](../../python-errors/SKILL.md)).
+
 One adapter runs real programs. It is the only module besides `main`'s allowed `subprocess`:
 
 ```python
@@ -204,7 +208,7 @@ class ProcessRunner:
 "src/shop/processes.py" = ["TID251"]
 ```
 
-The fake answers `which` from a dict and records each command it was asked to run:
+The fake answers `which` from a dict, records each command it was asked to run, and overruns, raising the runner's `TimeoutError`, when a test asks it to:
 
 ```python
 # tests/shipping/test_label.py
@@ -215,6 +219,7 @@ class FakeRunner:
     installed: dict[str, Path] = field(default_factory=dict)
     code: int = 0
     stderr: str = ""
+    overruns: bool = False
     ran: list[tuple[str, ...]] = field(default_factory=list)
 
     def which(self, program: str) -> Path | None:
@@ -222,8 +227,10 @@ class FakeRunner:
         return self.installed.get(program)
 
     def run(self, program: Path, *args: str) -> Finished:
-        """Record the command, and finish as the test set."""
+        """Record the command, then finish as the test set, or run past the timeout."""
         self.ran.append((str(program), *args))
+        if self.overruns:
+            raise TimeoutError(f"{program.name} ran past 0:00:30")
         return Finished(code=self.code, stderr=self.stderr)
 ```
 
@@ -231,7 +238,7 @@ The adapter's own tests run this interpreter as the child, `Path(sys.executable)
 
 ## Ids and randomness
 
-- **A value a test must predict is a seam.** The retry policy's jitter comes from `rand`, and its tests pass `lambda: 1.0` to make every wait exact. An id minted with `uuid.uuid7()` ([3.14](https://docs.python.org/3/whatsnew/3.14.html)) that a test checks comes from `new_id`.
+- **A value a test must predict is a seam.** The retry policy's jitter comes from `rand`, and its tests pass `lambda: 1.0` to make every wait exact. An id minted with `uuid.uuid7()` ([3.14](https://docs.python.org/3/whatsnew/3.14.html)) that a test checks comes from a `new_id` field. An id a second try must repeat isn't minted at all: the reorderer takes the new order's from its caller, so a request sent twice places one order ([python-actions](../../python-actions/SKILL.md)).
 - **One nothing asserts on needs no seam.** `main` mints the run's correlation id with `uuid.uuid7()` itself.
 - **An id derived from data needs none either:** the canceller's refund key is `cancel-{order_id}`, the same each time that cancel runs.
 - ruff's `S311` flags a call to `random.random()` as unfit for secrets. Passing the function as a seam calls nothing, so it isn't flagged, and jitter is no secret. A token or a key comes from `secrets`.
