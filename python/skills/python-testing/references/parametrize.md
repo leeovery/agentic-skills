@@ -34,6 +34,8 @@ def test_a_status_says_whether_it_allows_cancelling(
     assert status.cancellable is cancellable
 ```
 
+`Status.cancellable` is the property under test ([python-types](../../python-types/SKILL.md)).
+
 - **The expected value is data in the row,** never a flag that picks which check runs.
 - **Rows hold values, not fixtures or callables.** A row's value is built once, at collection, so it's a frozen value from a builder, as the [SKILL.md](../SKILL.md#pattern) pattern's rows are from `make_order`. A list or a fake in a row is one object that a test can change under the next.
 - **The parameters are keyword-only (`*`)** when one is a `bool`: ruff's `FBT001` flags a positional `bool`, and pytest passes parameters by name, so the `*` costs nothing.
