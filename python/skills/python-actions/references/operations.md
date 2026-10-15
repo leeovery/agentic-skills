@@ -130,7 +130,7 @@ class Restorer:
         return restored
 ```
 
-`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with `with self.db:`, which commits on a clean exit and rolls back on an exception, and yields a writer bound to it. Its own `save` is one write in a transaction of its own:
+`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with an explicit `BEGIN`, commits it when the block ends and rolls it back if the block raises, and yields a writer bound to it. Its own `save` is one write in a transaction of its own:
 
 ```python
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -150,14 +150,14 @@ class SqliteOrders:
     def transaction(self) -> Generator[SqliteTransaction]:
         """Open a transaction: committed when the block ends, rolled back if it raises.
 
-        Every write in the block goes through the writer it yields: this store's
-        own save would commit, part way through.
+        Every write in the block goes through the writer it yields. This store's
+        own save opens a transaction of its own, which SQLite refuses in here.
         """
-        with self.db:
+        with _transaction(self.db):
             yield SqliteTransaction(db=self.db)
 ```
 
-- **Every write in the block goes through `tx`,** never the store's own `save`, which opens a `with self.db:` of its own. sqlite3's doesn't nest: the inner block's exit commits the whole transaction part way through, and a later failure can't take that back.
+- **Every write in the block goes through `tx`,** never the store's own `save`, which opens a transaction of its own. SQLite refuses a `BEGIN` inside another, so that mistake fails at once rather than committing part way through.
 - **A call that leaves the process can't roll back.** A refund or an email sent inside the block has happened even when the commit fails. Make it before the writes, keyed so a retry is safe, as `Canceller` makes its refund; or record it in the transaction and send it after the commit.
 - **The fake stages the block's writes on a copy** and keeps them only when the block ends cleanly, so a test sees the rollback ([python-testing](../../python-testing/SKILL.md)).
 - **`-> Generator[T]` on a `@contextmanager`,** not `Iterator[T]`: the stubs mark the `Iterator` form deprecated, and the drop-in's pyrefly fails on it.
@@ -177,18 +177,30 @@ def replace(path: Path, data: bytes, *, mode: int = 0o644) -> None:
     with tempfile.NamedTemporaryFile(
         dir=path.parent, prefix=f".{path.name}.", delete_on_close=False
     ) as temp:
+        # mkstemp makes the file readable by its owner alone. Set before the fsync,
+        # so the mode reaches the disk with the data.
+        os.fchmod(temp.fileno(), mode)
         temp.write(data)
         temp.flush()
         os.fsync(temp.fileno())
-        # mkstemp makes the file readable by its owner alone.
-        os.fchmod(temp.fileno(), mode)
         temp.close()
         Path(temp.name).replace(path)
+    if os.name == "posix":
+        _sync_directory(path.parent)
+
+
+def _sync_directory(directory: Path) -> None:
+    """Flush directory's entries to disk: on POSIX, a rename lives in the directory."""
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 ```
 
 - **The same directory,** never `/tmp`: a rename can't cross filesystems, and `Path.replace` raises `OSError` when asked to.
 - **`delete_on_close=False`** ([3.12](https://docs.python.org/3/whatsnew/3.12.html)) keeps the file through `close()`, and the `with` deletes it on the way out if anything failed. After the rename there's nothing under its name, which it ignores.
-- **`fsync` before the rename,** or a crash can leave the new name pointing at data that never reached the disk.
+- **`fchmod`, then `fsync`, then the rename,** or a crash can leave the new name pointing at data, or a mode, that never reached the disk. **Then `fsync` the directory** on POSIX, where the rename is an entry in the directory: without it, a crash can bring back the old file.
 - **It lives in one module, `shop/storage/atomic.py`,** called as `atomic.replace(path, data)`, so the steps are written once.
 
 ## Idempotency
@@ -197,7 +209,7 @@ A message is delivered again, a user presses twice, a retry follows a timeout th
 
 - **An upsert, never a check then a write.** `if not store.exists(id): store.insert(order)` lets two runs both see nothing and both insert. The SQLite store's save upserts the order, `INSERT … ON CONFLICT (id) DO UPDATE`, and replaces its lines in the same transaction, so restoring the same export twice leaves one copy of each order.
 - **A conditional write when a change must not overwrite another.** Load, check and save lets a cancel overwrite a shipment that landed between the load and the save. The write states what it expects, `UPDATE orders SET status = 'shipped' WHERE id = ? AND status = 'paid'`, and its row count says whether it won: 0 means another run moved the order first, so reload it and decide again.
-- **An idempotency key on every write to a provider,** derived from the work: the gateway sends `Idempotency-Key: refund-{payment_id}`, so a retried refund refunds once. A fresh `uuid4()` per call gives every retry a new key, and the provider does it twice. The adapter owns the header ([python-protocols](../../python-protocols/SKILL.md)).
+- **An idempotency key on every write to a provider,** derived from the work: the canceller keys its refund `cancel-{order_id}`, and the gateway sends it as `Idempotency-Key`, so a retried cancel refunds once, and a later refund of the same payment for another reason isn't mistaken for a repeat. A fresh `uuid4()` per call gives every retry a new key, and the provider does it twice. The adapter owns the header ([python-protocols](../../python-protocols/SKILL.md)).
 - **A job that stops partway is safe to run again** when it selects what's left to do. `withdraw` cancels only the open orders, so a second run finishes the first's work.
 
 ## Edges

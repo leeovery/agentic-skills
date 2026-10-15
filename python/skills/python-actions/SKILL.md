@@ -17,7 +17,7 @@ Business logic lives in operations: a function, or a frozen dataclass of its col
 6. **Compose by holding.** An operation that needs another holds it as a field, typed as a one-method Protocol. *It never redoes the other's steps against the store, so that rule keeps one owner, and a test fakes it in a line.*
 7. **A write leaves no half state.** Writes that land together go through one store transaction, a context manager: `with self.orders.transaction() as tx:`. A file is replaced whole: written to a temporary file beside it, then renamed over it. A call that leaves the process can't roll back, so it goes before the writes. *A failure partway leaves the old state or the new, never a mix the next run trips over.*
 8. **Anything that can run twice is idempotent:** an upsert or a conditional write, never a check followed by a write, and an idempotency key derived from the work on every write to a provider. *A queue delivers at least once, a user presses twice, a retry follows a timeout that had succeeded; each must leave the state one run would.*
-9. **The typer app is built by `build_app(wiring)`, never at module level.** Commands are closures that enter the wiring only when they run, so `--help` and a usage error build nothing. Data goes out through `typer.echo`, diagnostics through `typer.echo(..., err=True)`. *Each test builds a fresh app over fakes, and a mistyped command needs no settings to be told so.* Held by ruff's `T201`, which bans `print`.
+9. **The typer app is built by `build_app(wiring)`, never at module level.** Commands are closures that call the wiring only when they run, each opening only what it uses, so `--help` and a usage error build nothing. Data goes out through `typer.echo`, diagnostics through `typer.echo(..., err=True)`. *Each test builds a fresh app over fakes, and a mistyped command needs no settings to be told so.* Held by ruff's `T201`, which bans `print`.
 10. **`run` is the one function that sets exit codes:** 0 for success, 1 for a failure, 2 for a usage error, 130 for an interrupt. `main(argv)` returns what `run` returns; nothing else exits. *A script tells a bad call from a failed one, and Ctrl-C reads as the shell's own.* Held by ruff's `TID251`, which bans `sys.exit` outside `shop/cli.py`.
 
 ## Pattern
@@ -40,9 +40,15 @@ class Canceller:
         order = self.orders.get(order_id)
         ensure_cancellable(order)
         if order.payment_id is not None:
-            # Before the write, as a refund can't be undone. The provider keys
-            # it by payment, so a retry after a failed write refunds once.
-            self.payments.refund(order.payment_id, order.total)
+            # Before the write, as a refund can't be undone. Keyed by the order,
+            # so a retry after a failed write refunds once.
+            self.payments.refund(
+                Refund(
+                    payment_id=order.payment_id,
+                    amount=order.total,
+                    key=f"cancel-{order.id}",
+                )
+            )
         cancelled = copy.replace(
             order,
             status=Status.CANCELLED,
@@ -60,7 +66,7 @@ def ensure_cancellable(order: Order) -> None:
         raise NotCancellable(order.id, order.status)
 ```
 
-`main`'s wiring builds it once, `Canceller(orders=SqliteOrders(db=db), payments=Gateway(client=http, retry=Retry(...)), now=partial(datetime.now, UTC))`, and the command, the handler and the consumer that cancel all call that one.
+`main`'s wiring builds it when `cancel` runs, `Canceller(orders=SqliteOrders(db=db), payments=Gateway(client=http, retry=Retry(...)), now=partial(datetime.now, UTC))`, and the HTTP handler and the queue consumer call one built the same way. The refund's key comes from the work, the order being cancelled, so a second refund of one payment for another reason gets a key of its own.
 
 ## Decision table
 
@@ -88,7 +94,7 @@ def ensure_cancellable(order: Order) -> None:
 - ❌ Two `save` calls that must both land, each committing → one `with orders.transaction() as tx:`.
 - ❌ `path.write_bytes(data)` over a file something else reads → `atomic.replace(path, data)`: `write_bytes` truncates first.
 - ❌ `if not store.exists(order.id): store.insert(order)` → an upsert, or an insert the unique key refuses.
-- ❌ `"Idempotency-Key": str(uuid.uuid4())` → a key derived from the work: `f"refund-{payment_id}"`.
+- ❌ `"Idempotency-Key": str(uuid.uuid4())`, or a key from the payment alone → a key derived from the work: the canceller's `f"cancel-{order.id}"`.
 - ❌ `app = typer.Typer()` at module level, commands registered by decorator at import → `build_app(wiring)`.
 - ❌ `print(...)`, `sys.exit(1)`, or `raise typer.Exit(1)` for a failure → `typer.echo`; raise the domain's exception and let `run` map it.
 
