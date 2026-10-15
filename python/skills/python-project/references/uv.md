@@ -80,8 +80,9 @@ exclude-newer = "1 week"
 ```
 
 - **uv ignores every file uploaded less than a week ago** when it resolves. A release that turns out malicious is usually yanked within days; a lock taken a week behind never sees it.
+- **It holds back `uv add` too,** so it goes in before the first one. Each bound `uv add` writes is then the newest release a week old: `pydantic>=2.13.5` on 2026-10-15, with 2.14.1 four days old. A bound on a release inside the week, written before the cooldown or by hand, fails `uv lock`, which says the package "was filtered by `exclude-newer`" and suggests `exclude-newer-package`.
 - **The syntax:** a friendly duration (`"24 hours"`, `"1 week"`, `"30 days"`), an ISO 8601 one (`"P7D"`), or a fixed timestamp. Months and years aren't allowed. The lock records the span (`exclude-newer-span = "P1W"`), not a date, so each upgrade counts the week back from the day it runs.
-- **A release you need sooner,** a security fix, is exempted by name until the week passes, with why:
+- **A release you need sooner,** a fix that can't wait, is exempted by name until the week passes, with why. `false` takes the package's newest release; a duration of its own, `{ urllib3 = "1 day" }`, a shorter wait:
 
   ```toml
   [tool.uv]

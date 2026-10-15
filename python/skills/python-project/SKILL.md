@@ -13,7 +13,7 @@ uv runs everything, dependencies change only through uv, and the lockfile is the
 2. **Dependencies change through `uv add` and `uv remove`:** `--group lint` or `--group test` for a tool, `--optional cli` for an extra, neither for a runtime dependency. Never edit a dependency list by hand; the one exception is an `include-group` entry, which `uv add` can't write, followed by `uv lock`. *`uv add` resolves, writes the lower bound and updates the lock in one step; a hand edit leaves the lock behind, and CI's `uv sync --locked` fails on it.*
 3. **A new runtime dependency comes with its reason, the standard library first.** Tools go in `[dependency-groups]` (`lint` and `test`, composed into `dev`), never in `[project.dependencies]`; an extra is only for an optional runtime feature users choose. *Each package is code nobody here reviewed, and one more thing to audit and upgrade; a tool in the runtime list installs on every user's machine.*
 4. **`uv.lock` is committed, and CI installs with `uv sync --locked`,** which fails when the lock no longer matches `pyproject.toml`; `--frozen` installs a stale lock and leaves out whatever it lacks. An upgrade is targeted, `uv lock --upgrade-package httpx2`, and committed alone. *The lock is what CI tested and what production runs; a sweep of upgrades inside a feature hides which one broke what.* Held by `uv sync --locked`, CI's first step.
-5. **Supply chain: a week's cooldown and an audit.** `[tool.uv] exclude-newer = "1 week"` keeps anything uploaded in the last seven days out of the lock, and `pip-audit`, fed from `uv export`, runs in CI. `uv audit` takes over once it leaves preview. *A malicious release is usually found and pulled within days, so a week's wait keeps it out; the audit finds what's already in.* Held by the resolver and by pip-audit in CI.
+5. **Supply chain: a week's cooldown and an audit.** `[tool.uv] exclude-newer = "1 week"` keeps anything uploaded in the last seven days out of the lock and out of the bounds `uv add` writes, so it goes in before the first `uv add`; `exclude-newer-package` exempts one package whose fix can't wait. `pip-audit`, fed from `uv export`, runs in CI. `uv audit` takes over once it leaves preview. *A malicious release is usually found and pulled within days, so a week's wait keeps it out; the audit finds what's already in.* Held by the resolver and by pip-audit in CI.
 6. **`requires-python` is the floor, and `.python-version` pins the floor's interpreter:** `>=3.14` and `3.14` for an application, `>=3.11` and `3.11` for a library. Both are committed and raised together. *Without the pin, uv runs the first Python it finds or downloads the newest (3.15, from uv 0.13), so each machine runs a different one; on the floor, code that needs a newer Python fails on your machine before it fails on a user's.*
 7. **A project starts from `uv init --package --python 3.14`:** the src layout, `uv_build` with the upper bound uv writes, and the version in `pyproject.toml` alone. Code that needs the version calls `importlib.metadata.version("shop")` inside a function. *uv's minor releases may break, so the backend stays on the one you tested; a `__version__` literal is a second copy that drifts at the first release.*
 8. **One-off tools run through `uvx`, and a standalone script carries [PEP 723](https://peps.python.org/pep-0723/) metadata** and a `#!/usr/bin/env -S uv run --script` shebang. A project's own tools run through `uv run`, never `uvx`. *`uvx ruff` runs the newest ruff, not the locked one, so its findings differ from CI's; a script's inline block is its whole project, installed when it runs.*
@@ -30,8 +30,8 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "httpx2>=2.13.1",
-    "pydantic>=2.14.1",
-    "pydantic-settings>=2.16.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
     "typer>=0.27.3",
 ]
 
@@ -42,16 +42,23 @@ shop = "shop.cli:main"
 requires = ["uv_build>=0.13.1,<0.14.0"]
 build-backend = "uv_build"
 
+[tool.uv]
+exclude-newer = "1 week"
+
 [dependency-groups]
 lint = [
     "import-linter>=2.15",
     "pyrefly>=1.3.2",
-    "ruff>=0.17.0",
+    "ruff>=0.16.10",
+]
+# An audit run now and then, not a gate: `uv run --group mutation mutmut run`.
+mutation = [
+    "mutmut>=3.8.0",
 ]
 test = [
     "coverage>=7.16.2",
-    "hypothesis>=6.169.1",
-    "looptime>=0.9",
+    "hypothesis>=6.168.5",
+    "looptime>=0.7",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-benchmark>=5.3.0",
@@ -65,16 +72,9 @@ dev = [
     { include-group = "lint" },
     { include-group = "test" },
 ]
-# An audit run now and then, not a gate: `uv run --group mutation mutmut run`.
-mutation = [
-    "mutmut>=3.8.0",
-]
-
-[tool.uv]
-exclude-newer = "1 week"
 ```
 
-`uv init` wrote the first three tables, the script since pointed at `shop.cli:main`, and `uv add` every dependency; the `include-group` entries and `[tool.uv]` are written once, by hand, then `uv lock`. python-quality's drop-in `[tool.*]` tables follow ([python-quality](../python-quality/SKILL.md)).
+`uv init` wrote the first three tables, the script since pointed at `shop.cli:main`. `[tool.uv]` went in next, by hand, before any `uv add`: the cooldown holds `uv add` back too, so each bound above is the newest release a week old when uv 0.13.1 wrote it, on 2026-10-15. `uv add` wrote every dependency; the `include-group` entries are written once, by hand, then `uv lock`. python-quality's drop-in `[tool.*]` tables follow ([python-quality](../python-quality/SKILL.md)).
 
 ## Reach for
 
