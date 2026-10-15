@@ -69,15 +69,13 @@ class Order:
     def __post_init__(self) -> None:
         if not self.lines:
             raise ValueError("an order has at least one line")
-        if len({line.unit_price.currency for line in self.lines}) > 1:
-            raise ValueError("an order's lines are priced in one currency")
         if self.status.paid and self.payment_id is None:
             raise ValueError(f"a {self.status} order has its payment's id")
 
     ...
 ```
 
-The `...` after `Status` holds its `paid` property, which `__post_init__` asks and [enums.md](references/enums.md) shows, then `Reason` and `Line`. A status says what else an order holds: a paid or shipped one its payment's id, a pending one none, and a cancelled one, alone, the time and the reason. `Line` holds a `Money`, an integer of minor units and a `Currency`, and asks for a quantity of at least one at a price of zero or more; [values.md](references/values.md) has every rule.
+The `...` after `Status` holds its `paid` property, which `__post_init__` asks and [enums.md](references/enums.md) shows, then `Reason` and `Line`, whose `Money` and rules are in [values.md](references/values.md).
 
 ## Decision table
 

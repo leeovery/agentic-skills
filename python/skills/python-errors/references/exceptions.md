@@ -6,9 +6,9 @@ Contents: the error channel · one base per package · translating · notes · c
 
 ## The error channel
 
-- **A failure raises.** `SqliteOrders.get` raises `OrderNotFound`; it never returns `None` for a missing order, and never catches its own driver's error to return `None` either.
+- **A failure raises.** `SqliteOrders.get` raises `OrderNotFound`; it never returns `None` for a missing order.
 - **`None` is for an absence that is no failure,** and the type says so: `Order.payment_id` is `PaymentId | None` because a pending order hasn't been paid.
-- **No `Result` type.** The standard library and every dependency raise, so a `Result` adds a second channel beside the first: each caller checks it, and still meets the exceptions. A `Result` nobody inspects fails silently, where an exception nobody catches reaches the edge.
+- **No `Result` type.** The standard library and every dependency raise, so a `Result` adds a second channel beside the first. A `Result` nobody inspects fails silently, where an exception nobody catches reaches the edge.
 
 ## One base per package
 
@@ -16,7 +16,7 @@ Contents: the error channel · one base per package · translating · notes · c
 # src/shop/order/errors.py
 """What can go wrong with an order, as exceptions a caller can branch on."""
 
-from shop.order.order import OrderId, PaymentId, Status
+from shop.order.order import OrderId, PaymentId
 
 
 class OrderError(Exception):
@@ -31,13 +31,7 @@ class OrderNotFound(OrderError):
         self.order_id = order_id
 
 
-class NotCancellable(OrderError):
-    """The order's status forbids cancelling it."""
-
-    def __init__(self, order_id: OrderId, status: Status) -> None:
-        super().__init__(f"order {order_id} is {status}, so it can't be cancelled")
-        self.order_id = order_id
-        self.status = status
+...
 
 
 class PaymentFailed(OrderError):
@@ -51,33 +45,15 @@ class PaymentFailed(OrderError):
 - **The base lets an edge take every expected failure in one clause:** `run` catches `OrderError` and prints it.
 - **Each subclass is there because a caller branches on it.** The sweeper keeps going past `NotCancellable` and `PaymentFailed`; a refund that failed needs someone to act on its `payment_id`. A failure nobody tells apart stays the base with a message.
 - **What a caller branches on is an attribute, typed, set in `__init__`,** and the message is built from the same values. The message is for people; no code reads it.
-- **A builtin for a bug, or a value refusing its own rule:** `ValueError` for a value that breaks a rule as it's built (`Order` with no lines), `TimeoutError` from the process seam for a program that ran too long. `run` logs a builtin as a crash, so whatever the user must be told is the package's own: `reordered` raises `OrderError` when nothing is still on sale, and the labeller turns the runner's `TimeoutError` into a `ShippingError`.
+- **A builtin for a bug, or a value refusing its own rule:** `ValueError` for a value that breaks a rule as it's built (`Order` with no lines). `run` logs a builtin as a crash, so whatever the user must be told is the package's own.
 - `TRY003` is off: with a subclass only where a caller branches, a message written at the raise is the normal case.
 
 ## Translating
 
-At a boundary you own, an adapter or a store, the library's exception becomes the domain's:
-
-```python
-# src/shop/payments/gateway.py, in Gateway.refund
-try:
-    self._send(request)
-except httpx2.HTTPError as err:
-    raise PaymentFailed(refund.payment_id) from err
-```
-
-`_send` makes the request, retrying a passing failure under the adapter's policy, and raises httpx2's error once it gives up; [python-protocols](../../python-protocols/SKILL.md) has the adapter whole.
+At a boundary you own, an adapter or a store, the library's exception becomes the domain's, as `Gateway.refund` does in the [SKILL.md](../SKILL.md#pattern) pattern; [python-protocols](../../python-protocols/SKILL.md) has the adapter whole.
 
 - **`from err` sets `__cause__`,** and the traceback prints the httpx2 error first, then "The above exception was the direct cause of the following exception". Without `from`, Python still links them, as `__context__`, and prints "During handling of the above exception, another exception occurred", which reads as a second bug. ruff's `B904` flags a `raise` inside `except` with neither.
-- **`from None` hides the cause, and only on purpose,** where it's a detail of how the code works, not why it failed. The fake store's `KeyError` says nothing `OrderNotFound` doesn't:
-
-```python
-# tests/order/fakes.py, in FakeOrders.get
-try:
-    return self.orders[order_id]
-except KeyError:
-    raise OrderNotFound(order_id) from None
-```
+- **`from None` hides the cause, and only on purpose,** where it's a detail of how the code works, not why it failed: the fake store's `KeyError` says nothing `OrderNotFound` doesn't, so `FakeOrders.get` raises it `from None`.
 
 - **Inside the package, nothing translates.** A helper's `ValueError` rises as itself; translating at every layer turns one failure into a chain of three.
 
@@ -97,7 +73,7 @@ except ValueError as err:
     raise
 ```
 
-- **Add what the traceback lacks:** the id, the file, the attempt count. `'refunded' is not a valid Status` names no order; the note does. The gateway notes `gave up after 4 attempts` on the error that ends its retries.
+- **Add what the traceback lacks:** the id, the file, the attempt count. `'refunded' is not a valid Status` names no order; the note does.
 - **Add it where the fact is known,** then `raise` the same exception. That is still handling it once: nothing is logged, and the caller decides what it means.
 - **Notes live in `err.__notes__`,** a list, which a test can check.
 
@@ -111,7 +87,7 @@ except ValueError as err:
 
 ## Every problem at once
 
-- **At a trust boundary, pydantic collects every bad field into one `ValidationError`** ([python-types](../../python-types/SKILL.md)). The shop's settings report every missing or bad variable in one message, and its tests check two at once.
+- **At a trust boundary, pydantic collects every bad field into one `ValidationError`** ([python-types](../../python-types/SKILL.md)).
 - **A check written by hand collects the same way:** each rule appends its problem to a list, and after every rule has run, one exception carries them all as a tuple attribute. The caller fixes everything in one pass.
 
 ## Groups
@@ -121,12 +97,7 @@ Independent operations that each fail raise their failures together, as an `Exce
 ```python
 # src/shop/order/sweep.py, in Sweeper
 def sweep(self, customer_id: CustomerId, *, reason: Reason) -> tuple[Order, ...]:
-    """Cancel each of the customer's cancellable orders, and return them as saved.
-
-    One order's failure stops none of the others. Those that fail are raised
-    together, once every order has been tried, as an ExceptionGroup of
-    NotCancellable (it shipped meanwhile) and PaymentFailed.
-    """
+    """Cancel each of the customer's cancellable orders, and return them as saved."""
     cancelled: list[Order] = []
     failed: list[NotCancellable | PaymentFailed] = []
     for order in self.orders.cancellable_for(customer_id):
@@ -139,10 +110,8 @@ def sweep(self, customer_id: CustomerId, *, reason: Reason) -> tuple[Order, ...]
     return tuple(cancelled)
 ```
 
-`cancellable_for` is the one store query the sweeper declares: the customer's orders whose status still allows cancelling.
-
 - **It catches only the failures it expects of one order.** Anything else, a store that's down, stops the sweep at once: the next order would fail the same way.
-- **A caller takes the group apart with `except*`.** `except* NotCancellable as shipped:` handles `shipped.exceptions`, and the kinds it doesn't name rise on, still in a group. `return`, `break` and `continue` can't appear in an `except*` block, and `except* ExceptionGroup` is a `TypeError`.
+- **A caller takes the group apart with `except*`.** `except* NotCancellable as shipped:` handles `shipped.exceptions`, and the kinds it doesn't name rise on, still in a group. `return`, `break` and `continue` can't appear in an `except*` block.
 - **A plain `except OrderError` doesn't match a group of them.** An edge that calls code raising groups names `ExceptionGroup` in its mapping, or the group reaches its last resort as a bug.
 - **Validation is not a group.** Several problems with one input are one failure with a list; a group is for failures that each stand alone.
 
@@ -150,9 +119,9 @@ def sweep(self, customer_id: CustomerId, *, reason: Reason) -> tuple[Order, ...]
 
 Each edge has one function from exception to answer: `run` for the CLI, a handler wrapper for HTTP. [python-actions](../../python-actions/SKILL.md) holds the codes; the [SKILL.md](../SKILL.md#pattern) pattern shows `run`.
 
-- **Expected failures are answered and not logged:** a `SettingsError`, an `OrderError` or a `SettlementError` prints `shop: <message>`, each note on a line beneath it, and exits 1. The user reads it, and there's nothing for anyone else to fix.
+- **Expected failures are answered and not logged:** an `OrderError` prints `shop: <message>`, each note on a line beneath it, and exits 1. There's nothing for anyone else to fix.
 - **A library's exception is mapped where it's expected, never at the last resort.** The wiring turns the settings' `ValidationError` into `SettingsError`, and the HTTP edge answers a body's with 422. `run` doesn't catch `ValidationError` itself: one that reaches it came from a bug, and needs its traceback.
-- **Anything else is a bug, logged once with its traceback** by the last resort, `except Exception: logger.exception("shop failed")`. Beside it, the program has one other `except Exception`: the poller's loop, where a failed run stops so the next can go ahead ([python-concurrency](../../python-concurrency/SKILL.md)). ruff's `BLE001` accepts both because each logs the traceback.
+- **Anything else is a bug, logged once with its traceback** by the last resort, `except Exception: logger.exception("shop failed")`. The one other `except Exception` is the poller's loop, so the next run can go ahead ([python-concurrency](../../python-concurrency/SKILL.md)). ruff's `BLE001` accepts both because each logs the traceback.
 - **Domain exceptions carry no status or exit code.** An HTTP edge maps `OrderNotFound` to 404 and `NotCancellable` to 409 in its own function; the CLI maps both to 1 in `run`.
 
 ## Interrupts and cancellation
@@ -161,7 +130,7 @@ Each edge has one function from exception to answer: `run` for the CLI, a handle
 
 - **Ctrl-C is a `KeyboardInterrupt`,** which typer turns into exit code 130, the shell's own for an interrupt, and `run` returns it like any other code.
 - **`CancelledError` is how asyncio stops a task:** cleanup runs in `finally` or `async with`, and the error rises on ([python-concurrency](../../python-concurrency/SKILL.md)).
-- **`except BaseException` only to clean up and re-raise.** Cleanup that can't fail goes in `finally`, which needs no `except` at all. Cleanup that can fail goes in `except BaseException`, notes its own failure on the exception with `add_note`, and re-raises it, as the lock file's `held` does when its lock won't go and the store's transaction when its `ROLLBACK` fails ([python-concurrency](../../python-concurrency/SKILL.md)). Raised in `finally`, the cleanup's exception would take the place of the one the caller is waiting for.
+- **`except BaseException` only to clean up and re-raise.** Cleanup that can't fail goes in `finally`, which needs no `except` at all. Cleanup that can fail goes in `except BaseException`, notes its own failure on the exception with `add_note`, and re-raises it ([python-concurrency](../../python-concurrency/SKILL.md)). Raised in `finally`, the cleanup's exception would take the place of the one the caller is waiting for.
 
 ## Suppressing
 
@@ -177,22 +146,8 @@ Each edge has one function from exception to answer: `run` for the CLI, a handle
 
 ## In tests
 
-Match the way callers match: by type, then attributes.
-
-```python
-# tests/order/test_cancel.py
-def test_cancel_refuses_a_shipped_order() -> None:
-    orders = FakeOrders.holding(make_order(status=Status.SHIPPED, payment_id="pay-1"))
-    payments = FakeRefunder()
-
-    with pytest.raises(NotCancellable) as refused:
-        canceller(orders, payments).cancel(OrderId("o-1"), reason=Reason.CUSTOMER)
-
-    assert refused.value.status is Status.SHIPPED
-    assert payments.refunded == []
-    assert orders.saved == []
-```
+Match the way callers match: by type, then attributes, `pytest.raises(NotCancellable) as refused`, then `refused.value.status is Status.SHIPPED`, as [python-testing](../../python-testing/SKILL.md#pattern)'s pattern does.
 
 - **A translated exception's cause is checked as a type:** `isinstance(failed.value.__cause__, httpx2.HTTPStatusError)`.
 - **A group is checked with `pytest.RaisesGroup`** (pytest 8.4), which fails unless the group holds exactly the types named.
-- **`match=` checks a property the message must have,** such as naming the order, never its whole text. [python-testing](../../python-testing/SKILL.md) holds the rest.
+- **`match=` checks a property the message must have,** such as naming the order, never its whole text.

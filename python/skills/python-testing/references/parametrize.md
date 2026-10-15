@@ -12,7 +12,7 @@ Contents: when it fits · row shape · ids · errors apart · names · what the 
 | Rows a reader can scan as data | A row that needs a `setup` callable or a `should_raise` flag |
 | Adding a case means adding a row | Adding a case means adding an `if` to the body |
 
-A body that branches on a row's fields is several tests sharing one body, and each branch is tested less clearly than it would be alone. Split it.
+A body that branches on a row's fields is several tests sharing one body. Split it.
 
 ## Row shape
 
@@ -38,14 +38,14 @@ def test_a_status_says_whether_it_allows_cancelling(
 
 - **The expected value is data in the row,** never a flag that picks which check runs.
 - **Rows hold values, not fixtures or callables.** A row's value is built once, at collection, so it's a frozen value from a builder, as the [SKILL.md](../SKILL.md#pattern) pattern's rows are from `make_order`. A list or a fake in a row is one object that a test can change under the next.
-- **The parameters are keyword-only (`*`)** when one is a `bool`: ruff's `FBT001` flags a positional `bool`, and pytest passes parameters by name, so the `*` costs nothing.
+- **The parameters are keyword-only (`*`)** when one is a `bool`: ruff's `FBT001` flags a positional `bool`, and pytest passes parameters by name.
 - **Every case of a closed set gets a row,** as above: a member added to `Status` without a row is a case nobody decided.
 
 ## Ids
 
 - **Each row is a `pytest.param(..., id="...")`,** the id beside its values. A separate `ids=[...]` list drifts out of step with the rows the first time one is inserted.
 - **An id reads as the end of a sentence that starts with the test's name:** `test_cancel_refunds_only_a_paid_order[refunds a paid order in full]`. Without ids, pytest makes them from the values, and an `Order` becomes `order0`.
-- **Ids are unique.** The drop-in's `strict = true` fails collection on a duplicate id, and names the fix.
+- **Ids are unique.** The drop-in's `strict = true` fails collection on a duplicate id.
 - **One row runs alone** by its node id, quoted: `uv run pytest "tests/order/test_cancel.py::test_cancel_refunds_only_a_paid_order[refunds a paid order in full]"`. `-k "paid and full"` matches on words in it.
 
 ## Errors apart
@@ -57,9 +57,7 @@ A success checks a value; a failure checks an exception. Mixing them puts a `sho
 @pytest.mark.parametrize(
     "stored",
     [
-        pytest.param("", id="nothing"),
         pytest.param("lost", id="a status it doesn't know"),
-        pytest.param("PAID", id="the right word in capitals"),
         pytest.param("paid ", id="a trailing space"),
     ],
 )
