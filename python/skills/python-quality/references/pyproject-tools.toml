@@ -104,7 +104,9 @@ addopts = [
     "--import-mode=prepend",
     # No test reaches the network.
     "--disable-socket",
-    # asyncio's event loop wakes itself through a Unix socket pair.
+    # asyncio's event loop wakes itself through a Unix socket pair. Windows has none,
+    # so its pair is loopback TCP, which this blocks: a Windows job adds
+    # --allow-hosts=127.0.0.1, which pytest-socket applies in place of the block.
     "--allow-unix-socket",
     # The gate runs each benchmark once, as a test; measure with --benchmark-enable.
     "--benchmark-disable",

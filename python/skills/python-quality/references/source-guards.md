@@ -226,7 +226,7 @@ A module body declares: imports, constants, functions, classes and its logger. A
 
 - Decorators and default values run with the `def`; the body doesn't. A class body runs.
 - From 3.14 annotations are evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)), so a call inside one doesn't run at import, and nor does a `type` alias's value.
-- `DECLARATIONS` are calls that build a type, a logger, a context variable or a constant and touch nothing outside the process: `frozenset`, `tuple` and `re.compile` for constants, and `ContextVar` because the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for one at module level. A name joins only on that test, with the project's own: `ConfigDict` and `SettingsConfigDict` are pydantic's declarations of how a boundary model parses and where settings come from. `TypeVar` stays out: on a 3.12 floor a type parameter replaces it (`UP046`, `UP047`).
+- `DECLARATIONS` are calls that build a type, a logger, a context variable or a constant and touch nothing outside the process: `frozenset`, `tuple` and `re.compile` for constants, and `ContextVar` because the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for one at module level. A name joins only on that test, with the project's own: `ConfigDict` and `SettingsConfigDict` are pydantic's declarations of how a boundary model parses and where settings come from, and `Field`, `field_validator` and `model_validator` declare a field's constraints and a model's checks, which run when a model parses, never at import. `TypeVar` stays out: on a 3.12 floor a type parameter replaces it (`UP046`, `UP047`).
 - A name matches as it's written, `re.compile` not `compile`, and a call among an allowed call's arguments is still checked, so `frozenset(open(path))` fails.
 - A `__main__.py` is run, never imported, so it's skipped.
 
@@ -253,7 +253,8 @@ from tests.guards.source import (
 # Calls that build a type, a logger, a context variable or a constant: each touches
 # nothing outside the process and builds the same thing on every import. A call among
 # their arguments is checked like any other. The contextvars docs ask for a ContextVar
-# to be made at module level, never in a closure.
+# to be made at module level, never in a closure. pydantic's Field and validator
+# decorators declare how a model parses, as its ConfigDict does.
 DECLARATIONS = frozenset(
     {
         "NewType",
@@ -263,6 +264,9 @@ DECLARATIONS = frozenset(
         "ContextVar",
         "ConfigDict",
         "SettingsConfigDict",
+        "Field",
+        "field_validator",
+        "model_validator",
         "frozenset",
         "re.compile",
         "timedelta",
@@ -362,9 +366,9 @@ def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
         from contextvars import ContextVar
         from dataclasses import dataclass, field
         from datetime import timedelta
-        from typing import NewType
+        from typing import NewType, Self
 
-        from pydantic import BaseModel, ConfigDict
+        from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
         from pydantic_settings import BaseSettings, SettingsConfigDict
 
         logger = logging.getLogger(__name__)
@@ -385,6 +389,16 @@ def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
         class PriceRequest(BaseModel):
             model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
             sku: Sku
+            quantity: int = Field(gt=0)
+
+            @field_validator("sku")
+            @classmethod
+            def known(cls, sku: Sku) -> Sku:
+                return sku
+
+            @model_validator(mode="after")
+            def priced(self) -> Self:
+                return self
 
 
         @dataclass(frozen=True, slots=True)
