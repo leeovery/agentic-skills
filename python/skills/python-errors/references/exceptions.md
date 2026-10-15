@@ -63,7 +63,7 @@ At a boundary you own, an adapter or a store, the library's exception becomes th
 try:
     self._send(request)
 except httpx2.HTTPError as err:
-    raise PaymentFailed(payment_id) from err
+    raise PaymentFailed(refund.payment_id) from err
 ```
 
 - **`from err` sets `__cause__`,** and the traceback prints the httpx2 error first, then "The above exception was the direct cause of the following exception". Without `from`, Python still links them, as `__context__`, and prints "During handling of the above exception, another exception occurred", which reads as a second bug. ruff's `B904` flags a `raise` inside `except` with neither.
@@ -106,7 +106,7 @@ except ValueError as err:
 
 ## Every problem at once
 
-- **At a trust boundary, pydantic collects every bad field into one `ValidationError`** ([python-types](../../python-types/SKILL.md)). The shop's `Settings` reports each missing setting in one message, and its test checks two at once.
+- **At a trust boundary, pydantic collects every bad field into one `ValidationError`** ([python-types](../../python-types/SKILL.md)). The shop's settings report every missing or bad variable in one message, and its tests check two at once.
 - **A check written by hand collects the same way:** each rule appends its problem to a list, and after every rule has run, one exception carries them all as a tuple attribute. The caller fixes everything in one pass.
 
 ## Groups
@@ -143,7 +143,8 @@ def sweep(self, customer_id: CustomerId, *, reason: Reason) -> tuple[Order, ...]
 
 Each edge has one function from exception to answer: `run` for the CLI, a handler wrapper for HTTP. [python-actions](../../python-actions/SKILL.md) holds the codes; the [SKILL.md](../SKILL.md#pattern) pattern shows `run`.
 
-- **Expected failures are answered and not logged:** an `OrderError`, a `SettlementError` or a `ValidationError` prints `shop: <message>` and exits 1. The user reads it, and there's nothing for anyone else to fix.
+- **Expected failures are answered and not logged:** a `SettingsError`, an `OrderError` or a `SettlementError` prints `shop: <message>`, each note on a line beneath it, and exits 1. The user reads it, and there's nothing for anyone else to fix.
+- **A library's exception is mapped where it's expected, never at the last resort.** The wiring turns the settings' `ValidationError` into `SettingsError`, and the HTTP edge answers a body's with 422. `run` doesn't catch `ValidationError` itself: one that reaches it came from a bug, and needs its traceback.
 - **Anything else is a bug, logged once with its traceback** by the last resort, `except Exception: logger.exception("shop failed")`. This is the only `except Exception` in the program; ruff's `BLE001` accepts it because it logs the traceback.
 - **Domain exceptions carry no status or exit code.** An HTTP edge maps `OrderNotFound` to 404 and `NotCancellable` to 409 in its own function; the CLI maps both to 1 in `run`.
 

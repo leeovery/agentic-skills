@@ -10,7 +10,7 @@ Once, in the wiring `main` supplies, from the settings:
 
 ```python
 # src/shop/cli.py, in from_environment
-settings = Settings()
+settings = read_settings()
 stderr = logging.StreamHandler()
 stderr.addFilter(CorrelationFilter())
 logging.basicConfig(
@@ -132,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 - **The filter goes on the handler,** as the wiring above does. A filter on a logger sees only the records logged through that logger, not its children's, so one on the root would miss every module's lines.
 - **The token `set` returns resets the variable when its `with` ends** ([3.14](https://docs.python.org/3/whatsnew/3.14.html)), so no id outlives its work.
 - **The `ContextVar` is declared at module level,** as the `contextvars` docs require; the import-time guard counts `ContextVar` as a declaration.
-- **asyncio copies the context into each task it creates,** so a task logs with the id of the work that started it.
+- **asyncio copies the context into each task it creates,** so a task logs with the id of the work that started it, and `asyncio.to_thread` copies it into its thread. **A thread pool doesn't:** its threads see none of the caller's variables, so `refund_all` runs each call in a copy, `pool.submit(copy_context().run, ...)` ([python-concurrency](../../python-concurrency/SKILL.md)).
 - **A server or a worker sets it per request or message,** from the caller's header when there is one, minted with `uuid.uuid7()` when not, and sends it on in a header on outbound calls, so another system's logs can be matched to these.
 - A line logged with no id set shows the default, `-`.
 
@@ -145,7 +145,7 @@ pytest's `caplog` holds the records each test logged. Check the level and the me
 def test_each_retry_is_logged_as_a_warning(caplog: pytest.LogCaptureFixture) -> None:
     handler, _ = answers(httpx2.Response(502), httpx2.Response(201))
 
-    gateway(handler).refund(PaymentId("pay-1"), TEN_POUNDS)
+    gateway(handler).refund(REFUND)
 
     [record] = caplog.records
     assert record.levelname == "WARNING"

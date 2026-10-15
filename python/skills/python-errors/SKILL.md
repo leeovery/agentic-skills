@@ -47,7 +47,7 @@ The adapter translates at its boundary, and the edge maps what reaches it, in on
 try:
     self._send(request)
 except httpx2.HTTPError as err:
-    raise PaymentFailed(payment_id) from err
+    raise PaymentFailed(refund.payment_id) from err
 ```
 
 ```python
@@ -61,8 +61,8 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
         code = app(args=argv, prog_name="shop", standalone_mode=False)
     except typer.TyperException as err:
         ...
-    except (ValidationError, OrderError, SettlementError) as err:
-        typer.echo(f"shop: {err}", err=True)
+    except (SettingsError, OrderError, SettlementError) as err:
+        typer.echo(f"shop: {_said(err)}", err=True)
         return 1
     except Exception:
         logger.exception("shop failed")
@@ -70,7 +70,7 @@ def run(app: typer.Typer, argv: Sequence[str] | None) -> int:
     ...
 ```
 
-An `OrderError` or a `SettlementError` is an outcome the user reads, printed once with no traceback. Anything else is a bug, logged once with its traceback.
+A `SettingsError`, an `OrderError` or a `SettlementError` is an outcome the user reads, printed once with its notes and no traceback. Anything else is a bug, logged once with its traceback: a pydantic `ValidationError` too, as the wiring turns the settings' into `SettingsError` and an edge turns its input's into an answer of its own.
 
 ## Decision table
 
