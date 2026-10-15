@@ -86,7 +86,7 @@ Resources close in the reverse of the order they opened, which is the order shut
 
 - **Nested or bracketed `with`** closes last-opened first. The wiring's `_canceller` opens the database, then the gateway's client, in one `with closing(connect(database)) as db, client() as http:`, so the client closes before the database.
 - **An `AsyncExitStack`** gives the same order when the components are decided at runtime: enter the client, then the workers, then the intake, and the stack stops the intake first and closes the client last.
-- **Each close is bounded.** A component whose exit drains work (workers finishing what's queued, a buffer flushing) bounds the drain with `asyncio.timeout`, so one stuck call can't hold the process open. [asyncio.md](asyncio.md) has the queue workers and the poller.
+- **Each close is bounded.** A component whose exit drains work (workers finishing what's queued, a buffer flushing) bounds the drain with `asyncio.timeout`, and one that cancels a task bounds the wait for it to end, as the poller's `stop_within` does, so one stuck call can't hold the process open. [asyncio.md](asyncio.md) has the queue workers and the poller.
 
 ## Async resources
 

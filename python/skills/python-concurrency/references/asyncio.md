@@ -137,12 +137,18 @@ A `TaskGroup` fits work that ends inside one function. A job that runs beside ot
 # src/shop/settlement/poll.py
 @asynccontextmanager
 async def polling(
-    job: Callable[[], Awaitable[object]], *, every: timedelta
+    job: Callable[[], Awaitable[object]],
+    *,
+    every: timedelta,
+    # A cancelled job stops at its next await, so this is ample: one still
+    # running after it has swallowed its cancellation, or is stuck cleaning up.
+    stop_within: timedelta = timedelta(seconds=5),
 ) -> AsyncGenerator[None]:
     """Run job every interval while the body runs; on exit, stop it and wait for it.
 
-    A job that failed is raised once the body ends. If the body raised, or was
-    cancelled, that goes on as it was, with the job's failure as a note.
+    A job that failed, or didn't stop within stop_within, is raised once the
+    body ends. If the body raised, or was cancelled, that goes on as it was,
+    with the job's failure as a note.
 
     The task is held here, not in a TaskGroup: a group around the yield would
     wrap whatever the body raises in an ExceptionGroup.
@@ -151,17 +157,28 @@ async def polling(
     try:
         yield
     except BaseException as err:
-        if failure := await _stopped(task):
-            err.add_note(f"the polled job had failed too: {failure!r}")
+        if failure := await _stopped(task, within=stop_within):
+            err.add_note(f"the polled job {job!r} failed too: {failure!r}")
         raise
-    if failure := await _stopped(task):
+    if failure := await _stopped(task, within=stop_within):
+        failure.add_note(f"from the polled job {job!r}")
         raise failure
 
 
-async def _stopped(task: asyncio.Task[None]) -> BaseException | None:
-    """Cancel task and wait for it to end; return what it failed with, if anything."""
+async def _stopped(
+    task: asyncio.Task[None], *, within: timedelta
+) -> BaseException | None:
+    """Cancel task and wait for it to end; return what it failed with, if anything.
+
+    One still running after within comes back as a TimeoutError. Nothing more
+    can stop it from here.
+    """
     task.cancel()
-    await asyncio.wait([task])
+    try:
+        async with asyncio.timeout(within.total_seconds()):
+            await asyncio.wait([task])
+    except TimeoutError:
+        return TimeoutError(f"still running {within} after it was cancelled")
     return None if task.cancelled() else task.exception()
 
 
@@ -173,6 +190,7 @@ async def _every(job: Callable[[], Awaitable[object]], every: timedelta) -> None
 
 - **`asyncio.wait([task])`** waits without raising the task's own `CancelledError` into the caller, so a cancellation of the caller still propagates, and the task's isn't mistaken for it.
 - **A job that failed is raised once the body ends,** rather than lost. When the body raised, or was cancelled, that exception goes on and the job's failure becomes a note on it: raising the job's in its place would hide the body's, and would turn a cancellation into an error the caller's `asyncio.timeout` or `TaskGroup` doesn't recognise as its own.
+- **The stop has a deadline, `stop_within`,** like every other wait. A cancelled job ends at its next `await`, so five seconds is ample; one still running after that swallowed its cancellation, or is stuck in its cleanup. Nothing can stop it from outside, so the poller reports it: a `TimeoutError` with a note naming the job once the body ends, or a note on what the body raised.
 - **The job's own failures** (a refused settlement, a timeout) are caught inside `job`, as the settler's are, so the loop runs on; only a bug ends it.
 - **Order at shutdown** comes from nesting: the body's work stops first, then the poller, then the client it settles through. [resources.md](resources.md) covers close order.
 
