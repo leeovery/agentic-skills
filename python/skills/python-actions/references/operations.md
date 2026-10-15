@@ -67,7 +67,7 @@ A call's state is local to the call: `Restorer.restore`, below, counts in a loca
 
 ## Guards
 
-Every precondition is checked at the top, before any write, as a named check: `ensure_cancellable(order)` in the [SKILL.md](../SKILL.md#pattern) pattern raises `NotCancellable` unless `order.status.cancellable`.
+Every precondition is checked at the top, before anything it guards, as a named check. The canceller's is its first call, `self.orders.start_cancelling(order_id)` in the [SKILL.md](../SKILL.md#pattern) pattern, which raises `NotCancellable` unless `order.status.cancellable`, from the same write that claims the order ([below](#a-claim-before-the-call-that-cant-be-undone)).
 
 - **A property** when the question is about one value alone: `Status.cancellable`. It lives on the type, so every caller that asks gets the same answer ([python-types](../../python-types/SKILL.md)).
 - **`ensure_x(...)`** when the check raises, or needs more than one value. Its exception carries what it checked as attributes ([python-errors](../../python-errors/SKILL.md)).
@@ -102,7 +102,7 @@ class Withdrawer:
 
 The trap this avoids: a `withdraw` that saves each order as cancelled itself, and forgets the refund, because the refund lives in `cancel`.
 
-- **The field is a one-method Protocol,** `Cancels`, declaring `cancel(order_id, *, reason) -> Order` beside `Withdrawer`. The test chooses: a real `Canceller` over the fakes, when they're cheap to set up, or a fake that records "cancel `o-1`, out of stock".
+- **The field is a one-method Protocol,** `Cancels`, declaring `cancel(order_id, *, reason) -> Order` beside `Withdrawer`. Its tests pass a hand-written fake of it, `FakeCanceller`, which records "cancel `o-1`, out of stock" and raises what the test sets, so they check what the withdrawer asks and none of the canceller's own steps.
 - **`main` wires the chain:** `Withdrawer(orders=store, canceller=canceller)`, the same `Canceller` the edges call.
 
 ## Transactions
@@ -130,7 +130,7 @@ class Restorer:
         return restored
 ```
 
-`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with an explicit `BEGIN`, commits it when the block ends and rolls it back if the block raises, and yields a writer bound to it. Its own `save` is one write in a transaction of its own:
+`TransactionalOrders` is a Protocol beside it with one method, `transaction() -> AbstractContextManager[OrderWrites]`, and `OrderWrites` has `save`. The SQLite store opens the transaction with an explicit `BEGIN IMMEDIATE`, which takes the write lock at once, commits it when the block ends and rolls it back if the block raises, and yields a writer bound to it. Its own `save` is one write in a transaction of its own:
 
 ```python
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -153,12 +153,12 @@ class SqliteOrders:
         Every write in the block goes through the writer it yields. This store's
         own save opens a transaction of its own, which SQLite refuses in here.
         """
-        with _transaction(self.db):
+        with _transaction(self.db, writes=True):
             yield SqliteTransaction(db=self.db)
 ```
 
 - **Every write in the block goes through `tx`,** never the store's own `save`, which opens a transaction of its own. SQLite refuses a `BEGIN` inside another, so that mistake fails at once rather than committing part way through.
-- **A call that leaves the process can't roll back.** A refund or an email sent inside the block has happened even when the commit fails. Make it before the writes, keyed so a retry is safe, as `Canceller` makes its refund; or record it in the transaction and send it after the commit.
+- **A call that leaves the process can't roll back.** A refund or an email sent inside the block has happened even when the commit fails. Make it outside, keyed so a retry is safe: `Canceller` claims the order, refunds, then saves. Or record it in the transaction and send it after the commit.
 - **The fake stages the block's writes on a copy** and keeps them only when the block ends cleanly, so a test sees the rollback ([python-testing](../../python-testing/SKILL.md)).
 - **`-> Generator[T]` on a `@contextmanager`,** not `Iterator[T]`: the stubs mark the `Iterator` form deprecated, and the drop-in's pyrefly fails on it.
 
@@ -208,9 +208,41 @@ def _sync_directory(directory: Path) -> None:
 A message is delivered again, a user presses twice, a retry follows a timeout that had in fact succeeded. Each must leave the state one run would.
 
 - **An upsert, never a check then a write.** `if not store.exists(id): store.insert(order)` lets two runs both see nothing and both insert. The SQLite store's save upserts the order, `INSERT … ON CONFLICT (id) DO UPDATE`, and replaces its lines in the same transaction, so restoring the same export twice leaves one copy of each order.
-- **A conditional write when a change must not overwrite another.** Load, check and save lets a cancel overwrite a shipment that landed between the load and the save. The write states what it expects, `UPDATE orders SET status = 'shipped' WHERE id = ? AND status = 'paid'`, and its row count says whether it won: 0 means another run moved the order first, so reload it and decide again.
-- **An idempotency key on every write to a provider,** derived from the work: the canceller keys its refund `cancel-{order_id}`, and the gateway sends it as `Idempotency-Key`, so a retried cancel refunds once, and a later refund of the same payment for another reason isn't mistaken for a repeat. A fresh `uuid4()` per call gives every retry a new key, and the provider does it twice. The adapter owns the header ([python-protocols](../../python-protocols/SKILL.md)).
-- **A job that stops partway is safe to run again** when it selects what's left to do. `withdraw` cancels only the open orders, so a second run finishes the first's work.
+- **An idempotency key on every write to a provider,** derived from the work: the canceller keys its refund `cancel-{order_id}`, and the gateway sends it as `Idempotency-Key`, so a cancel run twice refunds once, and a later refund of the same payment for another reason isn't mistaken for a repeat. A fresh `uuid4()` per call gives every retry a new key, and the provider does it twice. The adapter owns the header ([python-protocols](../../python-protocols/SKILL.md)).
+- **A job that stops partway is safe to run again** when it selects what's left to do. `withdraw` cancels only the orders still open, an order its first run left `CANCELLING` among them, so a second run finishes the first's work.
+
+### A claim before the call that can't be undone
+
+Load, check and save lets a cancel overwrite a shipment that lands between the load and the save, and by then the refund has gone. The canceller claims the order first, in one write that states what it expects:
+
+```python
+# src/shop/storage/sqlite.py, on SqliteOrders
+def start_cancelling(self, order_id: OrderId) -> Order:
+    """Move the order to CANCELLING and return it, if its status allows cancelling.
+
+    The status is checked and changed by one statement, so a shipment that
+    lands first is refused. Raises NotCancellable with the status it found,
+    or OrderNotFound.
+    """
+    # The statuses come from Status, the rule's owner, bound as one JSON list.
+    cancellable = json.dumps([status for status in Status if status.cancellable])
+    with _transaction(self.db, writes=True):
+        claimed = self.db.execute(
+            "UPDATE orders SET status = ?"
+            " WHERE id = ? AND status IN (SELECT value FROM json_each(?))",
+            (Status.CANCELLING, order_id, cancellable),
+        ).rowcount
+        order = self._read(order_id)
+    if not claimed:
+        raise NotCancellable(order.id, order.status)
+    return order
+```
+
+- **The write is the check.** The `UPDATE` changes the status only where the current one allows cancelling, and its row count says whether it won. 0 means the order can't be cancelled now, whatever it was when someone loaded it, and the store raises `NotCancellable` with the status it found.
+- **The claim is a state of its own, `CANCELLING`,** and the refund waits for it. A shipment written the same way, `UPDATE orders SET status = 'shipped' WHERE id = ? AND status = 'paid'`, misses a claimed order, so nothing ships under the refund.
+- **`CANCELLING` still allows cancelling,** so a cancel that stopped after the claim, at a crash, a refused refund or a redelivered message, runs again and finishes. Its refund carries the same key, so the provider refunds once.
+- **The last write needs no condition.** Nothing else moves a claimed order, so `save` writes it `CANCELLED`, with the time and the reason, whole.
+- **The fake store claims the same way,** refusing what the real one refuses, so the canceller's tests run against the rule they rely on ([python-testing](../../python-testing/SKILL.md)).
 
 ## Edges
 
@@ -259,7 +291,7 @@ def cancel_requested(canceller: Canceller, body: bytes) -> None:
 ```
 
 - **Returning acknowledges the message; raising leaves it on the queue.** A message that can never succeed, such as one for a shipped order, ends in the dead-letter queue, where someone looks at it.
-- **A redelivery is success.** The order already cancelled is the state the message asked for, so the consumer acknowledges it rather than failing forever.
+- **A redelivery is success.** The order already cancelled is the state the message asked for, so the consumer acknowledges it rather than failing forever. An order a delivery left `CANCELLING`, stopped after its claim, the next delivery finishes.
 - **The loop that pulls messages, and its shutdown,** are [python-concurrency](../../python-concurrency/SKILL.md)'s.
 
 ### What an edge never does
@@ -277,4 +309,5 @@ def cancel_requested(canceller: Canceller, body: bytes) -> None:
 - [ ] Guards first, each a named check; another operation's steps reached by holding it.
 - [ ] Writes that land together share one transaction, with no call that leaves the process inside it; files are replaced whole.
 - [ ] A write that can run twice is an upsert or a conditional write; a provider gets a derived key.
+- [ ] A call that can't be undone follows a conditional claim, to a state a second run resumes from.
 - [ ] Each edge parses, calls one operation, and writes or maps the exception.
