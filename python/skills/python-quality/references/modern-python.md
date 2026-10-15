@@ -13,18 +13,18 @@ Contents: checking before writing · upgrading · `from __future__ import annota
 ## Upgrading
 
 1. Raise `requires-python` and `.python-version`, then lock and sync ([python-project](../../python-project/SKILL.md)).
-2. `uv run ruff check --select UP --fix .`, then again, until it changes nothing. Then `uv run ruff check --fix .` clears the imports a rewrite left unused, and `uv run ruff format .` reformats: on a 3.14 floor it drops the brackets around `except A, B:`.
+2. `uv run ruff check --select UP --fix .` until it changes nothing. Then `uv run ruff check --fix .` clears the imports a rewrite left unused, and `uv run ruff format .` reformats.
 3. On a 3.14 floor, delete `from __future__ import annotations` by hand (below); `UP037` has already taken out the quotes it stood in for.
 4. Run the gates, and commit that alone: it changes how the code is written, not what it does.
 5. Make the changes that alter behaviour by hand, each in a change of its own with its tests: `asyncio.get_event_loop()` to `asyncio.run`, a `tarfile` filter made explicit, state passed to a process pool that relied on `fork`.
 
-`--fix` applies only the fixes ruff marks safe. The rows below without a rule are by hand.
+The rows below without a rule are by hand.
 
 ## `from __future__ import annotations`
 
 - **Status:** deprecated, and not removed until after 3.13's end of life in 2029 ([3.14](https://docs.python.org/3/whatsnew/3.14.html), [PEP 749](https://peps.python.org/pep-0749/)). From 3.14 annotations are evaluated lazily without it ([PEP 649](https://peps.python.org/pep-0649/)).
 - **On a 3.14 floor, delete it.** No rule does: `UP010` (default) removes other obsolete `__future__` imports, never this one. `UP037` removes the quotes.
-- **Code that supports 3.13 or older keeps it,** as the way to write unquoted forward references there. Under it, annotations are strings at runtime, so whatever reads them (pydantic, typer, `typing.get_type_hints`) needs every annotated name importable at runtime: no `if TYPE_CHECKING:` import for those names.
+- **Code that supports 3.13 or older keeps it,** for unquoted forward references. Under it, annotations are strings at runtime, so whatever reads them (pydantic, typer, `typing.get_type_hints`) needs every annotated name imported for real, not under `if TYPE_CHECKING:`.
 - **Code that reads annotations** uses `annotationlib.get_annotations(obj, format=Format.FORWARDREF)`. `RUF063` (default) flags reading `__annotations__` from a class's `__dict__`.
 
 ## By version

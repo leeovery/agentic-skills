@@ -1,18 +1,12 @@
-# The drop-in tool config: the example shop's own tool tables. Copy them into
-# pyproject.toml, then rename the example project, shop, to yours: the per-file
-# ignores on src/shop/cli.py (the module that holds main) and src/shop/processes.py
-# (the one adapter that runs a process; delete its line if none does), source_pkgs,
-# root_package, and the packages in the two import-linter contracts.
-#
-# Each setting carries its reason. A rule family joins with its reason, once its
-# findings are fixed. Never loosen a setting to get a run green: fix the code, or
-# suppress the one line with its rule and why. The dependency groups that install
-# these tools, pytest-benchmark and mutmut among them, are python-project's.
+# Copy these tables into pyproject.toml, then rename shop to your project: the
+# per-file ignores on src/shop/cli.py (the module that holds main) and
+# src/shop/processes.py (the one adapter that runs a process; delete its line if
+# none does), source_pkgs, root_package, and the packages in the two import-linter
+# contracts. The dependency groups that install these tools are python-project's.
 
 [tool.ruff.lint]
-# ruff's default set (correctness, suspicious, complexity, performance, style),
-# plus these, each beside the rule it holds. Never "ALL": every upgrade would
-# switch on rules nobody chose.
+# ruff's default set, plus these. Never "ALL": every upgrade would switch on rules
+# nobody chose.
 extend-select = [
     "ANN",     # every signature annotated; Any only where a value really is anything (ANN401)
     "ARG",     # an unused argument is a seam nobody uses, or a bug
@@ -60,15 +54,14 @@ ban-relative-imports = "all"
 "subprocess".msg = "Run processes behind a Protocol that main supplies."
 
 [tool.ruff.lint.flake8-type-checking]
-# pydantic needs a field's type at runtime: one imported only under `if TYPE_CHECKING:`
-# passes every gate, then fails the first time the model is built. With the bases
-# named, TC004 (default) flags it. ruff follows a base only within its file, so the
-# project's own base model, subclassed in another module, joins the list.
+# pydantic needs a field's type at runtime; with the bases named, TC004 (default)
+# flags one imported only under `if TYPE_CHECKING:`. ruff follows a base only within
+# its file, so the project's own base model, subclassed in another module, joins.
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
 
 [tool.ruff.lint.per-file-ignores]
-# main reads the environment and the clock: the one file the ban list allows them.
-# The ignore lifts the whole list, so it names the composition root and nothing else.
+# main reads the environment and the clock. The ignore lifts the whole ban list, so
+# it names the composition root and nothing else.
 "src/shop/cli.py" = ["TID251"]
 # The one adapter that runs a process. It reads neither the clock nor the environment.
 "src/shop/processes.py" = ["TID251"]
@@ -94,7 +87,7 @@ non-exhaustive-match = "error"
 
 [tool.pytest]
 # Unknown markers and config keys, xfails that pass, and duplicate parametrize ids
-# all fail. It switches on future strict options too, so pytest stays pinned in the lock.
+# fail. It switches on future strict options too, so pytest stays pinned in the lock.
 strict = true
 testpaths = ["tests"]
 addopts = [
@@ -122,8 +115,7 @@ asyncio_default_fixture_loop_scope = "function"
 asyncio_default_test_loop_scope = "function"
 
 [tool.coverage.run]
-# Measured with `uv run pytest --cov`, and read for what no test runs. No fail_under:
-# a target gets met with tests that run code and check nothing.
+# No fail_under: a target gets met with tests that run code and check nothing.
 branch = true
 source_pkgs = ["shop"]
 

@@ -20,28 +20,24 @@ A guard is for what neither can say: a module's name, what runs at import, which
 - **It finds the project by walking up to `pyproject.toml`** from its own file, never by a fixed `../..` that breaks when the test moves.
 - **It reads every `.py` file under `src/`,** or `tests/` for a rule about tests, but those in a directory starting with `.` below it. It never skips the root by that test: a checkout can sit inside a hidden directory.
 - **It parses with `ast`** and walks the tree, tracking the qualname of the def or class around each node.
-- **It runs on every Python the project supports,** from 3.11, which `tomllib` needs. A library runs its tests on each Python from its floor ([python-project](../../python-project/SKILL.md)), guards among them, so a node class newer than the floor is looked up only behind a version check, as `ast.TypeAlias` (3.12) and `ast.Interpolation` (3.14) are, and a fixture in newer syntax is a test of its own, skipped below the version that parses it, as guard 3's t-string is. What a guard reports follows the Python it runs on: below 3.14 an annotation runs at import, so guard 2 reads annotations there. Its tests ran on 3.11, 3.12 and 3.13 too; those that read the shop's own source can't there, as the shop is written for 3.14.
+- **It runs on every Python the project supports,** from 3.11, which `tomllib` needs. A node class newer than the floor is looked up only behind a version check.
 - **Each breach says where, what, and the fix:** `src/shop/storage/sqlite.py:45: calls connect at import: call it from main, or from the function that needs it`. `check` fails once with every breach, one per line, and no traceback.
 - **Its allowance only shrinks.** Each entry is `"path:qualname"`, with a comment saying why it's allowed for now. An entry covers every breach in that def or class; one that covers nothing fails, so it's deleted the day the code is fixed.
-- **It's been seen to fail.** A second test writes a module that breaks the rule under `tmp_path`, runs the guard over it, and checks it reports exactly that, and a stale allowance entry too where the guard keeps an allowance, as guards 2 and 3 do. A guard reading the wrong directory otherwise passes forever.
+- **It's been seen to fail.** A second test writes a module that breaks the rule under `tmp_path`, runs the guard over it, and checks it reports exactly that, and a stale allowance entry too where the guard keeps an allowance. A guard reading the wrong directory otherwise passes forever.
 
 ## Where the guards live, and how they're imported
 
-Each guard is a module in `tests/guards/`, beside `source.py`, the helpers. `tests/` is a package, every directory of it with an `__init__.py` (`INP001` asks for them anyway), and pytest runs with `--import-mode=prepend`. pytest puts the first directory above the tests without an `__init__.py`, the project root, on `sys.path`, so `from tests.guards.source import check` resolves. `shop` still comes from the install: in the src layout nothing named `shop` sits at the root, and `pythonpath = ["src"]` is never set.
+Each guard is a module in `tests/guards/`, beside `source.py`, the helpers. Every directory of `tests/` has an `__init__.py` (`INP001` asks for them anyway), and pytest runs with `--import-mode=prepend`, which puts the first directory above them without one, the project root, on `sys.path`, so `from tests.guards.source import check` resolves. `shop` still comes from the install, and `pythonpath = ["src"]` is never set.
 
-`--import-mode=importlib`, which pytest suggests for new projects, leaves `sys.path` alone, and its docs say helpers under `tests/` then can't be imported and belong in the application package, which would ship them in the wheel. pytest 9 does resolve `tests.guards.source` in that mode, through the packages' `__init__.py` files, but its docs promise the opposite, so the guards don't lean on it. Under `tests/`, the helpers never reach the wheel, and pyrefly finds them through `search-path = ["src", "."]` in [pyproject-tools.toml](pyproject-tools.toml).
+`--import-mode=importlib`, which pytest suggests for new projects, leaves `sys.path` alone, and its docs say helpers under `tests/` then can't be imported, so the guards don't use it. Under `tests/`, the helpers never reach the wheel, and pyrefly finds them through `search-path = ["src", "."]` in [pyproject-tools.toml](pyproject-tools.toml).
 
 ## The helpers
 
-`report` is for the tests that prove a guard fails, which compare its list; `check` is for the guard's run over the project.
+`report` is for the tests that prove a guard fails, which compare its list; `check` is for the guard's run over the project. Each guard below elides its imports, these helpers and the standard library's, as `...`.
 
 ```python
 # tests/guards/source.py
-"""Reading the project's own source, for the guards that hold its rules.
-
-Only tests import this. A guard parses the modules under src/ or tests/, walks
-them, and reports each breach as "path:line: what: the fix".
-"""
+"""Reading the project's own source, for the guards that hold its rules. Only tests import this."""
 
 import ast
 import textwrap
@@ -55,7 +51,6 @@ TOP = "<module>"
 
 
 def project_root() -> Path:
-    """The directory holding pyproject.toml, found from this file upward."""
     for directory in Path(__file__).resolve().parents:
         if (directory / "pyproject.toml").is_file():
             return directory
@@ -64,14 +59,11 @@ def project_root() -> Path:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Module:
-    """One of the project's Python files, parsed. Its path is from the root, with slashes."""
-
     path: str
     tree: ast.Module
 
 
 def modules(root: Path, under: str) -> list[Module]:
-    """Parse every .py file below root/under, but those in a directory starting with "."."""
     top = root / under
     return [
         Module(
@@ -84,7 +76,6 @@ def modules(root: Path, under: str) -> list[Module]:
 
 
 def qualify(scope: str, name: str) -> str:
-    """The qualname of name, defined in scope: "Canceller.cancel"."""
     return name if scope == TOP else f"{scope}.{name}"
 
 
@@ -111,8 +102,6 @@ def dotted(node: ast.expr) -> str:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Breach:
-    """Where a rule breaks, in which def or class, what breaks it, and the fix."""
-
     path: str
     line: int
     scope: str
@@ -124,12 +113,7 @@ class Breach:
 
 
 def report(breaches: Iterable[Breach], *, allowed: Iterable[str] = ()) -> list[str]:
-    """Each breach no allowance entry covers, then each entry that covers nothing.
-
-    An entry is "path:qualname", such as "src/shop/report.py:Yearly.render", and
-    covers every breach in that def or class. An entry with no breach left is
-    reported, so it's deleted and the allowance only shrinks.
-    """
+    """Each breach no "path:qualname" entry covers, then each entry that covers nothing."""
     allowance = frozenset(allowed)
     used: set[str] = set()
     problems: list[str] = []
@@ -147,13 +131,11 @@ def report(breaches: Iterable[Breach], *, allowed: Iterable[str] = ()) -> list[s
 
 
 def check(breaches: Iterable[Breach], *, allowed: Iterable[str] = ()) -> None:
-    """Fail with what report finds, one per line, so every breach shows at once."""
     if problems := report(breaches, allowed=allowed):
         pytest.fail("\n".join(problems), pytrace=False)
 
 
 def write(root: Path, name: str, source: str) -> None:
-    """Write source, dedented, to root/name: a fixture that proves a guard fails."""
     path = root / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(source).lstrip("\n"), encoding="utf-8")
@@ -161,134 +143,35 @@ def write(root: Path, name: str, source: str) -> None:
 
 ## Guard 1: modules named for a job
 
-A grab-bag name gives code no reason to live anywhere else ([python-architecture](../../python-architecture/SKILL.md)). A package is named by its `__init__.py`, so it's reported once. It's the [SKILL.md](../SKILL.md#pattern) pattern, there without its imports.
-
-```python
-# tests/guards/test_names.py
-"""Modules and packages are named for the one job they do."""
-
-from collections.abc import Iterator
-from pathlib import Path, PurePosixPath
-
-from tests.guards.source import TOP, Breach, check, modules, project_root, report, write
-
-# These name no job, so any code fits under them.
-GRAB_BAGS = frozenset(
-    {
-        "common",
-        "helpers",
-        "misc",
-        "models",
-        "services",
-        "shared",
-        "types",
-        "util",
-        "utils",
-    }
-)
-FIX = "name it for the one thing it does, or move each part to the module it serves"
-
-
-def grab_bags(root: Path) -> Iterator[Breach]:
-    """The modules and packages in root's src/ named for no job."""
-    for module in modules(root, "src"):
-        path = PurePosixPath(module.path)
-        is_package = path.stem == "__init__"
-        name = path.parent.name if is_package else path.stem
-        if name in GRAB_BAGS:
-            kind = "package" if is_package else "module"
-            yield Breach(
-                path=module.path,
-                line=1,
-                scope=TOP,
-                what=f"{kind} {name} names no job",
-                fix=FIX,
-            )
-
-
-def test_modules_are_named_for_their_job() -> None:
-    check(grab_bags(project_root()))
-
-
-def test_the_naming_guard_finds_a_grab_bag(tmp_path: Path) -> None:
-    write(tmp_path, "src/shop/utils/__init__.py", '"""Odds and ends."""')
-    write(tmp_path, "src/shop/order/helpers.py", '"""Odds and ends."""')
-    write(tmp_path, "src/shop/order/cancel.py", '"""Cancelling an order."""')
-
-    assert report(grab_bags(tmp_path)) == [
-        f"src/shop/order/helpers.py:1: module helpers names no job: {FIX}",
-        f"src/shop/utils/__init__.py:1: package utils names no job: {FIX}",
-    ]
-```
+A grab-bag name gives code no reason to live anywhere else ([python-architecture](../../python-architecture/SKILL.md)). A package is named by its `__init__.py`, so it's reported once. The guard is the [SKILL.md](../SKILL.md#pattern) pattern.
 
 ## Guard 2: nothing runs at import
 
 A module body declares: imports, constants, functions, classes and its logger. A settings object, a client, a connection or a registration at module level runs in every test that imports it, before any test can stop it ([python-architecture](../../python-architecture/SKILL.md)).
 
-- Decorators and default values run with the `def`; the body doesn't. A class body runs.
-- From 3.14 annotations are evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)), so a call inside one doesn't run at import, and nor does a `type` alias's value. Below 3.14 an annotation on a def, or at module or class level, runs where it's written, so there the guard reads it; its fixture expects what the Python running it does.
-- `DECLARATIONS` are calls that build a type, a logger, a context variable or a constant and touch nothing outside the process: `frozenset`, `tuple` and `re.compile` for constants, and `ContextVar` because the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for one at module level. A name joins only on that test, with the project's own: `ConfigDict` and `SettingsConfigDict` are pydantic's declarations of how a boundary model parses and where settings come from, and `Field`, `field_validator` and `model_validator` declare a field's constraints and a model's checks, which run when a model parses, never at import. `TypeVar` stays out: on a 3.12 floor a type parameter replaces it (`UP046`, `UP047`).
-- A name matches as it's written, `re.compile` not `compile`, and a call among an allowed call's arguments is still checked, so `frozenset(open(path))` fails.
-- A `__main__.py` is run, never imported, so it's skipped.
+- **Decorators and default values run with the `def`; the body doesn't.** A class body runs. A `__main__.py` is run, never imported, so it's skipped.
+- **`DECLARATIONS` build a type, a logger or a constant, and touch nothing outside the process.** A name matches as it's written, `re.compile` not `compile`, and a call among an allowed call's arguments is still checked, so `frozenset(open(path))` fails. A project adds its own on that test, such as `timedelta`, `ContextVar`, which the [contextvars docs](https://docs.python.org/3/library/contextvars.html) ask for at module level, and pydantic's `ConfigDict`, `Field` and validators; never `TypeVar`, which a type parameter replaces from 3.12.
+- **Annotations are skipped,** as from 3.14 they're evaluated lazily ([PEP 649](https://peps.python.org/pep-0649/)). Below 3.14 they run where they're written, so a project on an older floor reads them too.
 
 ```python
 # tests/guards/test_import_time.py
 """Nothing runs at import: a module declares, and main does the work."""
 
-import ast
-import sys
-from collections.abc import Iterator
-from pathlib import Path
+...
 
-from tests.guards.source import (
-    TOP,
-    Breach,
-    check,
-    dotted,
-    modules,
-    project_root,
-    qualify,
-    report,
-    write,
-)
-
-# Calls that build a type, a logger, a context variable or a constant: each touches
-# nothing outside the process and builds the same thing on every import. A call among
-# their arguments is checked like any other. The contextvars docs ask for a ContextVar
-# to be made at module level, never in a closure. pydantic's Field and validator
-# decorators declare how a model parses, as its ConfigDict does.
 DECLARATIONS = frozenset(
-    {
-        "NewType",
-        "dataclass",
-        "field",
-        "logging.getLogger",
-        "ContextVar",
-        "ConfigDict",
-        "SettingsConfigDict",
-        "Field",
-        "field_validator",
-        "model_validator",
-        "frozenset",
-        "re.compile",
-        "timedelta",
-        "tuple",
-    }
+    {"NewType", "dataclass", "field", "logging.getLogger", "frozenset", "re.compile"}
 )
 FIX = "call it from main, or from the function that needs it"
-# From 3.14 an annotation is evaluated only when something asks for it (PEP 649);
-# before, one on a def or at module or class level runs where it's written.
-LAZY_ANNOTATIONS = sys.version_info >= (3, 14)
 
 # Calls let stand for now, each "path:qualname" with why. The set only shrinks.
 ALLOWED: frozenset[str] = frozenset()
 
 
 def calls_at_import(root: Path) -> Iterator[Breach]:
-    """The calls root's src/ modules make as they're imported, but declarations."""
     for module in modules(root, "src"):
         if module.path.endswith("/__main__.py"):
-            continue  # a __main__ module is run, never imported
+            continue
         for scope, call in _runs(module.tree, TOP):
             name = dotted(call.func)
             if name not in DECLARATIONS:
@@ -300,15 +183,10 @@ def calls_at_import(root: Path) -> Iterator[Breach]:
 
 def _runs(node: ast.AST, scope: str) -> Iterator[tuple[str, ast.Call]]:
     """The calls node makes when its module is imported, each with its scope."""
-    if sys.version_info >= (3, 12) and isinstance(node, ast.TypeAlias):
-        return  # a type alias's value is evaluated lazily, like an annotation
     parts: list[ast.AST | None]
     match node:
         case ast.FunctionDef() | ast.AsyncFunctionDef():
-            # Decorators and defaults run with the def; the body runs when it's called.
             parts = [*node.decorator_list, *node.args.defaults, *node.args.kw_defaults]
-            if not LAZY_ANNOTATIONS:
-                parts += [*_annotations(node.args), node.returns]
         case ast.Lambda():
             parts = [*node.args.defaults, *node.args.kw_defaults]
         case ast.ClassDef():
@@ -316,7 +194,7 @@ def _runs(node: ast.AST, scope: str) -> Iterator[tuple[str, ast.Call]]:
             for statement in node.body:
                 yield from _runs(statement, qualify(scope, node.name))
         case ast.AnnAssign():
-            parts = [node.value] if LAZY_ANNOTATIONS else [node.annotation, node.value]
+            parts = [node.value]
         case ast.Call():
             yield scope, node
             parts = list(ast.iter_child_nodes(node))
@@ -325,12 +203,6 @@ def _runs(node: ast.AST, scope: str) -> Iterator[tuple[str, ast.Call]]:
     for part in parts:
         if part is not None:
             yield from _runs(part, scope)
-
-
-def _annotations(args: ast.arguments) -> list[ast.expr | None]:
-    """The annotation of each of a def's parameters."""
-    every = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
-    return [arg.annotation for arg in every if arg is not None]
 
 
 def test_nothing_runs_at_import() -> None:
@@ -365,122 +237,23 @@ def test_the_import_guard_finds_a_call_at_import(tmp_path: Path) -> None:
         f"src/shop/store.py:8: calls sqlite3.connect at import: {FIX}",
         "src/shop/gone.py:old: breaks the rule no more: delete it from the allowance",
     ]
-
-
-def test_the_import_guard_lets_declarations_stand(tmp_path: Path) -> None:
-    write(
-        tmp_path,
-        "src/shop/prices.py",
-        '''
-        """Prices: each declaration the guard allows, and a file read inside one."""
-        import logging
-        import re
-        from contextvars import ContextVar
-        from dataclasses import dataclass, field
-        from datetime import timedelta
-        from typing import NewType, Self
-
-        from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-        from pydantic_settings import BaseSettings, SettingsConfigDict
-
-        logger = logging.getLogger(__name__)
-        PRICE_LIST: ContextVar[str] = ContextVar("price_list", default="retail")
-        Sku = NewType("Sku", str)
-        SKU = re.compile(r"[A-Z]{3}-[0-9]{4}")
-        SYMBOLS = {"GBP": "£", "EUR": "€"}
-        CURRENCIES = tuple(SYMBOLS)
-        ZERO_DECIMAL = frozenset({"JPY", "KRW"})
-        BLOCKED = frozenset(open("blocked.txt"))
-
-
-        class Settings(BaseSettings):
-            model_config = SettingsConfigDict(env_prefix="SHOP_")
-            grace: timedelta = timedelta(days=14)
-
-
-        class PriceRequest(BaseModel):
-            model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-            sku: Sku
-            quantity: int = Field(gt=0)
-
-            @field_validator("sku")
-            @classmethod
-            def known(cls, sku: Sku) -> Sku:
-                return sku
-
-            @model_validator(mode="after")
-            def priced(self) -> Self:
-                return self
-
-
-        @dataclass(frozen=True, slots=True)
-        class Basket:
-            skus: list[Sku] = field(default_factory=list)
-        ''',
-    )
-
-    assert report(calls_at_import(tmp_path)) == [
-        f"src/shop/prices.py:19: calls open at import: {FIX}",
-    ]
-
-
-def test_the_import_guard_reads_annotations_as_this_python_runs_them(
-    tmp_path: Path,
-) -> None:
-    write(
-        tmp_path,
-        "src/shop/limits.py",
-        '''
-        """Limits, one of them read as its annotation is evaluated."""
-        from typing import Annotated
-
-        from shop.config import load_limit
-
-        LIMIT: Annotated[int, load_limit()] = 5
-        ''',
-    )
-
-    # A library's matrix runs the guard on each Python it supports, and each
-    # reports what runs at import there.
-    expected: list[str] = (
-        []
-        if sys.version_info >= (3, 14)
-        else [f"src/shop/limits.py:6: calls load_limit at import: {FIX}"]
-    )
-    assert report(calls_at_import(tmp_path)) == expected
 ```
 
 ## Guard 3: values worded by display
 
-How a value reads to people is `shop.display`'s to say. Everywhere else, a format spec, `format()` or `strftime()` is a copy of that rule that will drift ([python-architecture](../../python-architecture/SKILL.md)). ruff's `UP031` and `UP032`, in the default set, flag `%` formatting and a literal's `str.format`, so specs end up in f-strings, where this guard reads them, as it does in a t-string's interpolations. A `.format()` on a template held in a name, which ruff leaves alone, and `strftime` imported from `time`, it reports by the name called. A stored or sent value has an encoder of its own, `isoformat()` and the like, never a display function ([python-types](../../python-types/SKILL.md)).
+How a value reads to people is `shop.display`'s to say. Everywhere else, a format spec, `format()` or `strftime()` is a copy of that rule that will drift ([python-architecture](../../python-architecture/SKILL.md)). ruff's `UP031` and `UP032`, in the default set, flag `%` formatting and a literal's `str.format`, so specs end up in f-strings, where this guard reads them. A `.format()` on a template held in a name, which ruff leaves alone, and `strftime` imported from `time`, it reports by the name called. A t-string's interpolations hold format specs too: a project that writes them reads `ast.Interpolation` as well, behind a check for 3.14.
 
 ```python
 # tests/guards/test_wording.py
 """Values are worded for people by shop.display alone."""
 
-import ast
-import sys
-from collections.abc import Iterator
-from pathlib import Path
-
-import pytest
-
-from tests.guards.source import (
-    Breach,
-    check,
-    modules,
-    project_root,
-    report,
-    scoped,
-    write,
-)
+...
 
 DISPLAY = "src/shop/display.py"
 FIX = "call shop.display"
 
 
 def wording(root: Path) -> Iterator[Breach]:
-    """Where root's src/ modules, but display, word a value themselves."""
     for module in modules(root, "src"):
         if module.path == DISPLAY:
             continue
@@ -493,18 +266,7 @@ def wording(root: Path) -> Iterator[Breach]:
 
 
 def _words(node: ast.AST) -> tuple[int, str] | None:
-    """Where and how node words a value: a format spec, format(), str.format() or strftime().
-
-    A spec is read in an f-string and in a t-string alike; a Python older than
-    3.14 has no t-strings, nor ast.Interpolation. A method goes by its name, as
-    the guard can't see the type it's called on.
-    """
-    if (
-        sys.version_info >= (3, 14)
-        and isinstance(node, ast.Interpolation)
-        and isinstance(node.format_spec, ast.JoinedStr)
-    ):
-        return node.lineno, "words a value with a format spec"
+    """Where and how node words a value. A method goes by its name, as its type is unseen."""
     match node:
         case ast.FormattedValue(format_spec=ast.JoinedStr()):
             return node.lineno, "words a value with a format spec"
@@ -553,139 +315,56 @@ def test_the_wording_guard_finds_a_value_worded_in_place(tmp_path: Path) -> None
         f"src/shop/report.py:13: words a value with str.format(): {FIX}",
         f"src/shop/report.py:13: words a time with strftime(): {FIX}",
     ]
-
-
-@pytest.mark.skipif(
-    sys.version_info < (3, 14), reason="t-strings came in 3.14: older can't parse one"
-)
-def test_the_wording_guard_reads_a_t_strings_format_spec(tmp_path: Path) -> None:
-    write(
-        tmp_path,
-        "src/shop/banner.py",
-        '''
-        """Today's banner, worded where it's built."""
-        from string.templatelib import Template
-
-
-        def banner(total: int) -> Template:
-            return t"{total / 100:.2f} today"
-        ''',
-    )
-
-    assert report(wording(tmp_path)) == [
-        f"src/shop/banner.py:6: words a value with a format spec: {FIX}",
-    ]
 ```
 
 ## Guard 4: logging configured by main
 
-`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). It goes by the name called, so `from logging import captureWarnings` is caught as well as `logging.basicConfig`, and `addHandler` or `setLevel` on any logger; `logging.disable` only by its whole name, as `disable` alone is too common a word. A logger changed rather than called is caught too: `propagate`, `disabled`, `level` or `handlers` assigned, and a call on its `handlers` list, such as `handlers.clear()`. Those words are common, so they count only on what is plainly a logger: a name bound from `logging.getLogger(...)`, the module's `logger`, `logging.root`, or a `getLogger(...)` call itself. A domain class setting `self.level` passes; its fixture holds one. Its fixture has each form. ruff's `LOG015`, in the default set, catches a call on the root logger.
+`main` configures logging once; a module names its logger and nothing more ([python-errors](../../python-errors/SKILL.md)). ruff's `LOG015`, in the default set, catches a call on the root logger.
+
+- **It goes by the name called,** so `from logging import captureWarnings` is caught as well as `logging.basicConfig`, and `addHandler` or `setLevel` on any logger; `logging.disable` only by its whole name, as `disable` alone is too common a word. `CONFIGURES` grows with the rest of `logging`'s configuring calls a project meets: `fileConfig`, `addFilter`, `removeHandler`, `setLoggerClass`.
+- **A setting assigned on the module's `logger`,** such as `propagate` or `handlers`, is caught too. Those words are common, so one on another logger, a name bound from `getLogger(...)` or `logging.root`, needs the guard to track which names are loggers.
 
 ```python
 # tests/guards/test_logging.py
 """Logging is configured once, by main; every other module only names its logger."""
 
-import ast
-from collections.abc import Iterator
-from pathlib import Path
-
-from tests.guards.source import (
-    Breach,
-    check,
-    dotted,
-    modules,
-    project_root,
-    report,
-    scoped,
-    write,
-)
+...
 
 ENTRY = "src/shop/cli.py"
 # Called by these names on any logger or handler, or imported from logging.
 CONFIGURES = frozenset(
-    {
-        "addFilter",
-        "addHandler",
-        "basicConfig",
-        "captureWarnings",
-        "dictConfig",
-        "fileConfig",
-        "removeFilter",
-        "removeHandler",
-        "setLevel",
-        "setLoggerClass",
-        "setLogRecordFactory",
-    }
+    {"addHandler", "basicConfig", "captureWarnings", "dictConfig", "setLevel"}
 )
-# Too common a word to go by alone, so only as logging's own.
 DISABLE = "logging.disable"
-# A logger's own settings, changed by assigning them. The words are common, so
-# they count only on what is plainly a logger.
 SETTINGS = frozenset({"disabled", "handlers", "level", "propagate"})
-GET_LOGGER = frozenset({"logging.getLogger", "getLogger"})
-ROOT = "logging.root"
 FIX = "leave it to main; a module only calls logging.getLogger(__name__)"
 
 
 def configures_logging(root: Path) -> Iterator[Breach]:
-    """The calls and assignments in root's src/ modules, but main's, that configure logging."""
     for module in modules(root, "src"):
         if module.path == ENTRY:
             continue
-        loggers = _loggers(module.tree)
         for scope, node in scoped(module.tree):
-            if found := _configures(node, loggers):
+            if found := _configures(node):
                 line, what = found
                 yield Breach(
                     path=module.path, line=line, scope=scope, what=what, fix=FIX
                 )
 
 
-def _configures(node: ast.AST, loggers: set[str]) -> tuple[int, str] | None:
-    """Where and how node configures logging: a call, a logger's handlers changed, a setting."""
+def _configures(node: ast.AST) -> tuple[int, str] | None:
+    """Where and how node configures logging: a call, or a setting on the logger."""
     match node:
         case ast.Call(func=ast.Attribute(attr=name) | ast.Name(id=name) as func) if (
             name in CONFIGURES or dotted(func) == DISABLE
         ):
             return node.lineno, f"configures logging with {ast.unparse(func)}"
-        case ast.Call(
-            func=ast.Attribute(
-                value=ast.Attribute(value=owner, attr="handlers")
-            ) as func
-        ) if _is_logger(owner, loggers):
-            return node.lineno, f"configures logging with {ast.unparse(func)}"
-        case ast.Attribute(value=owner, attr=name, ctx=ast.Store()) if (
-            name in SETTINGS and _is_logger(owner, loggers)
+        case ast.Attribute(value=ast.Name(id="logger"), attr=name, ctx=ast.Store()) if (
+            name in SETTINGS
         ):
             return node.lineno, f"configures logging by setting {ast.unparse(node)}"
         case _:
             return None
-
-
-def _loggers(tree: ast.Module) -> set[str]:
-    """The names in tree plainly bound to a logger: logger, and each bound from one."""
-    names = {"logger"}
-    for node in ast.walk(tree):
-        match node:
-            case (
-                ast.Assign(targets=[ast.Name(id=name)], value=ast.expr() as value)
-                | ast.AnnAssign(target=ast.Name(id=name), value=ast.expr() as value)
-            ) if _is_logger(value, names):
-                names.add(name)
-            case _:
-                pass
-    return names
-
-
-def _is_logger(node: ast.expr, loggers: set[str]) -> bool:
-    """Whether node is plainly a logger: a name bound to one, getLogger(), or the root."""
-    match node:
-        case ast.Name(id=name):
-            return name in loggers
-        case ast.Call(func=func):
-            return dotted(func) in GET_LOGGER
-        case _:
-            return dotted(node) == ROOT
 
 
 def test_only_main_configures_logging() -> None:
@@ -699,7 +378,6 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
         '''
         """Refunds, logging to a file of their own."""
         import logging
-        import logging.config
         from logging import captureWarnings
 
         logger = logging.getLogger(__name__)
@@ -707,42 +385,19 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
 
         def setup() -> None:
             logging.basicConfig(level=logging.DEBUG)
-            logging.config.dictConfig({"version": 1})
             captureWarnings(True)
-            logger.addHandler(logging.FileHandler("refunds.log"))
             logger.setLevel(logging.DEBUG)
             logger.propagate = False
-            logging.getLogger("httpx2").handlers.clear()
             logging.disable(logging.INFO)
-            audit = logging.getLogger("shop.audit")
-            audit.disabled = True
-            logging.root.level = logging.DEBUG
-        ''',
-    )
-    write(
-        tmp_path,
-        "src/shop/order/priority.py",
-        '''
-        """How urgent an order is, from one to five."""
-
-
-        class Priority:
-            def __init__(self, level: int) -> None:
-                self.level = level
         ''',
     )
 
     assert report(configures_logging(tmp_path)) == [
-        f"src/shop/payments/gateway.py:10: configures logging with logging.basicConfig: {FIX}",
-        f"src/shop/payments/gateway.py:11: configures logging with logging.config.dictConfig: {FIX}",
-        f"src/shop/payments/gateway.py:12: configures logging with captureWarnings: {FIX}",
-        f"src/shop/payments/gateway.py:13: configures logging with logger.addHandler: {FIX}",
-        f"src/shop/payments/gateway.py:14: configures logging with logger.setLevel: {FIX}",
-        f"src/shop/payments/gateway.py:15: configures logging by setting logger.propagate: {FIX}",
-        f"src/shop/payments/gateway.py:16: configures logging with logging.getLogger('httpx2').handlers.clear: {FIX}",
-        f"src/shop/payments/gateway.py:17: configures logging with logging.disable: {FIX}",
-        f"src/shop/payments/gateway.py:19: configures logging by setting audit.disabled: {FIX}",
-        f"src/shop/payments/gateway.py:20: configures logging by setting logging.root.level: {FIX}",
+        f"src/shop/payments/gateway.py:9: configures logging with logging.basicConfig: {FIX}",
+        f"src/shop/payments/gateway.py:10: configures logging with captureWarnings: {FIX}",
+        f"src/shop/payments/gateway.py:11: configures logging with logger.setLevel: {FIX}",
+        f"src/shop/payments/gateway.py:12: configures logging by setting logger.propagate: {FIX}",
+        f"src/shop/payments/gateway.py:13: configures logging with logging.disable: {FIX}",
     ]
 ```
 
@@ -750,45 +405,22 @@ def test_the_logging_guard_finds_a_module_configuring_logging(tmp_path: Path) ->
 
 A test that needs `monkeypatch.setattr` has found a missing seam ([python-testing](../../python-testing/SKILL.md)); `unittest.mock` is banned by ruff, so this guard covers the patch ruff can't see.
 
-- **Every way to patch, on every `MonkeyPatch`:** `setattr`, `delattr`, `setitem` and `delitem`, on the `monkeypatch` fixture, on a parameter or a variable of any name annotated `pytest.MonkeyPatch`, on a name bound to one built in place, `pytest.MonkeyPatch()` or a `context()` of the class or of the fixture, by a `with`, an `=` or a `:=`, and on one built in the call itself, `pytest.MonkeyPatch().setattr(...)`. A name bound from another found counts too, so `patchers` searches until it finds no more. Its fixture has each form.
-- **`setenv` and `delenv` are allowed.** The environment is the process's input, not code, and the session fixture in [python-testing](../../python-testing/SKILL.md)'s isolation uses them to keep the machine's variables out. A test of a component never needs them: the component takes the value ([python-architecture](../../python-architecture/SKILL.md)).
-- **It knows a `MonkeyPatch` by its annotation,** which ruff's `ANN` asks of every parameter, so a fixture passed on under another name is still found.
+- **`setattr`, `delattr`, `setitem` and `delitem`, on every `MonkeyPatch`:** the fixture, a parameter annotated `pytest.MonkeyPatch` (ruff's `ANN` asks every parameter for one), and a name a `context()` of either is bound to. `patchers` searches until it finds no more, as a name can be bound from another. A project that builds one with `pytest.MonkeyPatch()` binds that name in `_bound` too.
+- **`setenv` and `delenv` are allowed.** The environment is the process's input, not code, and the session fixture in [python-testing](../../python-testing/SKILL.md)'s isolation uses them to keep the machine's variables out. A component never needs them: it takes the value ([python-architecture](../../python-architecture/SKILL.md)).
 
 ```python
 # tests/guards/test_patching.py
 """Tests pass a fake through a seam; they never patch an attribute or an item in place."""
 
-import ast
-from collections.abc import Iterator
-from pathlib import Path
-
-from tests.guards.source import (
-    Breach,
-    check,
-    dotted,
-    modules,
-    project_root,
-    report,
-    scoped,
-    write,
-)
+...
 
 FIX = "take the dependency as a parameter, and pass a fake from the test"
-# setenv and delenv aren't among them: the environment is what the process is
-# given, not code, and the session fixture uses them to keep the machine's out.
 PATCHES = frozenset({"setattr", "delattr", "setitem", "delitem"})
 MONKEYPATCH = frozenset({"pytest.MonkeyPatch", "MonkeyPatch"})
 
 
 def patchers(tree: ast.Module) -> set[str]:
-    """The names a MonkeyPatch goes by in tree.
-
-    The fixture's own; any name annotated as one, which ruff's ANN asks of every
-    parameter; and any name bound to one made in place, by MonkeyPatch() or by a
-    context() of the class or of one, in a with, an assignment or a :=. A name
-    bound from another found here counts too, so the search runs until it finds
-    no more.
-    """
+    """The names a MonkeyPatch goes by in tree, searched until no more are found."""
     names = {"monkeypatch"}
     while True:
         found = {name for node in ast.walk(tree) if (name := _bound(node, names))}
@@ -798,51 +430,27 @@ def patchers(tree: ast.Module) -> set[str]:
 
 
 def _bound(node: ast.AST, patchers: set[str]) -> str | None:
-    """The name node binds to a MonkeyPatch, if it binds one."""
     match node:
-        case (
-            ast.arg(arg=name, annotation=ast.expr() as kind)
-            | ast.AnnAssign(target=ast.Name(id=name), annotation=ast.expr() as kind)
-        ) if dotted(kind) in MONKEYPATCH:
+        case ast.arg(arg=name, annotation=ast.expr() as kind) if (
+            dotted(kind) in MONKEYPATCH
+        ):
             return name
-        case (
-            ast.withitem(context_expr=made, optional_vars=ast.Name(id=name))
-            | ast.Assign(targets=[ast.Name(id=name)], value=made)
-            | ast.NamedExpr(target=ast.Name(id=name), value=made)
-        ) if _makes(made, patchers):
+        case ast.withitem(
+            context_expr=ast.Call(func=ast.Attribute(value=owner, attr="context")),
+            optional_vars=ast.Name(id=name),
+        ) if dotted(owner) in MONKEYPATCH | patchers:
             return name
         case _:
             return None
 
 
-def _makes(node: ast.expr, patchers: set[str]) -> bool:
-    """Whether node makes a MonkeyPatch: MonkeyPatch(), or a context() of the class or of one."""
-    match node:
-        case ast.Call(func=func) if dotted(func) in MONKEYPATCH:
-            return True
-        case ast.Call(func=ast.Attribute(value=owner, attr="context")):
-            return dotted(owner) in MONKEYPATCH or _is_patcher(owner, patchers)
-        case _:
-            return False
-
-
-def _is_patcher(node: ast.expr, patchers: set[str]) -> bool:
-    """Whether node is a MonkeyPatch: a name one goes by, or one made in place."""
-    match node:
-        case ast.Name(id=name):
-            return name in patchers
-        case _:
-            return _makes(node, patchers)
-
-
 def patches(root: Path) -> Iterator[Breach]:
-    """Each setattr, delattr, setitem and delitem on a MonkeyPatch in root's tests/."""
     for module in modules(root, "tests"):
         names = patchers(module.tree)
         for scope, node in scoped(module.tree):
             match node:
                 case ast.Call(func=ast.Attribute(value=owner, attr=method) as func) if (
-                    method in PATCHES and _is_patcher(owner, names)
+                    method in PATCHES and dotted(owner) in names
                 ):
                     yield Breach(
                         path=module.path,
@@ -872,74 +480,36 @@ def test_the_patching_guard_finds_a_patch_on_any_monkeypatch(tmp_path: Path) -> 
 
         def test_cancel_stamps_the_time(monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.setattr("shop.order.cancel.datetime", None)
-            monkeypatch.delattr("shop.order.cancel.logger")
 
 
         def test_cancel_offline(patcher: pytest.MonkeyPatch) -> None:
             patcher.setitem(sys.modules, "shop.payments", None)
-            patcher.delitem(sys.modules, "shop.storage")
 
 
         def test_cancel_from_the_environment() -> None:
             with pytest.MonkeyPatch.context() as env:
                 env.setenv("SHOP_DATABASE", "shop.db")
-                env.delenv("SHOP_GATEWAY_URL")
-                env.setattr("shop.order.cancel.datetime", None)
-
-
-        def test_cancel_in_a_block(monkeypatch: pytest.MonkeyPatch) -> None:
-            with monkeypatch.context() as inside:
-                inside.setattr("shop.order.cancel.logger", None)
-
-
-        def test_cancel_with_a_patcher_of_its_own() -> None:
-            mp = pytest.MonkeyPatch()
-            mp.setattr("shop.order.cancel.datetime", None)
-            pytest.MonkeyPatch().delitem(sys.modules, "shop.payments")
-            mp.undo()
+                env.delattr("shop.order.cancel.logger")
         ''',
     )
 
     assert report(patches(tmp_path)) == [
         f"tests/test_cancel.py:8: patches with monkeypatch.setattr: {FIX}",
-        f"tests/test_cancel.py:9: patches with monkeypatch.delattr: {FIX}",
-        f"tests/test_cancel.py:13: patches with patcher.setitem: {FIX}",
-        f"tests/test_cancel.py:14: patches with patcher.delitem: {FIX}",
-        f"tests/test_cancel.py:21: patches with env.setattr: {FIX}",
-        f"tests/test_cancel.py:26: patches with inside.setattr: {FIX}",
-        f"tests/test_cancel.py:31: patches with mp.setattr: {FIX}",
-        f"tests/test_cancel.py:32: patches with pytest.MonkeyPatch().delitem: {FIX}",
+        f"tests/test_cancel.py:12: patches with patcher.setitem: {FIX}",
+        f"tests/test_cancel.py:18: patches with env.delattr: {FIX}",
     ]
 ```
 
 ## Guard 6: domain names say what they are or do
 
-An operation is named by its verb, a value by what it is, and neither repeats the package it sits in ([python-actions](../../python-actions/SKILL.md)). The guard reports a class with a suffix that says nothing, and a function whose name holds its package's last word: `cancel_order` in `shop.order`, `parse_money` in `shop.money`. Only the domain is read, and the guard takes its list from the import-linter `forbidden` contract in `pyproject.toml`, through `tomllib`, so the two can't drift apart; an adapter subclassing `logging.Handler` is rightly a Handler.
+An operation is named by its verb, a value by what it is, and neither repeats the package it sits in ([python-actions](../../python-actions/SKILL.md)). The guard reports a class with a suffix that says nothing, and a function whose name holds its package's last word: `cancel_order` in `shop.order`, `parse_money` in `shop.money`. Only the domain is read, and the guard takes its list from the import-linter `forbidden` contract in `pyproject.toml`, through `tomllib`, so the two can't drift apart; an adapter subclassing `logging.Handler` is rightly a Handler. A name is split on `_`, so `reorder` in `shop.order` passes. Modules are guard 1's: `shop/order/order.py` is rightly named for what an order is.
 
 ```python
 # tests/guards/test_domain_names.py
 """Domain names say what they are or do: no OrderManager, no cancel_order."""
 
-import ast
-import tomllib
-from collections.abc import Iterator
-from pathlib import Path
+...
 
-import pytest
-
-from tests.guards.source import (
-    Breach,
-    check,
-    modules,
-    project_root,
-    qualify,
-    report,
-    scoped,
-    write,
-)
-
-# Its source modules are the domain. An adapter may need a suffix: a
-# logging.Handler subclass is a Handler.
 CONTRACT = "The domain imports no framework, client or wire library"
 SUFFIXES = ("Service", "Manager", "Handler", "Processor")
 FIX = "name an operation by its verb (Canceller), a value by what it is"
@@ -947,11 +517,7 @@ REPEATS = "drop the word its package already says (cancel, not cancel_order)"
 
 
 def domain(root: Path) -> dict[str, str]:
-    """Each domain package and module, as its path from root, and its name's last word.
-
-    They're read from the import-linter contract that keeps frameworks out of
-    the domain, so the guard and the contract can't disagree.
-    """
+    """The domain contract's packages and modules, as paths from root, with their last words."""
     config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     for contract in config["tool"]["importlinter"]["contracts"]:
         if contract["name"] == CONTRACT:
@@ -963,7 +529,6 @@ def domain(root: Path) -> dict[str, str]:
 
 
 def package_of(path: str, packages: dict[str, str]) -> str | None:
-    """The last word of the domain package or module that holds path, if one does."""
     for base, word in packages.items():
         if path == f"{base}.py" or path.startswith(f"{base}/"):
             return word
@@ -971,7 +536,6 @@ def package_of(path: str, packages: dict[str, str]) -> str | None:
 
 
 def vague_names(root: Path) -> Iterator[Breach]:
-    """Domain classes named for no job, and functions that repeat their package."""
     packages = domain(root)
     for module in modules(root, "src"):
         package = package_of(module.path, packages)
@@ -1016,9 +580,6 @@ def test_the_domain_name_guard_finds_a_manager_and_a_repeat(tmp_path: Path) -> N
         tmp_path,
         "src/shop/order/manage.py",
         '''
-        """Everything to do with orders."""
-
-
         class OrderManager:
             def cancel_order(self) -> None: ...
 
@@ -1031,14 +592,10 @@ def test_the_domain_name_guard_finds_a_manager_and_a_repeat(tmp_path: Path) -> N
 
     assert report(vague_names(tmp_path)) == [
         f"src/shop/money.py:1: parse_money repeats its package's name: {REPEATS}",
-        f"src/shop/order/manage.py:4: class OrderManager is named for no job: {FIX}",
-        f"src/shop/order/manage.py:5: cancel_order repeats its package's name: {REPEATS}",
+        f"src/shop/order/manage.py:1: class OrderManager is named for no job: {FIX}",
+        f"src/shop/order/manage.py:2: cancel_order repeats its package's name: {REPEATS}",
     ]
 ```
-
-- **Words, not letters.** The name is split on `_`, so `reorder` and `reordered` in `shop.order` pass, and `cancel_order` doesn't.
-- **Functions and classes, not modules.** `shop/order/order.py` holds what an order is, and is rightly named for it; guard 1 holds module names to a job.
-- **Its fixture writes a `pyproject.toml` too,** with the contract the guard looks for, so the fixture's domain is what the guard reads.
 
 ## What syntax can't see
 
