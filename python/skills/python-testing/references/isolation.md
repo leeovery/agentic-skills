@@ -12,7 +12,7 @@ Code that reaches for the machine can't be tested without touching it; code that
 |---|---|---|
 | `now: Callable[[], datetime]` | `partial(datetime.now, UTC)` | `lambda: NOW` |
 | `sleep: Callable[[float], None]` | `time.sleep` | a fake clock's `sleep`, which records the wait and returns at once |
-| values from `Settings` | `Settings()`, reading the environment | the values themselves |
+| values from `Settings` | `read_settings()`, reading the environment | the values themselves |
 | a directory | the configured path | `tmp_path` |
 | an `httpx2.Client` | one with the base URL, token and timeout | one over `httpx2.MockTransport` |
 
@@ -36,6 +36,7 @@ def test_no_test_looks_up_a_name() -> None:
         socket.getaddrinfo("pay.example", 443)
 ```
 
+- **On Windows the block is narrower.** asyncio's socket pair is loopback TCP there, so a Windows job adds `--allow-hosts=127.0.0.1`, and pytest-socket then blocks only a connection to another host. Opening a socket and looking up a name pass, so the two tests above fail on that job: skip them on Windows.
 - **No `@pytest.mark.enable_socket` and no `--force-enable-socket`.** A test that needs the network is testing the provider, not the code; it gets `MockTransport`.
 - **A blocked call can hide in a swallowed exception.** Code that catches `Exception` around a request turns the block into a degraded result, and the test passes. The guard makes the call fail; only the test's asserts notice the result.
 
@@ -53,12 +54,12 @@ def _outside_world(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         env.setenv("HOME", str(home))
         env.setenv("XDG_CONFIG_HOME", str(home / ".config"))
         for name in Settings.model_fields:
-            env.delenv(f"SHOP_{name.upper()}", raising=False)
+            env.delenv(f"{PREFIX}{name.upper()}", raising=False)
         yield
 ```
 
 - **`pytest.MonkeyPatch.context()`,** as the `monkeypatch` fixture is per test and this is per session. `setenv` and `delenv` change the environment and undo it after; `setattr` stays banned.
-- **The variable names come from `Settings`,** so a setting added later is unset too, and a developer's real `SHOP_DATABASE` can never reach a test.
+- **The variable names come from `Settings` and its `PREFIX`,** so a setting added later is unset too, and so is every one after a change of prefix, and a developer's real `SHOP_DATABASE` can never reach a test.
 - **The run checks it:** `assert Path.home().is_relative_to(tmp_path_factory.getbasetemp())`.
 - **A subprocess the code starts** inherits this environment, so it gets the throwaway home as well.
 

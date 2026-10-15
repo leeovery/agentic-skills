@@ -32,14 +32,18 @@ Tests are pytest with plain asserts, a fake for each seam, and a failure that sa
         pytest.param(make_order(), [], id="cancels a pending order without a refund"),
         pytest.param(
             make_order(status=Status.PAID, payment_id="pay-1"),
-            [(PaymentId("pay-1"), Money(minor=2500, currency=Currency.GBP))],
+            [
+                Refund(
+                    payment_id=PaymentId("pay-1"),
+                    amount=Money(minor=2500, currency=Currency.GBP),
+                    key="cancel-o-1",
+                )
+            ],
             id="refunds a paid order in full",
         ),
     ],
 )
-def test_cancel_refunds_only_a_paid_order(
-    order: Order, refunded: list[tuple[PaymentId, Money]]
-) -> None:
+def test_cancel_refunds_only_a_paid_order(order: Order, refunded: list[Refund]) -> None:
     payments = FakeRefunder()
 
     canceller(FakeOrders.holding(order), payments).cancel(

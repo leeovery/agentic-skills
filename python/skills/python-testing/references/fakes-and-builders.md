@@ -35,13 +35,14 @@ def make_order(
         id=OrderId(order_id),
         customer_id=CustomerId(customer_id),
         status=status,
-        lines=lines or (make_line(),),
+        lines=(make_line(),) if lines is None else lines,
         payment_id=None if payment_id is None else PaymentId(payment_id),
     )
 ```
 
 - **`make_order(status=Status.PAID, payment_id="pay-1")` reads as the case it builds.** A literal with every field hides the one that matters among those that don't.
 - **Keyword-only, and every default valid.** The value passes the type's own checks (`Order` refuses an order with no lines), so a test that doesn't mention a field never trips on it.
+- **A default stands in for `None` alone, never through `or`.** `make_order(lines=())` must reach `Order`, so the test of its refusal tests something; `lines or ...` would swap the empty tuple for a line, and that test would pass by building a valid order.
 - **Plain strings in, typed values out.** The builder wraps `OrderId` and `PaymentId`, so tests write `"pay-1"`.
 - **Each test builds its own value.** A module-level `PAID_ORDER` that tests share is fine only while it's frozen; a fixture returning one hides it in another file.
 - **The same builders feed hypothesis:** `st.builds(make_order, status=st.sampled_from(Status))` ([properties-snapshots-benchmarks.md](properties-snapshots-benchmarks.md)).
@@ -91,19 +92,19 @@ class FakeOrders:
 class FakeRefunder:
     """A Refunder that records each refund and raises error, when it's set."""
 
-    refunded: list[tuple[PaymentId, Money]] = field(default_factory=list)
+    refunded: list[Refund] = field(default_factory=list)
     error: Exception | None = None
 
-    def refund(self, payment_id: PaymentId, amount: Money) -> None:
+    def refund(self, refund: Refund) -> None:
         """Record the refund, then raise the error the test set, if any."""
-        self.refunded.append((payment_id, amount))
+        self.refunded.append(refund)
         if self.error is not None:
             raise self.error
 ```
 
 - **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, so the code under test meets the same exception in a test as in production. The methods left out above, the other consumers' queries and the transaction, answer as the real store does too ([python-protocols](../../python-protocols/SKILL.md)).
 - **It doesn't inherit from the Protocol.** It matches it by shape, and pyrefly checks the match where the test passes it to `Canceller`. A Protocol method the fake lacks fails the type check, not a test run.
-- **Check what it recorded as a value:** `assert payments.refunded == [(PaymentId("pay-1"), Money(minor=2500, currency=Currency.GBP))]`. Check the order or the number of calls only when they are the behaviour.
+- **Check what it recorded as a value:** `assert payments.refunded == [Refund(payment_id=PaymentId("pay-1"), amount=Money(minor=2500, currency=Currency.GBP), key="cancel-o-1")]`. Check the order or the number of calls only when they are the behaviour.
 - **It holds no logic of its own.** Once a fake needs some, a memory implementation that lives beside the real one is the better tool ([python-protocols](../../python-protocols/SKILL.md)).
 - **It's mutable**, unlike the domain's values: a fake is test equipment that collects what happened.
 
@@ -149,6 +150,12 @@ The adapter is the one place that knows the provider's HTTP API, so it's tested 
 
 ```python
 # tests/payments/test_gateway.py
+REFUND = Refund(
+    payment_id=PaymentId("pay-1"),
+    amount=Money(minor=1000, currency=Currency.GBP),
+    key="cancel-o-1",
+)
+
 type Handler = Callable[[httpx2.Request], httpx2.Response]
 
 
@@ -172,15 +179,15 @@ def answers(
     return handle, seen
 
 
-def test_refund_posts_the_amount_keyed_by_payment() -> None:
+def test_refund_posts_the_amount_under_the_callers_key() -> None:
     handler, sent = answers(httpx2.Response(201))
 
-    gateway(handler).refund(PaymentId("pay-1"), TEN_POUNDS)
+    gateway(handler).refund(REFUND)
 
     [request] = sent
     assert request.method == "POST"
     assert request.url == "https://pay.example/payments/pay-1/refunds"
-    assert request.headers["Idempotency-Key"] == "refund-pay-1"
+    assert request.headers["Idempotency-Key"] == "cancel-o-1"
     assert json.loads(request.content) == {"amount": 1000, "currency": "GBP"}
 ```
 

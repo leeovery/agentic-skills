@@ -86,7 +86,7 @@ def test_refund_recovers_after_passing_failures() -> None:
         httpx2.Response(201),
     )
 
-    gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
+    gateway(handler, time).refund(REFUND)
 
     assert len(sent) == 3
     assert time.slept == [0.5, 1.0]
@@ -97,7 +97,7 @@ def test_refund_stops_at_the_attempt_cap() -> None:
     handler, sent = answers(*[httpx2.Response(503)] * 4)
 
     with pytest.raises(PaymentFailed) as failed:
-        gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
+        gateway(handler, time).refund(REFUND)
 
     assert len(sent) == 4
     assert time.slept == [0.5, 1.0, 2.0]
@@ -110,7 +110,7 @@ def test_refund_never_retries_a_permanent_failure() -> None:
     handler, sent = answers(httpx2.Response(400))
 
     with pytest.raises(PaymentFailed):
-        gateway(handler, time).refund(PaymentId("pay-1"), TEN_POUNDS)
+        gateway(handler, time).refund(REFUND)
 
     assert len(sent) == 1
     assert time.slept == []
