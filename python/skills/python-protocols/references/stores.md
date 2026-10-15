@@ -272,7 +272,7 @@ class FakeOrders:
             )
 ```
 
-`get`, `start_cancelling` and `save` are in [python-testing](../../python-testing/SKILL.md)'s fakes.
+`get` and `start_cancelling` are in [python-testing](../../python-testing/SKILL.md)'s fakes. Each of them, and `save`, calls `_begin()` first.
 
 - **The transaction's writer is a copy of the fake.** A block that raises never reaches the lines after the `try`, so the copy and its writes are dropped; one that ends cleanly hands them back.
 - **Inside its transaction, a call to the store itself fails as SQLite's does,** so a restorer that calls `orders.save` where it means `tx.save` fails its test, as it would in production, rather than lose the write. `tests/order/test_fakes.py` makes the calls `test_sqlite.py` makes of the real store.

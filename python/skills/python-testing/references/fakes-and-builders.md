@@ -107,7 +107,7 @@ class FakeRefunder:
             self.refunded.append(refund)
 ```
 
-- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, and its claim refuses with `NotCancellable` what the SQLite store's conditional `UPDATE` refuses, so the code under test meets the same exceptions in a test as in production. `tests/order/test_fakes.py` checks the fake against what `test_sqlite.py` checks of the real store; the whole fake, transaction and all, is in [python-protocols](../../python-protocols/SKILL.md).
+- **It fails as the real one fails.** `FakeOrders.get` raises `OrderNotFound` with the id, and its claim refuses with `NotCancellable` what the SQLite store's conditional `UPDATE` refuses, so the code under test meets the same exceptions in a test as in production. `tests/order/test_fakes.py` checks the fake against what `test_sqlite.py` checks of the real store; its transaction is in [python-protocols](../../python-protocols/SKILL.md).
 - **It doesn't inherit from the Protocol.** It matches it by shape, and pyrefly checks the match where the test passes it to `Canceller`. A Protocol method the fake lacks fails the type check, not a test run.
 - **Check what it recorded as a value:** `assert payments.refunded == [PAID_IN_FULL]`. Check the order or the number of calls only when they are the behaviour.
 - **It keeps the Protocol's promises and holds no other logic.** `FakeRefunder` records one refund per key because `Refunder` promises a second does nothing. Once a fake needs logic past its promises, a memory implementation that lives beside the real one is the better tool ([python-protocols](../../python-protocols/SKILL.md)).
