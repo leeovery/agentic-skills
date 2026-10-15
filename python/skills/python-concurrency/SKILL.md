@@ -26,21 +26,14 @@ Concurrency is the caller's choice, and every task and resource has an owner tha
 # src/shop/settlement/settle.py
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Settler:
-    """Settles payments with the provider, at most `limit` at once.
-
-    `deadline` bounds each payment's whole call, however slowly the provider answers.
-    """
+    """Settles payments with the provider, at most `limit` at once."""
 
     provider: Provider
     limit: int
     deadline: timedelta
 
     async def settle(self, payment_ids: Iterable[PaymentId]) -> list[PaymentId]:
-        """Settle every payment once, and return those that failed or ran out of time.
-
-        A payment named twice is settled once, as two calls for it at once would
-        race at the provider.
-        """
+        """Settle every payment once, and return those that failed or ran out of time."""
         gate = asyncio.Semaphore(self.limit)
         async with asyncio.TaskGroup() as tg:
             tasks = {
@@ -63,7 +56,7 @@ class Settler:
         return True
 ```
 
-Each task catches the failures it expects, so the group raises only for a bug, and then as an `ExceptionGroup`. `except SettlementFailed, TimeoutError:` is [3.14](https://docs.python.org/3/whatsnew/3.14.html)'s form without brackets. The composition root enters asyncio once, `asyncio.run(_settle(client, payment_ids))`, and opens the `AsyncClient` inside it, from a factory the wiring bound its settings into: [asyncio.md](references/asyncio.md) has it whole.
+Each task catches the failures it expects, so the group raises only for a bug, and then as an `ExceptionGroup`. `except SettlementFailed, TimeoutError:` is [3.14](https://docs.python.org/3/whatsnew/3.14.html)'s form without brackets. The composition root enters asyncio once, `asyncio.run(_settle(client, payment_ids))`, and opens the `AsyncClient` inside it: [asyncio.md](references/asyncio.md) has it whole.
 
 ## Decision table
 

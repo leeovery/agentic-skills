@@ -25,10 +25,7 @@ Sync is the default because async isn't local. A function that awaits is `async 
 def settle_payments(
     client: Callable[[], httpx2.AsyncClient], payment_ids: Iterable[PaymentId]
 ) -> list[PaymentId]:
-    """Settle the payments, and return those that weren't.
-
-    The program's one way into asyncio: the loop starts here and closes here.
-    """
+    """Settle the payments, and return those that weren't."""
     return asyncio.run(_settle(client, payment_ids))
 
 
@@ -44,12 +41,12 @@ async def _settle(
         return await settler.settle(payment_ids)
 ```
 
-`settle_payments` returns a plain list, so the `settle` command, its tests and `main` stay sync; the command reaches it through the `Deps` that `main`'s wiring returns, and a test of the command passes a lambda in its place. `SETTLE_DEADLINE`, beside it in `cli.py`, is thirty seconds: each payment's whole call gets that long, however slowly the provider answers.
+`settle_payments` returns a plain list, so the `settle` command, its tests and `main` stay sync.
 
 - **Nothing below it calls `asyncio.run`.** Inside a running loop it raises `RuntimeError: asyncio.run() cannot be called from a running event loop`, so a library function that calls it can never be called from async code.
-- **Async clients open inside the coroutine it runs,** with `async with`. `AsyncClient.aclose()` is a coroutine, so sync wiring can't close one, and only the loop that used its connections can. The wiring passes a factory with the URL, headers and timeout bound in, `partial(httpx2.AsyncClient, ...)`, and `_settle` calls it.
+- **Async clients open inside the coroutine it runs,** with `async with`. `AsyncClient.aclose()` is a coroutine, so sync wiring can't close one; it passes a factory, `partial(httpx2.AsyncClient, ...)`, and `_settle` calls it.
 - **`asyncio.get_running_loop()`** inside a coroutine, when an API wants the loop: `loop.time()` for the loop's clock. Never `get_event_loop()`, which raises on 3.14 when no loop is running, and which the drop-in bans.
-- **Ctrl-C cancels the main task.** `asyncio.run` turns the first SIGINT into a cancellation, lets the tasks unwind through their `finally` blocks, then raises `KeyboardInterrupt`, which typer turns into exit code 130 as it does for any command ([python-actions](../../python-actions/SKILL.md)). A second Ctrl-C raises at once. A task that swallows the cancellation keeps the program running after the first.
+- **Ctrl-C cancels the main task.** `asyncio.run` turns the first SIGINT into a cancellation, lets the tasks unwind through their `finally` blocks, then raises `KeyboardInterrupt`, which typer turns into exit code 130 ([python-actions](../../python-actions/SKILL.md)). A task that swallows the cancellation keeps the program running after the first.
 
 ## Tasks and their owner
 
@@ -67,9 +64,9 @@ A `TaskGroup` ([3.11](https://docs.python.org/3/whatsnew/3.11.html)) owns the ta
 
 - **Catch `TimeoutError` outside the block.** Inside it, the await sees `CancelledError`; the conversion happens on the way out.
 - **The whole operation, not each call.** A deadline around a retry loop bounds the retries too. `timeout_at(when)` takes an absolute time on the loop's clock, and `reschedule()` moves a deadline that's already running.
-- **Not `wait_for`.** Since [3.12](https://docs.python.org/3/whatsnew/3.12.html) it's built on `asyncio.timeout` around a single awaitable, so it's a second spelling of the same deadline that can't cover a block. One spelling reads the same everywhere.
-- **A coroutine takes no `timeout` parameter.** The caller wraps the call. ruff's `ASYNC109` flags one that does. A deadline that's part of an operation's policy, as `Settler.deadline` is, is a field `main` sets, and the operation wraps its own calls.
-- **Clients keep their own timeout.** httpx2's `timeout=` applies to each connect, each read, each write and each wait for a pooled connection, separately. A provider that sends a byte every few seconds never trips a read timeout; only the deadline around the whole call ends that wait. Set both.
+- **Not `wait_for`.** Since [3.12](https://docs.python.org/3/whatsnew/3.12.html) it's built on `asyncio.timeout` around a single awaitable, so it's a second spelling of the same deadline that can't cover a block.
+- **A coroutine takes no `timeout` parameter.** The caller wraps the call. ruff's `ASYNC109` flags one that does. A deadline that's part of an operation's policy, as `Settler.deadline` is, is a field `main` sets.
+- **Clients keep their own timeout.** httpx2's `timeout=` applies to each connect, read and write separately. A provider that sends a byte every few seconds never trips a read timeout; only the deadline around the whole call ends that wait. Set both.
 
 ## Cancellation
 
@@ -78,14 +75,14 @@ A `TaskGroup` ([3.11](https://docs.python.org/3/whatsnew/3.11.html)) owns the ta
 - **Clean up in `finally`.** It runs on cancellation as on any other exit.
 - **An `await` in `finally` still runs,** as a cancellation is delivered once. Bound it with `asyncio.timeout`: a second cancellation, or a stuck close, would otherwise hold the exit.
 - **To act on the cancellation itself,** `except asyncio.CancelledError:`, do the work, then a bare `raise`.
-- **Never swallow it.** `asyncio.timeout` relies on the cancellation reaching it. A coroutine that catches `CancelledError` and returns ends the timeout block with no error, so the caller carries on as if the call had finished. The same coroutine keeps a program running after Ctrl-C.
+- **Never swallow it.** `asyncio.timeout` relies on the cancellation reaching it. A coroutine that catches `CancelledError` and returns ends the timeout block with no error, so the caller carries on as if the call had finished.
 - **Never call `task.uncancel()`** outside code that implements a timeout or a group.
 
 ## Bounded fan-out
 
 The pattern's `Semaphore` lets `limit` settlements run at once and parks the rest. It suits work already in hand: a task per payment is cheap, and the semaphore caps the connections, not the tasks.
 
-The limit is a number with a reason, written beside it, once. The provider takes ten connections per token, and settling and `refund_all` share the token, so `shop.payments.limits`, beside the adapters that know the provider, splits the ten in one place: `SETTLEMENTS_AT_ONCE = 8`, which `main` hands the settler, and `REFUNDS_AT_ONCE = 2`, which `refund_all` reads. A limit with no reason gets doubled by the next person who finds the run slow, and one each side sets for itself gets spent twice: eight and eight is sixteen.
+The limit is a number with a reason, written beside it, once. Where two callers share one provider's cap, `shop.payments.limits` splits it in one place: `SETTLEMENTS_AT_ONCE = 8` and `REFUNDS_AT_ONCE = 2` of its ten connections. A limit with no reason gets doubled by the next person who finds the run slow, and one each side sets for itself gets spent twice.
 
 ## Workers over a queue
 
@@ -96,19 +93,12 @@ When the work arrives as a stream, or there's too much to hold a task for each, 
 async def settle_stream(
     self, payment_ids: AsyncIterable[PaymentId]
 ) -> list[PaymentId]:
-    """Settle payments as they arrive, and return those that failed.
-
-    `limit` workers take them from a queue that holds `limit` more, so a long
-    stream never sits in memory whole. A payment that arrives again while it's
-    being settled is skipped, as two calls for it at once would race at the
-    provider.
-    """
+    """Settle payments as they arrive, and return those that failed."""
     queue: asyncio.Queue[PaymentId] = asyncio.Queue(maxsize=self.limit)
-    settling: set[PaymentId] = set()
     unsettled: list[PaymentId] = []
     async with asyncio.TaskGroup() as tg:
         for _ in range(self.limit):
-            tg.create_task(self._work(queue, settling, unsettled))
+            tg.create_task(self._work(queue, unsettled))
         async for payment_id in payment_ids:
             await queue.put(payment_id)
         queue.shutdown()
@@ -117,7 +107,6 @@ async def settle_stream(
 async def _work(
     self,
     queue: asyncio.Queue[PaymentId],
-    settling: set[PaymentId],
     unsettled: list[PaymentId],
 ) -> None:
     while True:
@@ -125,13 +114,7 @@ async def _work(
             payment_id = await queue.get()
         except asyncio.QueueShutDown:
             return
-        # One that arrives once this call is done is settled again, and the
-        # provider's idempotency key makes that second settlement a no-op.
-        if payment_id in settling:
-            continue
-        settling.add(payment_id)
         settled = await self._settled(payment_id)
-        settling.discard(payment_id)
         if not settled:
             unsettled.append(payment_id)
 ```
@@ -140,8 +123,7 @@ async def _work(
 - **`Queue.shutdown()`** ([3.13](https://docs.python.org/3/whatsnew/3.13.html)) ends the workers. After it, `put` raises `QueueShutDown`, and `get` hands out what's left, then raises `QueueShutDown` once the queue is empty. `shutdown(immediate=True)` drops what's left instead.
 - **No sentinels.** One `None` per worker has to match the number of workers, and a worker that died leaves its `None` for nobody. `shutdown` is one call, and it wakes every waiter.
 - **The drain is bounded:** at most `limit` payments are queued at shutdown, each under its deadline.
-- **A payment that arrives again while it's being settled is skipped.** An at-least-once stream repeats one, and two calls for it at once would race at the provider. One that arrives once its call is done is settled again: the provider's idempotency key makes that a no-op, and a set of every id seen would grow with the stream. A test sends one payment twice while the first call hangs, and checks it comes back unsettled once while the worker that skipped the repeat settles the next payment; another sends it again after its call is done, and checks it was settled twice.
-- **Shared state between tasks needs no lock** when nothing awaits between reading and writing it, as with `unsettled.append` and the check and add on `settling`. A read, an `await`, then a write is a race between tasks too.
+- **Shared state between tasks needs no lock** when nothing awaits between reading and writing it, as with `unsettled.append`. A read, an `await`, then a write is a race between tasks too.
 
 ## A task that outlives its starter
 
@@ -157,17 +139,9 @@ async def polling(
     job: Callable[[], Awaitable[object]],
     *,
     every: timedelta,
-    # A cancelled job stops at its next await, so this is ample: one still
-    # running after it has swallowed its cancellation, or is stuck cleaning up.
     stop_within: timedelta = timedelta(seconds=5),
 ) -> AsyncGenerator[None]:
     """Run job every interval while the body runs; on exit, stop it and wait for it.
-
-    A run that raises is logged with its traceback, and the next runs on time.
-    A job still running stop_within after it was cancelled is reported once the
-    body ends: raised as a TimeoutError after a clean body, or logged as a
-    warning when the body raised or was cancelled, whose exception goes on as
-    it was.
 
     The task is held here, not in a TaskGroup: a group around the yield would
     wrap whatever the body raises in an ExceptionGroup.
@@ -177,8 +151,6 @@ async def polling(
         yield
     except BaseException:
         if not await _stopped(task, within=stop_within):
-            # Logged, not noted: an outer asyncio.timeout replaces the cancellation
-            # it caused with a TimeoutError of its own, and a note would go with it.
             logger.warning(
                 "polled job %r still running %s after it was cancelled",
                 job,
@@ -192,10 +164,7 @@ async def polling(
 
 
 async def _stopped(task: asyncio.Task[None], *, within: timedelta) -> bool:
-    """Cancel task and wait for it to end; say whether it ended within that long.
-
-    Nothing more can stop one that didn't from here.
-    """
+    """Cancel task and wait for it to end; say whether it ended within that long."""
     task.cancel()
     try:
         async with asyncio.timeout(within.total_seconds()):
@@ -211,21 +180,19 @@ async def _every(job: Callable[[], Awaitable[object]], every: timedelta) -> None
         try:
             await job()
         except Exception:
-            # The loop is where a run's exception stops: logged, so none goes
-            # unseen, and the next run goes ahead on time.
             logger.exception("polled job %r failed", job)
 ```
 
 - **`asyncio.wait([task])`** waits without raising the task's own `CancelledError` into the caller, so a cancellation of the caller still propagates, and the task's isn't mistaken for it.
-- **A run that raises is logged, and the next runs on time.** The loop is where a run's exception stops, as `run` is for a command: `logger.exception` records it with its traceback, so no failure goes unseen, and one failed run doesn't end polling for the rest of the process. A job catches the failures it expects itself (a refused settlement, a timeout), as the settler does, so what reaches the log is a bug. `except Exception` lets a cancellation through, so the stop still ends the loop.
-- **The stop has a deadline, `stop_within`,** like every other wait. A cancelled job ends at its next `await`, so five seconds is ample; one still running after that swallowed its cancellation, or is stuck in its cleanup. Nothing can stop it from outside, so the poller reports it once the body ends. After a clean body it raises a `TimeoutError` naming the job. When the body raised or was cancelled, it logs a warning naming the job, and the body's exception goes on unchanged: raising the `TimeoutError` in its place would hide that exception, and would turn a cancellation into an error the caller's `asyncio.timeout` or `TaskGroup` doesn't recognise as its own. It's a log line, not a note, because a note can be lost on the way: an outer `asyncio.timeout` that cancelled the body raises a `TimeoutError` of its own in place of the cancellation, and the note stays on the cancellation. The poller's tests cover both, the body raising and an outer timeout ending it.
+- **A run that raises is logged, and the next runs on time.** The loop is where a run's exception stops, as `run` is for a command, so one failed run doesn't end polling. A job catches the failures it expects itself, so what reaches the log is a bug. `except Exception` lets a cancellation through, so the stop still ends the loop.
+- **The stop has a deadline, `stop_within`,** like every other wait. A cancelled job ends at its next `await`; one still running after that swallowed its cancellation, or is stuck in its cleanup, and nothing can stop it from outside, so the poller reports it once the body ends. After a clean body it raises a `TimeoutError`. When the body raised or was cancelled, it logs a warning, and the body's exception goes on unchanged: a `TimeoutError` in its place would hide it, and turn a cancellation into an error the caller's `asyncio.timeout` or `TaskGroup` doesn't recognise. A log line, not a note: an outer `asyncio.timeout` replaces the cancellation with a `TimeoutError` of its own, and a note on the cancellation is lost.
 - **Order at shutdown** comes from nesting: the body's work stops first, then the poller, then the client it settles through. [resources.md](resources.md) covers close order.
 
 ## Blocking calls
 
 `await asyncio.to_thread(fn, *args)` runs a blocking function on the loop's default thread pool and awaits its result. Reach for it for a library you can't replace with an async one, and for file work big enough to matter.
 
-- **A thread can't be cancelled.** Cancelling the awaiting task, or its deadline passing, leaves the thread running to the end. Give the blocking call its own timeout where it takes one.
+- **A thread can't be cancelled.** Cancelling the awaiting task leaves the thread running to the end. Give the blocking call its own timeout where it takes one.
 - **Context variables are copied** into the thread, so a request id set in a `ContextVar` is still there. `loop.run_in_executor` and a pool's `submit` copy nothing ([threads-and-processes.md](threads-and-processes.md)).
 - **A `sqlite3` connection belongs to the thread that made it,** and raises `ProgrammingError` when used from another. Open the connection inside the function you send to the thread.
 - **The default pool** has `min(32, os.process_cpu_count() + 4)` threads, shared by every `to_thread` in the program.
@@ -256,4 +223,4 @@ python -m asyncio pstree 4242  # the same, as a tree of who awaits whom
 ```
 
 - It attaches to the process, so it needs the permissions the [remote debugging HOWTO](https://docs.python.org/3.14/howto/remote_debugging.html#permission-requirements) lists. On macOS it refuses with a permissions error unless run with `sudo`.
-- Name the tasks you create (`tg.create_task(coro, name=f"settle {payment_id}")`, or the poller's `name="poll"`): the listing shows the names, and a stuck `settle pay-7` says where to look.
+- Name the tasks you create (`tg.create_task(coro, name=f"settle {payment_id}")`): the listing shows the names, and a stuck one says where to look.

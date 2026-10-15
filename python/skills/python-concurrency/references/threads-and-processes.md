@@ -26,12 +26,7 @@ from shop.payments.limits import REFUNDS_AT_ONCE
 
 
 def refund_all(refunder: Refunder, refunds: Iterable[Refund]) -> list[Refund]:
-    """Make each refund, REFUNDS_AT_ONCE at a time, and return those that failed.
-
-    A pool's threads don't see the caller's context variables, so each call runs
-    in a copy of them, and its log lines keep the correlation id. A copy each, as
-    one context can't run on two threads at once.
-    """
+    """Make each refund, REFUNDS_AT_ONCE at a time, and return those that failed."""
     with ThreadPoolExecutor(
         max_workers=REFUNDS_AT_ONCE, thread_name_prefix="refund"
     ) as pool:
@@ -53,11 +48,11 @@ def _refunded(refunder: Refunder, refund: Refund) -> bool:
 
 - **The `with` owns the threads.** Leaving it waits for every call, so nothing outlives `refund_all`.
 - **Each call returns its result through its future,** read once the pool has closed. Nothing is shared between the threads, so nothing needs a lock.
-- **A pool's threads don't copy the caller's context.** `submit` runs the call in the worker thread's own context, so a `ContextVar` the caller set, such as the correlation id, isn't set there. `copy_context().run` carries it across, a copy per call, as one `Context` can't be entered on two threads at once. `asyncio.to_thread` makes that copy itself; `loop.run_in_executor` doesn't.
+- **A pool's threads don't copy the caller's context.** A `ContextVar` the caller set, such as the correlation id, isn't set in the worker thread. `copy_context().run` carries it across, a copy per call, as one `Context` can't be entered on two threads at once. `asyncio.to_thread` makes that copy itself; `loop.run_in_executor` doesn't.
 - **The expected failure is caught inside the call,** as a `TaskGroup` task's is. `future.result()` re-raises anything else, a bug, in the caller.
-- **What the threads share must be safe to share.** `httpx2.Client` says it can be shared between threads. A `sqlite3.Connection` can't: sqlite3's `check_same_thread`, on by default, makes it raise `ProgrammingError` when used from a thread other than the one that made it, which `test_sqlite.py` pins. Each thread opens its own ([python-protocols](../../python-protocols/SKILL.md)).
-- **A running call can't be stopped from outside.** Its client's timeout bounds each step of it, the connect, each send and each wait for more of the answer, but not the call: a provider that trickles its answer holds the call, and the pool's close, for as long as it trickles. A call that needs a deadline on the whole of it goes through async code, under `asyncio.timeout` ([asyncio.md](asyncio.md#deadlines)).
-- **The size has a reason, and one owner.** `refund_all` lives with the adapter, in `shop.payments`, because the provider's ten connections per token are its limit, not the domain's; `REFUNDS_AT_ONCE` is split from them in `shop.payments.limits`, beside the settler's share ([asyncio.md](asyncio.md#bounded-fan-out)).
+- **What the threads share must be safe to share.** `httpx2.Client` says it can be shared between threads. A `sqlite3.Connection` can't: it raises `ProgrammingError` when used from a thread other than the one that made it. Each thread opens its own ([python-protocols](../../python-protocols/SKILL.md)).
+- **A running call can't be stopped from outside.** Its client's timeout bounds each step of it, not the call: a provider that trickles its answer holds the call, and the pool's close, for as long as it trickles. A call that needs a deadline on the whole of it goes through async code, under `asyncio.timeout` ([asyncio.md](asyncio.md#deadlines)).
+- **The size has a reason, and one owner.** `refund_all` lives with the adapter, as the provider's connections are its limit, not the domain's; `REFUNDS_AT_ONCE` is split from them in one place ([asyncio.md](asyncio.md#bounded-fan-out)).
 
 ## A process pool for CPU
 
@@ -78,10 +73,7 @@ class ReportRow(BaseModel):
 
 
 def totals(reports: Sequence[Path]) -> Counter[Currency]:
-    """The minor units settled in each currency, across the reports.
-
-    Parsing is CPU-bound, so each report is read in a process of its own.
-    """
+    """The minor units settled in each currency, across the reports."""
     settled = Counter[Currency]()
     with ProcessPoolExecutor() as pool:
         for one_report in pool.map(report_totals, reports):
@@ -90,11 +82,7 @@ def totals(reports: Sequence[Path]) -> Counter[Currency]:
 
 
 def report_totals(report: Path) -> Counter[Currency]:
-    """The minor units settled in each currency in one report.
-
-    At module level, so a worker process can import it by name. A currency the
-    shop doesn't sell in raises ValidationError, naming those it does.
-    """
+    """The minor units settled in each currency in one report."""
     settled = Counter[Currency]()
     with report.open(encoding="utf-8", newline="") as rows:
         for payment_id, currency, minor in csv.reader(rows):
@@ -106,7 +94,7 @@ def report_totals(report: Path) -> Counter[Currency]:
 ```
 
 - **The function a worker runs is at module level.** It's sent by name and imported in the worker; a lambda, a nested function or a method of an object that can't be pickled fails.
-- **Arguments, results and exceptions are pickled.** Pass a path, not an open file or a connection; return plain values. A row whose currency the shop doesn't sell in raises `ValidationError` in the worker, and `totals` raises it again in the caller.
+- **Arguments, results and exceptions are pickled.** Pass a path, not an open file or a connection; return plain values. A `ValidationError` raised in the worker is raised again in the caller.
 - **Each row is parsed where it's read,** into the domain's `Currency`, so the totals are keyed by the type every other module uses ([python-types](../../python-types/SKILL.md)).
 - **State is passed in:** as arguments, or with `initializer=` and `initargs=` for something each worker builds once, such as its logging.
 - **A process costs an interpreter's start-up and an import of the program.** It pays for work measured in seconds; for less, measure first ([python-testing](../../python-testing/SKILL.md)).
@@ -143,7 +131,6 @@ class Tally:
     def add(self, amount: Money) -> None:
         """Count amount as refunded."""
         with self.lock:
-            # A read, an add and a write: two threads between them can lose one.
             self.minor[amount.currency] += amount.minor
 
     def totals(self) -> dict[Currency, int]:
@@ -157,9 +144,9 @@ class Tally:
 ```
 
 - **A named field, declared beside the data it guards,** with a comment saying which. Taken with `with`, never `acquire()` and a `release()` further down.
-- **Memory work only under it.** `totals` copies under the lock; `report` logs after. A log handler writing to a slow sink, an HTTP call or a file write under the lock makes every other thread wait on it.
+- **Memory work only under it.** `totals` copies under the lock; `report` logs after. A slow log handler, an HTTP call or a file write under the lock makes every other thread wait on it.
 - **The GIL doesn't make an update one step.** `+=` on a dict entry reads, adds and writes, and a thread can switch between them.
-- **Nothing finds a data race in Python.** There's no race detector, and a test rarely loses the race, so a test that passes proves nothing about a missing lock. Review checks every field written from more than one thread.
+- **Nothing finds a data race in Python.** There's no race detector, and a test rarely loses the race. Review checks every field written from more than one thread.
 
 ## `asyncio.Lock` and threads
 
