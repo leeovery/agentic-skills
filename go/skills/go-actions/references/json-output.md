@@ -51,6 +51,7 @@ func kindOf(err error) string {
 }
 ```
 
+- **`kindOf`'s order is deliberate:** the interrupt is read first, since an error can wrap both a refusal and the Ctrl-C that ended its question, and a run the person stopped reads as `interrupted`, never as the refusal it was asking about. Keep that order in a port.
 - **The words are the text mode's,** `messageOf` and `fixOf` shared, so the two modes never word one failure apart.
 
 ## One document per run
@@ -83,7 +84,7 @@ type CancelResult struct {
 
 - **Exported, in the renderer's package,** one per result, each read by every mode. The domain's own types carry no tags: the edge maps them in.
 - **Every field tagged, snake_case.** The tag is the API: renaming a Go field must not rename a member, and renaming a member is a breaking change, said as one in the release notes.
-- **Typed string fields are fine here.** `order.Status` encodes to the same bytes as a `string`, and exhaustive checks every switch the text mode makes on it ([go-types](../../go-types/SKILL.md)).
+- **Typed string fields are fine here.** `order.Status` encodes to the same bytes as a `string`, and exhaustive checks every switch the text mode makes on it ([go-types](../../go-types/SKILL.md)). Each result's own vocabulary is its own type, never one `Outcome` shared by every command ([go-types' enums.md](../../go-types/references/enums.md#one-type-per-vocabulary)).
 - **A model encodes as an object,** so a member can be added later without breaking a reader.
 - **Times in UTC, to a fixed precision.** The text mode words them in the person's zone; the document holds the instant.
 
