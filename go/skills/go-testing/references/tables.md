@@ -45,7 +45,7 @@ func TestParseStatus(t *testing.T) {
 - Name the fields in each row (`{name: …, in: …}`) once a row is long, or when two fields share a type and could be swapped unseen.
 - The failure message prints the input, even though the subtest name is in the output too: the name says which case, the message says what happened.
 - Never identify a row by its index.
-- A row may carry a builder option that shapes its input, `edit func(*world)`, applied to a fresh world the row builds: it's data in the shape of a function, and a fake set to answer an error is such data too. An `edit` that swaps a collaborator for another, a function that asserts, or a flag that picks which check runs, is a test of its own.
+- A row may carry a builder option that shapes its input, `edit func(*world)`, applied to a fresh world the row builds: it's data in the shape of a function, and a fake set to answer an error is such data too. An `edit` that swaps a collaborator for another, a function that asserts, or a flag that picks which check runs, is a test of its own. An option that needs `t` to build its input (`setup func(t *testing.T) store`, for a `t.TempDir()`) takes it and calls no `t.Helper()`, so a failure in it stays on its own line; thelper reads it as a helper, and is excluded for it by its source ([go-quality's gates.md](../../go-quality/references/gates.md#what-the-drop-ins-linters-expect)).
 
 ## Errors get their own table
 
