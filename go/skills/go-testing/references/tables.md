@@ -9,7 +9,7 @@ Contents: when a table fits · row shape · errors · names · comparing without
 | Fits a table | Wants its own test |
 |---|---|
 | The same call, the same checks, different values | A different arrangement: another fake, another store state |
-| Rows a reader can scan as data | A row that needs a `setup` func or a `wantCall bool` |
+| Rows a reader can scan as data | A row that needs a `check` func or a `wantCall bool` |
 | Adding a case means adding a line | Adding a case means adding an `if` in the loop |
 
 A loop that branches on a row's fields is several tests sharing a loop, and each branch is tested less clearly than it would be alone. Split it.
@@ -45,6 +45,7 @@ func TestParseStatus(t *testing.T) {
 - Name the fields in each row (`{name: …, in: …}`) once a row is long, or when two fields share a type and could be swapped unseen.
 - The failure message prints the input, even though the subtest name is in the output too: the name says which case, the message says what happened.
 - Never identify a row by its index.
+- A row may carry a builder option that shapes its input, `edit func(*world)`, applied to a fresh world the row builds: it's data in the shape of a function. A function that asserts, or a flag that picks which check runs, is a test of its own.
 
 ## Errors get their own table
 
@@ -72,11 +73,12 @@ func TestParseStatusRejects(t *testing.T) {
 }
 ```
 
-Match the error by identity or type, never its text. To check that a message names the bad input, check for the input, not the whole sentence.
+Match the error by identity or type, never its text. To check that a message names the bad input, check for the input, not the whole sentence. Where the message is the program's output, shown to people as it stands, its test pins the whole text beside the match ([go-errors' errors-as-output.md](../../go-errors/references/errors-as-output.md)).
 
 ## Names
 
 - **Tests:** `Test` + subject + behaviour, as one sentence: `TestCancelRefundsAPaidOrder`, `TestLoadDefaultsWithoutAFile`. Not `TestCancel2`, `TestCancel_Error` or `TestCancelHappyPath`.
+- **An underscore may mark the subject:** `TestCancel_RefusesAShippedOrder` states its behaviour as fully, and `go test -run 'TestCancel_'` runs exactly the subject's tests. `TestCancel_Error` fails for its suffix, which states no behaviour, as `_JSON` or `_Fails` would, not for its underscore.
 - **Rows:** lower-case phrases that finish the sentence: `TestParseStatusRejects` / `"a trailing space"`.
 - `t.Run` turns spaces into underscores, so one row runs alone with `go test -run 'TestParseStatusRejects/a_trailing_space'`. Keep `/` out of names: it separates subtest levels.
 - **Files:** `order_test.go` tests `order.go`. Use `package order` to test internals and `package order_test` to test only the exported API, or to break an import cycle.
@@ -91,7 +93,7 @@ Match the error by identity or type, never its text. To check that a message nam
 | `time.Time` | `got.Equal(want)` | `==` also compares the location and the monotonic reading |
 | Floats | `math.Abs(got-want) < tolerance` | Money is integer cents, so it never needs this |
 | Nested data with slices or maps | `reflect.DeepEqual`, printing both with `%+v` | It compares unexported fields, and nil and empty slices differ |
-| Errors | `errors.Is`, `errors.AsType` | Never `err.Error()` |
+| Errors | `errors.Is`, `errors.AsType` | Never `err.Error()`, but to pin a message that is the program's output |
 
 When a struct holds one slice, compare the comparable fields with `==` and the slice with `slices.Equal`: the message then says which part differs.
 

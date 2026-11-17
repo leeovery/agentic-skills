@@ -2,11 +2,11 @@
 
 **Code that waits is tested inside a `synctest` bubble, where the clock is fake and moves only when every goroutine in the bubble is blocked.**
 
-Contents: the bubble · a worker on a ticker · a timeout · stopping · HTTP in a bubble · what blocks durably · rules inside a bubble · when to inject `now` instead.
+Contents: the bubble · a worker on a ticker · a timeout · stopping · HTTP in a bubble · what blocks durably · what a bubble can't drive · rules inside a bubble · when to inject `now` instead · when the program needs its own clock.
 
 ## The bubble
 
-`testing/synctest` is generally available since [Go 1.25](https://go.dev/doc/go1.25). It replaces real sleeps and injected fake clocks for anything that waits.
+`testing/synctest` is generally available since [Go 1.25](https://go.dev/doc/go1.25). It replaces real sleeps and injected fake clocks for anything that waits, but what it can't drive (below) and a program that needs a clock of its own.
 
 - `synctest.Test(t, func(t *testing.T) { … })` runs the function in a bubble with its own clock, starting at midnight UTC on 1 January 2000. Goroutines started inside belong to the bubble.
 - Time moves only when every goroutine in the bubble is durably blocked, and then jumps straight to the next timer. A test of an hour-long interval runs in microseconds, and always sees the same order of events.
@@ -157,6 +157,16 @@ func TestInvoiceGivesUpAfterItsTimeout(t *testing.T) {
 
 A goroutine stuck on the right-hand side keeps the clock still until it returns. Code under test that does real I/O in a bubble is the usual cause of a synctest test that hangs: give it a fake, a temp file read up front, or `NewTestServer`.
 
+## What a bubble can't drive
+
+Some waits are never durable, so a bubble's clock never moves past them:
+
+- **Real I/O:** a file, a socket, a pipe to anything outside the test.
+- **A subprocess:** the wait for a child to exit, and every read of its output.
+- **A terminal:** a read of stdin, a reply to a query, a full-screen program's input and renderer loops.
+
+Fake the thing first: a fake runner in place of the subprocess ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)), a pipe made in the bubble in place of the terminal. Where code must wait across one of these and no in-memory double exists, inject its wait (`wait func(context.Context, time.Duration) error`) and say why beside the field; a test passes one that returns at once.
+
 ## Rules inside a bubble
 
 - No `t.Run`, `t.Parallel` or `t.Deadline` inside the function. A table of timing cases runs `synctest.Test` inside each row's `t.Run`, not the other way round.
@@ -170,3 +180,11 @@ A goroutine stuck on the right-hand side keeps the clock still until it returns.
 The bubble's clock starts on 1 January 2000. A decision that turns on the calendar (an invoice overdue at the end of a month, a renewal on 29 February, the hour a clock change skips) needs a chosen instant: inject `now func() time.Time`, as [go-interfaces](../../go-interfaces/SKILL.md) describes, and pass the instant the case is about. Waits, timers, tickers and timeouts stay with synctest.
 
 Inside a bubble, build instants from `time.Now()` (`time.Now().Add(-48 * time.Hour)`) rather than from fixed dates, so the case means the same whatever the bubble's epoch.
+
+## When the program needs its own clock
+
+Some programs control time themselves, as a product feature: a demo build that holds its made-up shop at one moment or moves it on from there, golden frames of a screen drawn at a given second, a replay of a day's orders at ten times speed. There the clock is a seam the program needs, not a test's convenience, so it's injected: the clock (`now func() time.Time`) and the timer factory (`after func(time.Duration) <-chan time.Time`) the code waits through.
+
+- **`main` passes the real ones;** the demo build passes its held or moving clock.
+- **The tests drive the same seam,** firing each timer when they choose, so a frame is drawn at exactly the moment it's of.
+- **Code that waits only to wait** still runs under synctest; inject the clock only where the program itself needs one.
