@@ -59,7 +59,11 @@ The deadline covers reading the body too. `json` is `encoding/json/v2` ([Go 1.27
 
 noctx flags `http.Get`, `http.NewRequest`, `net.Dial`, `exec.Command` and the other calls that take no context. Use `NewRequestWithContext`, a `net.Dialer`'s `DialContext`, and `exec.CommandContext`.
 
-In a program a person runs and can interrupt, a CLI, a write whose outcome a timeout would make unknown, a push or a dispatch that may land after the deadline, takes no timeout of its own: the person's interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)). A server or a worker has no one to interrupt it, so it keeps the deadline on every outbound write and makes the write idempotent, with a key, so a retry after an unknown outcome is safe.
+Writes are decided by whether the other side can de-duplicate them:
+
+- **A write that carries an idempotency key keeps its deadline,** anywhere, and may be retried: a second attempt after an unknown outcome lands once. The gateway's refund is one ([go-interfaces' services.md](../../go-interfaces/references/services.md)).
+- **A write the other side can't de-duplicate,** a push or a workflow dispatch, whose outcome a timeout would leave unknown, takes no timeout of its own in a program a person runs and can interrupt: the interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
+- **A server or a worker** has no one to interrupt it, so it makes such a write idempotent, with a key or a check of what's there before it, and keeps the deadline.
 
 ## Work that outlives its caller
 

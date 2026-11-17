@@ -67,15 +67,18 @@ func newLineReader(stdin io.Reader) *lineReader {
 }
 
 // ready is called once each question is shown. It drops a line read before
-// it, left by an ask that gave up, and discards what was typed ahead, so only
-// a line typed after the question answers it. discard flushes the terminal's
-// input queue (tcflush), from the detection file.
+// it, left by an ask that gave up, and discards what was typed ahead, so a
+// line typed before the question almost never answers it. discard flushes the
+// terminal's input queue (tcflush), from the detection file. What it can't
+// drop: a read that finishes in the instant between its check and the flush,
+// and a partial line typed before the question, which the outstanding read
+// holds already and an answer then finishes.
 func (r *lineReader) ready(discard func() error) error {
 	if r.reading {
 		select {
 		case <-r.lines:
 			r.reading = false
-		default: // still reading: its line will be one typed from now on
+		default: // still reading
 		}
 	}
 	if !r.reading {
@@ -109,7 +112,7 @@ func (r *lineReader) next(ctx context.Context) (string, error) {
 
 - **It's the exception to "every goroutine has an owner that stops it":** nothing can stop it, so it's kept to one, its comment says the process's exit is its end, and a second is never started.
 - **The channel holds one,** so the goroutine finishes its send and returns even when no ask is waiting.
-- **A line left from an ask that gave up answers nothing:** `ready` drops it, and what was typed ahead, once the new question shows, so a stray Enter pressed while a step ran never takes a default unseen.
+- **A line left from an ask that gave up answers nothing:** `ready` drops it, and what was typed ahead, once the new question shows, so a stray Enter pressed while a step ran doesn't take a default unseen. Its two limits, in its comment, are a race of an instant and a line begun before the question; both are rare, and the first only ever answers with what the person typed.
 - **The buffer is reset only with no read outstanding:** while one is, its goroutine owns `in`.
 - **Reads happen only while an answer is awaited,** so nothing else is reading the terminal when a child or another part of the program needs it.
 
@@ -120,10 +123,22 @@ A live view redraws in place: it moves the cursor back over the rows it drew las
 ```go
 // screen redraws a region at the bottom of the terminal.
 type screen struct {
-	mu    sync.Mutex // guards out, width and rows: a draw writes and records under one hold
+	mu    sync.Mutex // guards every field: a draw writes and records under one hold
 	out   io.Writer
-	width int // the terminal's columns, as last read
-	rows  int // rows the last draw took, which the next moves back over
+	width int      // the terminal's columns, as last read; 0 where it gave none
+	last  []string // the lines the last draw wrote
+	drawn int      // the width they were drawn at
+}
+
+// rowsAt is how many rows lines take on a terminal width columns wide, a line
+// wider than it wrapping onto more.
+func rowsAt(lines []string, width int) int {
+	width = max(1, width)
+	n := 0
+	for _, l := range lines {
+		n += max(1, (cells(l)+width-1)/width)
+	}
+	return n
 }
 
 // draw replaces the region with lines.
@@ -135,17 +150,25 @@ func (s *screen) draw(lines []string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	width := s.width
+	if width <= 0 {
+		width = 80 // a terminal that gave no size
+	}
+	// Back over the last draw: the rows it took, or, where the terminal has
+	// been resized and reflowed it onto fewer, those. Never further, so a
+	// redraw never erases what it didn't draw; too few leaves a stale copy.
+	up := rowsAt(s.last, s.drawn)
+	if width != s.drawn {
+		up = min(up, rowsAt(s.last, width))
+	}
 	back := ""
-	if s.rows > 0 {
-		back = fmt.Sprintf("\x1b[%dA\x1b[J", s.rows) // up over the last draw, then erase below
+	if up > 0 {
+		back = fmt.Sprintf("\x1b[%dA\x1b[J", up) // up over the last draw, then erase below
 	}
 	if _, err := io.WriteString(s.out, back+b.String()); err != nil {
 		return err
 	}
-	s.rows = 0
-	for _, l := range lines {
-		s.rows += max(1, (cells(l)+s.width-1)/s.width) // a line wider than the terminal wraps onto more
-	}
+	s.last, s.drawn = lines, width
 	return nil
 }
 ```
@@ -154,7 +177,8 @@ func (s *screen) draw(lines []string) error {
 - **Every write to that stream goes through the same lock,** a warning or a question included, or one lands in the middle of a region still being redrawn.
 - **The cost:** a terminal paused with Ctrl-S blocks the writer, and every caller waits behind it.
 - **Each draw is one write,** so the terminal never shows a half-erased region.
-- **Rows are counted at the terminal's width,** `cells` measuring what a line shows (a wide character two columns, an escape none), so a line that wraps is moved back over whole. A resize changes `width` under the same lock.
+- **Rows are counted at the terminal's width,** `cells` measuring what a line shows (a wide character two columns, an escape none), so a line that wraps is moved back over whole. A width of 0, a terminal that gave no size, draws at 80.
+- **A resize changes `width` under the same lock,** and the next draw goes back by the fewer of the rows the last draw took and the rows its lines take at the new width. A terminal that reflows on a widen has put the region on fewer rows, and going back the old count would erase what is above it; one that doesn't reflow, or a narrow, leaves a stale copy of the region's first rows, which fails safe.
 
 ## Signals while the mode is changed
 
@@ -175,7 +199,7 @@ func withMode(ctx context.Context, set func() (restore func() error, err error),
 	}
 	restore, err := set()
 	if err != nil {
-		signal.Stop(held)
+		deliver(held, nil) // one may have come while set ran
 		return err
 	}
 	fctx, cancel := context.WithCancel(ctx)
@@ -192,17 +216,25 @@ func withMode(ctx context.Context, set func() (restore func() error, err error),
 	cancel()
 	wg.Wait()
 	err = errors.Join(err, restore())
+	deliver(held, caught)
+	return err
+}
+
+// deliver stops watching, then delivers again the signal caught, or one that
+// came since and is waiting in held. Kill returns before the signal lands on
+// another thread, so the caller may run on for an instant: it returns at
+// once and writes nothing more.
+func deliver(held chan os.Signal, caught os.Signal) {
 	signal.Stop(held)
 	if caught == nil {
 		select {
-		case caught = <-held: // one that came as f returned
+		case caught = <-held:
 		default:
 		}
 	}
 	if s, ok := caught.(syscall.Signal); ok {
 		_ = syscall.Kill(os.Getpid(), s) // nothing watches it now, so its default action ends the process
 	}
-	return err
 }
 
 // notIgnored are those of sigs the process isn't ignoring.
@@ -217,7 +249,7 @@ func notIgnored(sigs ...os.Signal) []os.Signal {
 }
 ```
 
-- **Watch before changing the mode, restore before letting go,** so no signal lands while the terminal is changed and unwatched.
+- **Watch before changing the mode, restore before letting go,** so no signal lands while the terminal is changed and unwatched; a signal that came while `set` failed is delivered too.
 - **A held signal cancels `f`,** so `f` must return promptly once its ctx ends: after a hang-up the terminal is gone, and a read loop that waits on it would never end.
 - **A signal the process was ignoring stays ignored:** `signal.Notify` would install a handler over the ignore, and the re-raise would then kill a `nohup`'d process.
 - **The whole function is the exception to rule 5,** and its comment says so; nothing else but `run` watches signals.
