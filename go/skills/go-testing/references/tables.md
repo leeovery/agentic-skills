@@ -1,6 +1,6 @@
 # Table Tests and Names
 
-**A table is one behaviour fed many inputs. When the setup or the check changes, it's another test.**
+**A table is one behaviour fed many inputs. When the kind of arrangement or the check changes, it's another test; a change to the input's data, even through a builder option, is a row.**
 
 Contents: when a table fits · row shape · errors · names · comparing without go-cmp · printing a diff · Error or Fatal · parallel rows.
 
@@ -8,7 +8,7 @@ Contents: when a table fits · row shape · errors · names · comparing without
 
 | Fits a table | Wants its own test |
 |---|---|
-| The same call, the same checks, different values | A different arrangement: another fake, another store state |
+| The same call, the same checks, different values, a builder option's among them | A different kind of arrangement: another fake, another collaborator |
 | Rows a reader can scan as data | A row that needs a `check` func or a `wantCall bool` |
 | Adding a case means adding a line | Adding a case means adding an `if` in the loop |
 

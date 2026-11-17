@@ -165,7 +165,7 @@ Some waits are never durable, so a bubble's clock never moves past them:
 - **A subprocess:** the wait for a child to exit, and every read of its output.
 - **A terminal:** a read of stdin, a reply to a query, a full-screen program's input and renderer loops.
 
-Fake the thing first: a fake runner in place of the subprocess ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)), a pipe made in the bubble in place of the terminal. Where code must wait across one of these and no in-memory double exists, inject its wait (`wait func(context.Context, time.Duration) error`) and say why beside the field; a test passes one that returns at once.
+Fake the thing first: a fake runner in place of the subprocess ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)), an `io.Pipe` made in the bubble in place of the terminal, which blocks on the bubble's channels where an `os.Pipe` read is real I/O. Where code must wait across one of these and no in-memory double exists, inject its wait (`wait func(context.Context, time.Duration) error`) and say why beside the field; a test passes one that returns at once.
 
 ## Rules inside a bubble
 

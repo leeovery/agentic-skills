@@ -59,7 +59,8 @@ The builder, the fake and the store are in [fakes-and-builders.md](references/fa
 | The test needs | Reach for |
 |---|---|
 | Many inputs through one behaviour | a table, each row under `t.Run` |
-| A different setup or a different check | a test of its own |
+| Another kind of arrangement (another fake, another collaborator), or a different check | a test of its own |
+| Another state of the same input, even set through a builder option | a row |
 | A collaborator you own | a hand-written fake of its interface |
 | An outside HTTP API | your client against an `httptest` server |
 | Files or a store | the real thing on `t.TempDir()` |
