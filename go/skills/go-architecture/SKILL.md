@@ -29,7 +29,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	show := cli.ShowError(stderr)
+	show := cli.ShowFor(args, stdout, stderr)
 	store, err := filestore.Open(getenv("SHOP_DATA_DIR"))
 	if err != nil {
 		show(err)
@@ -41,6 +41,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		Out:       stdout,
 	}
 	root := cli.NewRootCommand(deps) //nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext
+	root.SetOut(stdout)
 	root.SetErr(stderr)
 	return cli.Execute(ctx, root, args, show)
 }
