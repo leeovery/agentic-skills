@@ -65,6 +65,44 @@ Writes are decided by whether the other side can de-duplicate them:
 - **A write the other side can't de-duplicate,** a push or a workflow dispatch, whose outcome a timeout would leave unknown, takes no timeout of its own in a program a person runs and can interrupt: the interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
 - **A server or a worker** has no one to interrupt it, so it makes such a write idempotent, with a key or a check of what's there before it, and keeps the deadline.
 
+An adapter that runs every call through one function ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md#an-adapter-per-binary)) keeps both rules by taking the bound as a parameter, never fixing one inside it: a read gets its deadline, and a write the other side can't de-duplicate gets none, so the interrupt bounds it.
+
+```go
+// The bounds a call to the payment CLI runs under.
+const (
+	readBound   = 30 * time.Second
+	byInterrupt = time.Duration(0) // a write the provider can't de-duplicate
+)
+
+// call is the one runner of the payment CLI. A bound above zero is the call's
+// deadline; zero leaves it to ctx, which the person's interrupt ends.
+func (c *Client) call(ctx context.Context, bound time.Duration, args ...string) ([]byte, error) {
+	if bound > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, bound)
+		defer cancel()
+	}
+	res, err := c.run.Run(ctx, runner.Command{Name: "pay", Args: args})
+	if err != nil {
+		return nil, failed(res, err)
+	}
+	return res.Stdout, nil
+}
+
+// Invoice reads an invoice: a read, so it gives up after readBound.
+func (c *Client) Invoice(ctx context.Context, number string) ([]byte, error) {
+	return c.call(ctx, readBound, "invoice", "show", number)
+}
+
+// Payout sends money, which the provider can't de-duplicate: a timeout would
+// leave unknown whether it went, so only the interrupt bounds it.
+func (c *Client) Payout(ctx context.Context, to string, amount Cents) ([]byte, error) {
+	return c.call(ctx, byInterrupt, "payout", "--to", to, "--amount", strconv.FormatInt(int64(amount), 10))
+}
+```
+
+Each method names its kind where it calls, so a new write is a choice made at the call, never a bound it inherits.
+
 ## Work that outlives its caller
 
 Some work must finish even when the caller has gone: an audit record, a rollback, a cleanup after cancellation. Run it on `context.WithoutCancel(ctx)`, which keeps the caller's values and drops its cancellation and deadline, then give it a deadline of its own.
