@@ -110,6 +110,7 @@ func TestRunRefusesAnUnknownCommand(t *testing.T) {
 - **The other codes come from the edge.** `cli.Execute` sets 0, 1, 2 for a usage error and 130 for an interrupt, and leaves printing a command's error to cobra, so nothing prints it twice ([go-actions' cli.md](../../go-actions/references/cli.md)).
 - **`run` sets cobra's error writer, never its output writer.** Data goes to the writer in `cli.Deps`; with `root.SetOut(stdout)`, a bad command line would print its usage into the pipe.
 - **A test calls `run`** with `t.Context()` ([Go 1.24](https://go.dev/doc/go1.24)), a `getenv` closure and buffers, and checks the code it returns, without touching the real environment.
+- **A tool that drives a terminal takes `*os.File` for its streams,** since whether each is a terminal decides how it draws and whether it may ask; `getenv` stays. The detection sits in one file ([go-concurrency's terminals.md](../../go-concurrency/references/terminals.md)).
 
 ## Naming
 
@@ -146,4 +147,5 @@ A cycle means a package reaches the wrong way:
 
 - **No `init()`.** What a package needs is built in its constructor, called from `run`.
 - **A package-level `var` holds only what never changes after start:** sentinel errors, compiled regexps. A table callers might change is a function returning a fresh copy ([go-types](../../go-types/SKILL.md)).
+- **The one mutable allowed guards a process-wide resource an outside tool imposes,** such as a lock around a CLI that rewrites its config file on every call, so its calls must run one at a time in the process. Its comment says so.
 - **The logger is a field or a parameter,** never a package variable or `slog.Default()`.

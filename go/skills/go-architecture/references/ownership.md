@@ -16,7 +16,8 @@ If two outputs show it, or two code paths decide on it, it has one owner.
 ## Who owns it
 
 - **A figure or decision about a domain type** belongs to that type's package, often as a method: `inv.Overdue(now)`, `order.CancelRatio(orders)`.
-- **How a value reads to people** belongs to `format`.
+- **How a value reads to people** belongs to `format`, a leaf any package may import. A domain package whose error messages people read words its values through it too, so the message and the screen agree.
+- **Wording that depends on the output mode** (a time in the person's zone in text, and in UTC in JSON) belongs to the renderer, which knows the mode, and calls `format` for the rest.
 - **How a value is stored or sent** belongs beside its type, as its own function with a test that pins its bytes. It never calls the display wording, or a display tweak rewrites stored data.
 
 ## Before computing anything a screen shows
