@@ -140,13 +140,17 @@ var ErrNotLoggedIn = errors.New("the gateway refused the shop's credentials")
 // AuthError is a call the gateway refused for its credentials, with what the
 // person does about it.
 type AuthError struct {
-	Fix string // the command that logs in again
-	Err error  // the gateway's answer
+	Login string // the command that logs in again
+	Err   error  // the gateway's answer
 }
 
 func (e *AuthError) Error() string {
 	return fmt.Sprintf("%v: %v", ErrNotLoggedIn, e.Err)
 }
+
+// Fix is what the person does about it, which the renderer shows apart from
+// the message: AuthError meets failure.Fixed.
+func (e *AuthError) Fix() string { return e.Login }
 
 // Unwrap gives the error's identities: its class, its kind, and its cause.
 func (e *AuthError) Unwrap() []error {
@@ -155,6 +159,7 @@ func (e *AuthError) Unwrap() []error {
 ```
 
 - `failure.ErrBlocked` is one of the kinds a small `failure` package names for every domain package to share (blocked by a rule, waiting on a person); the edge maps each kind to its status or exit code.
+- `failure.Fixed` (`interface{ error; Fix() string }`) is how any error says what the person does about it, so the renderer finds a fix with `errors.AsType[failure.Fixed]` whatever package made the error. `failure.Partial` (`interface{ error; Done() string }`) is its like for an error that stopped partway, saying what was done first.
 - `errors.Is(err, gateway.ErrNotLoggedIn)` holds for the caller that branches on the class, `errors.Is(err, failure.ErrBlocked)` for the exit-code function that maps the kind, and `errors.AsType[*url.Error](err)` still reaches the cause.
 - It replaces a custom `Is` method: each identity is a plain error in the list, and the match walks into each.
 - **Every element is API.** A caller comes to depend on each, so the list holds only what a caller branches on.

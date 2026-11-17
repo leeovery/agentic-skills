@@ -51,10 +51,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	show := cli.ShowError(stderr)
+	show := cli.ShowFor(args, stdout, stderr)
 	var level slog.LevelVar
 	if err := level.UnmarshalText([]byte(cmp.Or(getenv("SHOP_LOG_LEVEL"), "INFO"))); err != nil {
-		show(fmt.Errorf("read SHOP_LOG_LEVEL: %w", err))
+		show(fmt.Errorf("can't read SHOP_LOG_LEVEL: %w", err))
 		return 1
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: &level}))
@@ -69,6 +69,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	settler := billing.NewSettler(billing.Config{Invoices: store, Charger: payments, Logger: log})
 
 	root := cli.NewRootCommand(cli.Deps{Settler: settler, Out: stdout}) //nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext
+	root.SetOut(stdout)
 	root.SetErr(stderr)
 	return cli.Execute(ctx, root, args, show)
 }
@@ -87,7 +88,7 @@ Where an error stops, and nowhere it passes through:
 - **An edge:** the HTTP edge's `writeError` ([matching.md](matching.md)). A CLI's errors, a command's or a setup failure in `run`, are shown by its one renderer, so nothing logs them as well.
 - **A worker that carries on:** a failure it skips and retries later is logged at the point it's skipped.
 - **Not in code that returns the error.** Its caller logs it, or matches it, or returns it in turn.
-- **A CLI whose output is its report has no logger:** the same rules land as its result's failure and warnings ([errors-as-output.md](errors-as-output.md)).
+- **A CLI command that ends in one result has no logger:** the same rules land as its result's failure and warnings ([errors-as-output.md](errors-as-output.md)). The line is the command's, not the program's: `settle`, working through many invoices, logs as it goes, to stderr.
 
 ```go
 // Settle charges every unpaid invoice. A charge that fails is logged and left
