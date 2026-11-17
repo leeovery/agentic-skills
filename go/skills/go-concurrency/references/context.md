@@ -65,43 +65,56 @@ Writes are decided by whether the other side can de-duplicate them:
 - **A write the other side can't de-duplicate,** a push or a workflow dispatch, whose outcome a timeout would leave unknown, takes no timeout of its own in a program a person runs and can interrupt: the interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
 - **A server or a worker** has no one to interrupt it, so it makes such a write idempotent, with a key or a check of what's there before it, and keeps the deadline.
 
-An adapter that runs every call through one function ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md#an-adapter-per-binary)) keeps both rules by taking the bound as a parameter, never fixing one inside it: a read gets its deadline, and a write the other side can't de-duplicate gets none, so the interrupt bounds it.
+An adapter whose calls include a write the other side can't de-duplicate, all through one function ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md#an-adapter-per-binary)), keeps both rules by taking each call's kind as a parameter, never fixing one bound inside it: a read gets its deadline, and the write gets none, so the interrupt bounds it. The kind is an enum whose zero is refused, never a duration whose zero means "no deadline", so a call that forgets its kind fails at once rather than running unbounded. An adapter that only reads keeps one deadline for every call, as the `Client` above does.
 
 ```go
-// The bounds a call to the payment CLI runs under.
+// callKind is how a call to the deploy CLI is bounded. The zero value is
+// refused, so every call names its kind.
+type callKind int
+
 const (
-	readBound   = 30 * time.Second
-	byInterrupt = time.Duration(0) // a write the provider can't de-duplicate
+	callKindUnknown      callKind = iota
+	callKindRead                  // bounded by readBound
+	callKindUnkeyedWrite          // can't be de-duplicated: bounded by the interrupt alone
 )
 
-// call is the one runner of the payment CLI. A bound above zero is the call's
-// deadline; zero leaves it to ctx, which the person's interrupt ends.
-func (c *Client) call(ctx context.Context, bound time.Duration, args ...string) ([]byte, error) {
-	if bound > 0 {
+const readBound = 30 * time.Second
+
+// call is the one runner of the deploy CLI.
+func (c *Client) call(ctx context.Context, kind callKind, args ...string) ([]byte, error) {
+	switch kind {
+	case callKindRead:
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, bound)
+		ctx, cancel = context.WithTimeout(ctx, readBound)
 		defer cancel()
+	case callKindUnkeyedWrite:
+		// No deadline of its own: a timeout would leave unknown whether it
+		// started. ctx ends on the person's interrupt.
+	case callKindUnknown:
+		return nil, fmt.Errorf("deploy %s: no call kind", strings.Join(args, " "))
+	default:
+		return nil, fmt.Errorf("deploy %s: call kind %d", strings.Join(args, " "), kind)
 	}
-	res, err := c.run.Run(ctx, runner.Command{Name: "pay", Args: args})
+	res, err := c.run.Run(ctx, runner.Command{Name: "deploy", Args: args})
 	if err != nil {
 		return nil, failed(res, err)
 	}
 	return res.Stdout, nil
 }
 
-// Invoice reads an invoice: a read, so it gives up after readBound.
-func (c *Client) Invoice(ctx context.Context, number string) ([]byte, error) {
-	return c.call(ctx, readBound, "invoice", "show", number)
+// Releases lists an app's releases: a read, so it gives up after readBound.
+func (c *Client) Releases(ctx context.Context, app string) ([]byte, error) {
+	return c.call(ctx, callKindRead, "release", "list", app)
 }
 
-// Payout sends money, which the provider can't de-duplicate: a timeout would
-// leave unknown whether it went, so only the interrupt bounds it.
-func (c *Client) Payout(ctx context.Context, to string, amount Cents) ([]byte, error) {
-	return c.call(ctx, byInterrupt, "payout", "--to", to, "--amount", strconv.FormatInt(int64(amount), 10))
+// StartRelease dispatches the release workflow, which takes no idempotency
+// key: a second dispatch starts a second release.
+func (c *Client) StartRelease(ctx context.Context, app, version string) ([]byte, error) {
+	return c.call(ctx, callKindUnkeyedWrite, "release", "start", app, version)
 }
 ```
 
-Each method names its kind where it calls, so a new write is a choice made at the call, never a bound it inherits.
+Each method names its kind where it calls, so a new write is a choice made at the call, never a bound it inherits. A money write such as a payout is not this kind: a payment provider takes an idempotency key, so it keeps its deadline, as the refund does.
 
 ## Work that outlives its caller
 
