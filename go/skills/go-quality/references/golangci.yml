@@ -1,5 +1,6 @@
 # golangci-lint v2. Copy to .golangci.yml at the module's root, then name your
-# domain packages under depguard's domain rule.
+# domain packages under depguard's domain rule, and your module under
+# exhaustive's only-types.
 #
 # Each linter carries its reason. A new one joins with its reason, once its
 # findings are fixed or excluded here with theirs. Never loosen a setting to get
@@ -86,13 +87,20 @@ linters:
       kv-only: true     # "order", id: one style of attribute
       static-msg: true  # the message is a constant; the values are attributes
 
+    exhaustive:
+      # Only the module's own enums: a switch on reflect.Kind or another
+      # module's constants would have to name members it doesn't care about.
+      # The pattern matches the enum's full import path.
+      only-types: ['^example\.com/shop/']
+
     interfacebloat:
       max: 5
 
     iface:
-      # unusedmethod: a method its own package never calls, so the
-      # interface asks for more than its consumer uses.
-      enable: [identical, unused, opaque, unusedmethod]
+      # unusedmethod is off: it misfires on a producer-side seam whose
+      # consumers are in other packages, and on an interface whose value is
+      # passed on to another package's narrower one.
+      enable: [identical, unused, opaque]
 
     depguard:
       rules:
@@ -159,3 +167,7 @@ linters:
       - path: _test\.go$
         text: 'fmt\.Print'
         linters: [forbidigo]
+      # In a test, an unchecked assertion of the wrong type panics the test:
+      # a failure with its stack, as a checked one and t.Fatal would give.
+      - path: _test\.go$
+        linters: [forcetypeassert]

@@ -16,6 +16,17 @@ go build ./...
 
 The fast checks run first, so a failure costs least. A project with its own test runner (a sandboxed script, a `TestMain` guard) runs that in place of `go test`, with the race detector still on.
 
+A module that ships a build-tag set, code behind `//go:build demo`, runs the gates under each set it ships as well, since the five over the default build never compile a tagged file:
+
+```sh
+go vet -tags demo ./...
+go test -race -tags demo ./...
+golangci-lint run --build-tags demo
+go build -tags demo ./...
+```
+
+A tag for tests alone (`integration`) runs where its suite runs; it ships nothing.
+
 | Gate | Catches | Watch for |
 |---|---|---|
 | `gofmt -l .` | anything not in the one format | it prints file names but exits 0: test that its output is empty |
@@ -51,7 +62,7 @@ go tool govulncheck ./...
 
 ## Before reporting done
 
-- [ ] All five pass clean, and the report says which runner ran the tests.
+- [ ] All five pass clean, under each build-tag set the module ships, and the report says which runner ran the tests.
 - [ ] A gate failing on code you didn't touch is reported, not skipped or silenced.
 - [ ] No `//nolint` without its linter and reason; no exclusion, limit or allowance entry loosened.
 - [ ] Each new dependency has its reason in the PR.

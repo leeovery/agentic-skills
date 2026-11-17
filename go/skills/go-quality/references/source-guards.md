@@ -2,7 +2,7 @@
 
 **A source guard is a test that reads the module's own source and fails where a rule breaks.**
 
-Contents: a linter first · the shape of a guard · the helpers · guard 1, packages named for a job · guard 2, values worded by their owner · guard 3, a field read only through its owner · guard 4, table rows run under `t.Run` · keeping the helpers out of the binaries.
+Contents: a linter first · the shape of a guard · the helpers · guard 1, packages named for a job · guard 2, values worded by their owner · guard 3, a field read only through its owner · guard 4, table rows run under `t.Run` · guard 5, what each build-tag set links · guard 6, starting the binary runs nothing · the one startup file · keeping the helpers out of the binaries.
 
 ## A linter first
 
@@ -14,6 +14,8 @@ A linter setting is cheaper than a guard, so reach for one where it can say the 
 | a package mustn't call a function or use a variable | forbidigo, with an exclusion for the one place allowed |
 
 A guard is for what no linter can say: a package's name, which function a call sits in, what a format string holds, what a name refers to, or a rule across the module's files.
+
+A rule that ties an import to the one function or file that may use it, such as "only `start` names `os.Stdin`", stays a guard test whole, even where depguard could hold the import half. Split across a linter and a test, one rule has two homes, and the test is the half that can be seen to fail.
 
 ## The shape of a guard
 
@@ -477,6 +479,127 @@ func callsRun(body *ast.BlockStmt) bool {
 
 - It goes by the variable's name, so a table named otherwise passes unseen. Name every table `tests`, or `cases` beside another, and the guard reads them all.
 - It looks for any `X.Run` call in the loop's body, so `b.Run` in a benchmark passes as `t.Run` does. A loop that calls `t.Run` for some rows and not others passes too: review catches that, and rule 3 of go-testing forbids the branch.
+
+## Guard 5: what each build-tag set links
+
+A module that ships a second build behind a tag (`//go:build demo`, a demo with a world of its own) holds which packages each build links. Syntax can't say it: an import three packages away pulls the demo into the shipped binary. `go list -deps` can:
+
+```go
+// internal/guard/builds_test.go
+
+package guard_test
+
+import (
+    "os/exec"
+    "slices"
+    "strings"
+    "testing"
+
+    "example.com/shop/internal/guard"
+)
+
+// demoWorld is the demo's made-up shop, which only a -tags demo build links.
+const demoWorld = "example.com/shop/internal/demoworld"
+
+func TestTheShippedBinaryLinksNoDemo(t *testing.T) {
+    if slices.Contains(linked(t, ""), demoWorld) {
+        t.Errorf("cmd/shop links %s: only the -tags demo build may", demoWorld)
+    }
+}
+
+func TestTheDemoBuildLinksItsWorld(t *testing.T) {
+    if !slices.Contains(linked(t, "demo"), demoWorld) {
+        t.Errorf("cmd/shop with -tags demo doesn't link %s, so the guard above proves nothing", demoWorld)
+    }
+}
+
+// linked lists every package cmd/shop links when built with tags.
+func linked(t *testing.T, tags string) []string {
+    t.Helper()
+    args := []string{"list", "-deps", "-tags", tags, "./cmd/shop"}
+    cmd := exec.CommandContext(t.Context(), "go", args...)
+    cmd.Dir = guard.ModuleRoot(t)
+    out, err := cmd.Output()
+    if err != nil {
+        t.Fatalf("go %s: %v", strings.Join(args, " "), err)
+    }
+    return strings.Fields(string(out))
+}
+```
+
+- **Each set is checked both ways:** the shipped build lacks the package, and the tagged one has it, so a renamed package can't leave the first test passing over nothing.
+- **A tag for tests alone** (`integration`) needs no guard: it builds no binary.
+- Like guard 3, it needs the `go` command when tests run.
+
+## Guard 6: starting the binary runs nothing
+
+The runner seam keeps every process the program starts in one place ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)), but a dependency's `init` runs before `main` and outside it: a terminal-colour library that asks `tmux` what it supports starts a process on every run. Only running the built binary shows it:
+
+```go
+//go:build unix
+
+// cmd/shop/startup_test.go
+
+package main
+
+import (
+    "os"
+    "os/exec"
+    "path/filepath"
+    "testing"
+)
+
+// started are the binaries the tool, or a library it links, could start.
+var started = []string{"git", "gh", "tmux", "tput", "stty", "infocmp"}
+
+func TestStartingTheBinaryRunsNothing(t *testing.T) {
+    dir := t.TempDir()
+    bin := filepath.Join(dir, "shop")
+    if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+        t.Fatalf("go build: %v\n%s", err, out)
+    }
+    fakes, ran := filepath.Join(dir, "bin"), filepath.Join(dir, "ran")
+    if err := os.Mkdir(fakes, 0o755); err != nil {
+        t.Fatal(err)
+    }
+    for _, name := range started {
+        script := "#!/bin/sh\necho \"$0 $*\" >> " + ran + "\n"
+        if err := os.WriteFile(filepath.Join(fakes, name), []byte(script), 0o755); err != nil {
+            t.Fatal(err)
+        }
+    }
+    for _, args := range [][]string{{"--version"}, {"help", "cancel"}} {
+        cmd := exec.CommandContext(t.Context(), bin, args...)
+        cmd.Env = append(os.Environ(), "PATH="+fakes+string(os.PathListSeparator)+os.Getenv("PATH"), "TMUX=/tmp/tmux-0/default")
+        if out, err := cmd.CombinedOutput(); err != nil {
+            t.Fatalf("shop %v: %v\n%s", args, err, out)
+        }
+    }
+    if b, err := os.ReadFile(ran); err == nil {
+        t.Errorf("starting shop ran:\n%s", b)
+    }
+}
+```
+
+- **Each fake records being started** and does nothing else; a run that started none leaves no record.
+- **The environment invites the start:** `TMUX` set, so a library that asks tmux only inside it is caught. A guard over a terminal tool also runs it at a pseudo-terminal, where most detection happens.
+- **Run every build-tag set the module ships,** `go build -tags demo` too.
+
+## The one startup file
+
+A terminal program reads `TERM`, `NO_COLOR`, `CI` and the standard streams to choose how it draws, once, at startup. When that lives in one file of the package that draws, rather than in `cmd/`, forbidigo excludes that file as it excludes `cmd/`, and nothing else:
+
+```yaml
+linters:
+  exclusions:
+    rules:
+      # Startup reads the environment and the streams to choose the output
+      # mode, once; everything after it is handed what it found.
+      - path: ^internal/render/startup\.go$
+        linters: [forbidigo]
+```
+
+A guard test then holds the rest of the rule, that only its one constructor calls those reads, since a path exclusion covers the whole file.
 
 ## Keeping the helpers out of the binaries
 

@@ -9,7 +9,7 @@ Work is done when every gate passes clean, and a rule that must always hold is a
 
 ## Core rules
 
-1. **Five gates pass clean before work is called done:** `gofmt -l .` prints nothing, then `go vet ./...`, `go test -race ./...` (or the project's own runner), `golangci-lint run` and `go build ./...`. *A green build proves it compiles; the races, vet's findings and the lint rules are what review would find instead.*
+1. **Five gates pass clean before work is called done:** `gofmt -l .` prints nothing, then `go vet ./...`, `go test -race ./...` (or the project's own runner), `golangci-lint run` and `go build ./...`. A module that ships a build-tag set (`-tags demo`) runs the gates under each set too. *A green build proves it compiles; the races, vet's findings and the lint rules are what review would find instead, and code behind a tag no gate builds is never checked.*
 2. **golangci-lint v2 starts from [golangci.yml](references/golangci.yml).** A linter joins with its reason beside it, once its findings are fixed or excluded with theirs. *A linter switched on over a hundred open findings teaches everyone to ignore it.*
 3. **`//nolint:<linter> // reason`, never bare.** *A bare nolint silences every linter on the line, for a reason nobody can check.* Held by nolintlint.
 4. **A rule that must always hold is a gate, not a comment.** A linter setting where one can say it (depguard for an import, forbidigo for a call); otherwise a source-guard test that parses the module with `go/parser`, or `go/types` when it must know what a name refers to, and keeps an allowance list that only shrinks. *A comment or a README line is read once; a gate fails the day the rule breaks.*
@@ -83,7 +83,7 @@ func TestPackagesAreNamedForTheirJob(t *testing.T) {
 
 - **[gates.md](references/gates.md)** — read when setting up a project or CI, or before reporting done: the commands, their order, what each catches, a CI script.
 - **[golangci.yml](references/golangci.yml)** — the drop-in config; read when creating or changing `.golangci.yml`.
-- **[source-guards.md](references/source-guards.md)** — read when a rule must hold everywhere and no linter can say it: the helpers, allowance lists, four worked guards, and proving a guard fails.
+- **[source-guards.md](references/source-guards.md)** — read when a rule must hold everywhere and no linter can say it: the helpers, allowance lists, six worked guards (a build-tag set's dependencies and a binary that runs nothing at startup among them), and proving a guard fails.
 - **[modern-go.md](references/modern-go.md)** — read when upgrading Go, or unsure an API exists: the idioms from 1.21 to 1.27, each with its release note and its `go fix` analyser.
 
 ## Related skills
