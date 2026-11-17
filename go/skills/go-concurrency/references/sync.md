@@ -47,24 +47,24 @@ func (b *Balances) Charge(id CustomerID, amount Cents) {
 ```go
 // Ledger appends entries to one file, a write at a time.
 type Ledger struct {
-    turn chan struct{} // holds a value while a write has its turn
-    path string
+	turn chan struct{} // holds a value while a write has its turn
+	path string
 }
 
 // NewLedger returns a Ledger for the file at path.
 func NewLedger(path string) *Ledger {
-    return &Ledger{turn: make(chan struct{}, 1), path: path}
+	return &Ledger{turn: make(chan struct{}, 1), path: path}
 }
 
 // Append writes e once its turn comes, or gives up when ctx ends.
 func (l *Ledger) Append(ctx context.Context, e Entry) error {
-    select {
-    case l.turn <- struct{}{}:
-    case <-ctx.Done():
-        return ctx.Err()
-    }
-    defer func() { <-l.turn }()
-    return appendEntry(ctx, l.path, e)
+	select {
+	case l.turn <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-l.turn }()
+	return appendEntry(ctx, l.path, e)
 }
 ```
 

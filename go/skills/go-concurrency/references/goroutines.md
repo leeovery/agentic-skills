@@ -19,7 +19,7 @@ And first: does it need to be a goroutine at all? A function that does its work 
 
 A channel needs closing only when a receiver ranges over it or waits for the end. A worker told to stop by its context can leave its input channel open.
 
-The one goroutine "the process ends" stops is a reader blocked on a call nothing can cancel, such as a terminal's stdin: [terminals.md](terminals.md) keeps it to one, and says so where it starts.
+The one goroutine nothing stops but the process's exit is a reader blocked on a call nothing can cancel, such as a terminal's stdin: [terminals.md](terminals.md) keeps it to one, and says so where it starts.
 
 ## A worker and its owner
 

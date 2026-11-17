@@ -59,7 +59,7 @@ The deadline covers reading the body too. `json` is `encoding/json/v2` ([Go 1.27
 
 noctx flags `http.Get`, `http.NewRequest`, `net.Dial`, `exec.Command` and the other calls that take no context. Use `NewRequestWithContext`, a `net.Dialer`'s `DialContext`, and `exec.CommandContext`.
 
-A write whose outcome a timeout would make unknown, a push or a dispatch that may land after the deadline, takes no timeout of its own: the person's interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
+In a program a person runs and can interrupt, a CLI, a write whose outcome a timeout would make unknown, a push or a dispatch that may land after the deadline, takes no timeout of its own: the person's interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)). A server or a worker has no one to interrupt it, so it keeps the deadline on every outbound write and makes the write idempotent, with a key, so a retry after an unknown outcome is safe.
 
 ## Work that outlives its caller
 
