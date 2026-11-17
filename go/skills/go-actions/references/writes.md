@@ -60,10 +60,10 @@ func (p Publisher) Plan(ctx context.Context, want PriceList, stores []StoreID) (
 func (p Publisher) Apply(ctx context.Context, plan Plan) error {
 	for i, c := range plan.Changes {
 		if err := ctx.Err(); err != nil {
-			return &PartialError{Plan: plan, Done: i, Err: err, Untried: true}
+			return &PartialError{Plan: plan, Landed: i, Err: err, Untried: true}
 		}
 		if err := p.Stores.Replace(ctx, c.Store, c.Version, c.List); err != nil {
-			return &PartialError{Plan: plan, Done: i, Err: err}
+			return &PartialError{Plan: plan, Landed: i, Err: err}
 		}
 	}
 	return nil
@@ -92,9 +92,9 @@ Each write is a compare-and-swap on what `Plan` read: `If-Match` with the versio
 
 A write that timed out, got a 5xx, or lost its connection after the request went may have landed. Retrying it can make it land twice, and a leased retry reads its own first write as someone else's change.
 
-- **The adapter never retries a write.** It retries reads, which are safe.
+- **The adapter never retries a write the other side can't de-duplicate.** It retries reads, which are safe, and a write that carries an idempotency key.
 - **It tells "never ran" from "may have run":** a request refused before it was sent, or a binary that never started, changed nothing; anything after the request left is unknown. The two are separate sentinels, and the edge words the second as "may have landed: look at <where>".
-- **The person's interrupt bounds the write,** not a timeout of its own, since a timeout would turn a known outcome into an unknown one. That holds for a program a person runs; a server or a worker keeps a deadline and makes the write idempotent instead ([go-concurrency's context.md](../../go-concurrency/references/context.md#deadlines-on-calls-that-leave-the-process)).
+- **The person's interrupt bounds a write the storefront can't de-duplicate,** not a timeout of its own, since a timeout would turn a known outcome into an unknown one. A write that carries an idempotency key keeps its deadline and may be retried, and a server or worker makes its writes so ([go-concurrency's context.md](../../go-concurrency/references/context.md#deadlines-on-calls-that-leave-the-process)).
 
 ## Saying what landed
 
@@ -104,27 +104,39 @@ A failure partway names what was written, what may have been, and what wasn't tr
 // PartialError is a publish that stopped partway.
 type PartialError struct {
 	Plan    Plan
-	Done    int   // how many of the plan's changes landed
+	Landed  int   // how many of the plan's changes landed
 	Err     error // why the next one failed, or why it wasn't tried
 	Untried bool  // the run stopped before the next write was tried: an interrupt
 }
 
 func (e *PartialError) Error() string {
-	var b strings.Builder
-	if e.Done > 0 {
-		fmt.Fprintf(&b, "published to %s; ", storesOf(e.Plan.Changes[:e.Done]))
-	}
-	rest := e.Plan.Changes[e.Done:]
 	if e.Untried {
-		fmt.Fprintf(&b, "%v", e.Err) // no store failed: the run was stopped
-	} else {
-		fmt.Fprintf(&b, "%s: %v", rest[0].Store, e.Err)
-		rest = rest[1:]
+		return e.said(e.Err.Error())
+	}
+	return e.said(fmt.Sprintf("%s: %v", e.Plan.Changes[e.Landed].Store, e.Err))
+}
+
+// Done is what the publish did before it was interrupted, which the renderer
+// says after "interrupted": PartialError meets failure.Partial.
+func (e *PartialError) Done() string { return e.said("") }
+
+// said is what landed, then why it stopped, then what wasn't tried.
+func (e *PartialError) said(stopped string) string {
+	var parts []string
+	if e.Landed > 0 {
+		parts = append(parts, "published to "+storesOf(e.Plan.Changes[:e.Landed]))
+	}
+	rest := e.Plan.Changes[e.Landed:]
+	if stopped != "" {
+		parts = append(parts, stopped)
+	}
+	if !e.Untried {
+		rest = rest[1:] // the one that failed
 	}
 	if len(rest) > 0 {
-		fmt.Fprintf(&b, "; %s not tried", storesOf(rest))
+		parts = append(parts, storesOf(rest)+" not tried")
 	}
-	return b.String()
+	return strings.Join(parts, "; ")
 }
 
 func (e *PartialError) Unwrap() error { return e.Err }
@@ -132,7 +144,7 @@ func (e *PartialError) Unwrap() error { return e.Err }
 
 - **The cause stays matchable,** so the edge tells a refused lease (nothing changed there) from a write that may have landed.
 - **The words are exact,** "published to north and south; west: may have landed: …; east not tried", because the person repairs from them. A test pins them.
-- **An interrupt blames no store:** stopped before a write, it reads "published to north; context canceled; south and west not tried", the edge wording the cause as "interrupted".
+- **An interrupt blames no store:** stopped before a write, the renderer reads it as "interrupted; published to north; south and west not tried" ([cli.md](cli.md)'s `messageOf`).
 - **Running it again is safe:** a fresh plan finds what already landed equal, and leaves it.
 
 ## The edge and `--dry-run`
@@ -155,6 +167,6 @@ The split gives `--dry-run` for nothing: it is the plan, shown, with every check
 - [ ] Every read and every check in the plan, before the first write.
 - [ ] The plan is a value the edge can show; apply takes it back.
 - [ ] Each write leased on what the plan read; a refused lease is its own sentinel.
-- [ ] No write retried; "never ran" told from "may have run".
+- [ ] No write retried but one with an idempotency key; "never ran" told from "may have run".
 - [ ] `ctx` checked before each write.
 - [ ] A failure partway names what landed, what may have, and what wasn't tried, pinned by a test.

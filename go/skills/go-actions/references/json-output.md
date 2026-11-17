@@ -10,7 +10,48 @@ A script reading `shop cancel ord-1 --json` parses stdout. One line printed past
 
 - **One renderer owns every error, in every mode.** The command returns its error; the renderer writes it, as text to stderr or as the document on stdout. Nothing else prints one: the command parser's own error and usage printing is off (cobra's `SilenceErrors` and `SilenceUsage`).
 - **Parse errors included.** An unknown flag fails before the flags are read, so the edge scans the arguments for `--json` first, up to `--`, and renders the parse failure in the mode they ask for.
-- **The mode is chosen once,** from the parsed flags, before the renderer is built. Each mode renders the same model: JSON encodes it, text lays it out.
+- **The mode is chosen once,** from the arguments, before anything can fail, so a setup failure is in the mode asked for too ([cli.md](cli.md)'s `ShowFor`). Each mode renders the same model: JSON encodes it, text lays it out.
+
+```go
+// ShowJSON is the one renderer of errors with --json: the run's document,
+// holding its failure, on stdout.
+func ShowJSON(w io.Writer) func(error) {
+	return func(err error) {
+		b, _ := json.Marshal(errorDocument{Error: errorBody{ // a struct of strings always encodes
+			Kind:    kindOf(err),
+			Message: messageOf(err),
+			Fix:     fixOf(err),
+		}})
+		_, _ = fmt.Fprintf(w, "%s\n", b) // a failed write to stdout has nowhere left to go
+	}
+}
+
+type errorDocument struct {
+	Error errorBody `json:"error"`
+}
+
+type errorBody struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+	Fix     string `json:"fix,omitempty"`
+}
+
+// kindOf is the class a script branches on, the exit code's in words.
+func kindOf(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "interrupted"
+	}
+	if _, ok := errors.AsType[usageError](err); ok {
+		return "usage"
+	}
+	if errors.Is(err, failure.ErrBlocked) {
+		return "blocked"
+	}
+	return "failed"
+}
+```
+
+- **The words are the text mode's,** `messageOf` and `fixOf` shared, so the two modes never word one failure apart.
 
 ## One document per run
 
@@ -54,7 +95,7 @@ An error's message shown to a person, or read by an agent from `message`, is the
 func TestCancelJSONRefusesAShippedOrder(t *testing.T) {
 	code, stdout, stderr := execute(t.Context(), t, "cancel", "ord-2", "--json")
 
-	want := `{"error":{"kind":"failed","message":"order ord-2 is shipped, so it can't be cancelled"}}` + "\n"
+	want := `{"error":{"kind":"failed","message":"can't cancel ord-2: it has shipped, so it can't be called back"}}` + "\n"
 	if code != 1 || stdout != want || stderr != "" {
 		t.Errorf("shop cancel ord-2 --json = %d, stdout %q, stderr %q; want 1, %q and nothing", code, stdout, stderr, want)
 	}

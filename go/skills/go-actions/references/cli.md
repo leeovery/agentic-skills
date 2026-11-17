@@ -71,7 +71,7 @@ func newCancelCommand(deps Deps) *cobra.Command {
 }
 ```
 
-- **`RunE`, never `Run`.** The error goes back to `Execute`, which picks the exit code. cobra prints it once, as `Error: …`; the command doesn't print it too.
+- **`RunE`, never `Run`.** The error goes back to `Execute`, which shows it through the one renderer and picks the exit code; the command doesn't print it.
 - **Parse first.** Arguments and flag values become typed values (`order.ID`, `order.Reason`) before anything else runs. A value that doesn't parse is a usage error. A word whose meaning takes reads (a name that may be a branch, a tag or a build) is passed on as typed, for the operation to resolve.
 - **Flags bind to variables local to the constructor,** so every fresh tree has fresh flags.
 - **The context is `cmd.Context()`.** It carries `run`'s interrupt, so Ctrl-C cancels the work.
@@ -80,8 +80,8 @@ func newCancelCommand(deps Deps) *cobra.Command {
 ## Output
 
 - **Data goes to `deps.Out`:** what a pipe or a script consumes. `shop list | wc -l` counts orders, not warnings. `run` passes its `stdout`; a test passes a buffer.
-- **Not `cmd.OutOrStdout()`.** To point it at `run`'s `stdout`, `run` would call `root.SetOut`, and cobra writes its own help there too, so the data writer would no longer be the commands' alone.
-- **Diagnostics go to `cmd.ErrOrStderr()`:** progress, warnings, prompts. `run` points it at its `stderr`, where cobra prints a command's error.
+- **Not `cmd.OutOrStdout()`.** `run` points it at its `stdout` for cobra's help and version, output a person asked for; the commands' data goes through `deps.Out`, so what a command writes is its own and a test hands it a writer of its own.
+- **Diagnostics go to `cmd.ErrOrStderr()`:** progress, warnings, prompts. `run` points it at its `stderr`.
 - **Input comes from `cmd.InOrStdin()`.**
 - **Never `cmd.Print`, `cmd.Println` or `cmd.Printf` for data.** cobra sends them to stderr unless an output writer is set.
 - **A value is printed through its one formatter** ([go-architecture](../../go-architecture/SKILL.md)), never a `%.2f` of the command's own.
@@ -124,12 +124,12 @@ func Execute(ctx context.Context, root *cobra.Command, args []string, show func(
 	if err == nil {
 		return 0
 	}
+	if !parsed {
+		err = usageError{err}
+	}
 	show(err)
-	switch {
-	case ctx.Err() != nil:
+	if ctx.Err() != nil {
 		return 130
-	case !parsed:
-		return 2
 	}
 	if _, ok := errors.AsType[usageError](err); ok {
 		return 2
@@ -137,11 +137,51 @@ func Execute(ctx context.Context, root *cobra.Command, args []string, show func(
 	return 1
 }
 
-// ShowError is the one renderer of errors in text: each as "shop: <message>".
+// ShowFor is the one renderer of errors for the run args ask for: the JSON
+// document on stdout with --json, else text on stderr. It reads args as
+// written, up to "--", since a parse failure is shown before any flag is read.
+func ShowFor(args []string, stdout, stderr io.Writer) func(error) {
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == "--json" {
+			return ShowJSON(stdout)
+		}
+	}
+	return ShowError(stderr)
+}
+
+// ShowError is the one renderer of errors in text: "shop: <message>", then
+// the fix the error carries on a line of its own.
 func ShowError(w io.Writer) func(error) {
 	return func(err error) {
-		_, _ = fmt.Fprintf(w, "shop: %v\n", err) // a failed write to stderr has nowhere left to go
+		// A failed write to stderr has nowhere left to go.
+		_, _ = fmt.Fprintf(w, "shop: %s\n", messageOf(err))
+		if fix := fixOf(err); fix != "" {
+			_, _ = fmt.Fprintf(w, "fix: %s\n", fix)
+		}
 	}
+}
+
+// messageOf is the error's words. An interrupt is said as the person did it,
+// "interrupted", then what was done before it where the error says so.
+func messageOf(err error) string {
+	if !errors.Is(err, context.Canceled) {
+		return err.Error()
+	}
+	if p, ok := errors.AsType[failure.Partial](err); ok {
+		return "interrupted; " + p.Done()
+	}
+	return "interrupted"
+}
+
+// fixOf is what the error says the person does about it, if anything.
+func fixOf(err error) string {
+	if f, ok := errors.AsType[failure.Fixed](err); ok {
+		return f.Fix()
+	}
+	return ""
 }
 ```
 
@@ -154,7 +194,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	show := cli.ShowError(stderr)
+	show := cli.ShowFor(args, stdout, stderr) // first, so a setup failure shows in the mode asked for
 	store, err := filestore.Open(getenv("SHOP_DATA_DIR"))
 	if err != nil {
 		show(err)
@@ -166,6 +206,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		Out:       stdout,
 	}
 	root := cli.NewRootCommand(deps) //nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext
+	root.SetOut(stdout)
 	root.SetErr(stderr)
 	return cli.Execute(ctx, root, args, show)
 }
@@ -175,22 +216,24 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 - **`usageError` covers what the command checks itself** once the line has parsed: an id or a flag value that doesn't parse.
 - **`errors.AsType`** is the generic form of `errors.As` ([Go 1.26](https://go.dev/doc/go1.26)).
 - **`main` exits with what `run` returns, and nothing else exits:** `os.Exit` and `log.Fatal` appear in `main` alone. `os.Exit` skips deferred calls, so `main` holds none, and `run` defers `stop`.
-- **Each error is printed once, by one renderer.** cobra's own error and usage printing is off; `Execute` shows a command's error through `show`, and `run` shows a setup failure through the same `show` before it returns 1. A tool with `--json` hands `Execute` a renderer that writes the failure as the document, a parse failure included ([json-output.md](json-output.md)).
-- **contextcheck misfires on the `NewRootCommand` line:** `run` has a context and the constructor takes none. The command gets the context from `ExecuteContextC`, so the nolint says so ([go-quality's gates.md](../../go-quality/references/gates.md)).
+- **Each error is printed once, by one renderer.** cobra's own error and usage printing is off; `Execute` shows a command's error through `show`, a parse failure as a `usageError`, and `run` shows a setup failure through the same `show` before it returns 1.
+- **The renderer is chosen first,** from the arguments as written, so a setup failure or a parse failure under `--json` is the document too ([json-output.md](json-output.md)).
+- **A fix is the error's, its layout the renderer's:** an error that carries one meets `failure.Fixed` ([go-errors' matching.md](../../go-errors/references/matching.md#several-identities)), and each renderer shows it its own way, a `fix:` line in text, a member in JSON.
+- **An interrupt reads "interrupted",** never "context canceled", whatever wraps it; one that stopped partway meets `failure.Partial`, which says what it did first ([writes.md](writes.md#saying-what-landed)).
+- **contextcheck misfires on the `NewRootCommand` line:** `run` has a context and the constructor takes none. The command gets the context from `ExecuteContext`, so the nolint says so ([go-quality's gates.md](../../go-quality/references/gates.md)).
 
 ## Testing a command
 
-Build a fresh tree with fakes, capture both streams, and run it through `Execute`, as `run` does:
+Build a fresh tree with fakes, capture both streams, and run it through `ShowFor` and `Execute`, as `run` does once its setup is done:
 
 ```go
 func execute(ctx context.Context, t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	var out, errOut bytes.Buffer
 	root := cli.NewRootCommand(newDeps(&out)) //nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext
-	// cobra's help too, which run leaves on the process's own stdout.
-	root.SetOut(&errOut)
+	root.SetOut(&out)
 	root.SetErr(&errOut)
-	code = cli.Execute(ctx, root, args, cli.ShowError(&errOut))
+	code = cli.Execute(ctx, root, args, cli.ShowFor(args, &out, &errOut))
 	return code, out.String(), errOut.String()
 }
 
@@ -228,6 +271,6 @@ func TestExecuteExitCodes(t *testing.T) {
 - **Only the root has a persistent hook, and `Execute` sets it.** cobra runs the nearest `PersistentPreRun(E)` alone, so a subcommand's own hook skips the root's, and the parse marker with it. Don't reach for cobra's package-level `EnableTraverseRunHooks` instead.
 - **Required flags and flag groups are checked after the hooks,** so a missing `MarkFlagRequired` flag exits 1 with no usage. Check required input in the parse step and return a `usageError`.
 - **`SetArgs(nil)` reads `os.Args`,** a test binary's flags included. `Execute` passes an empty slice instead.
-- **Usage stays off.** With `SilenceUsage` unset, cobra prints usage after an error to the output writer when one is set, else to the process's stderr, burying the error; the renderer shows the error alone. Data still has its own writer in `Deps`, and `run` never calls `root.SetOut`, so help can't land in a pipe someone is reading.
+- **Usage stays off.** With `SilenceUsage` unset, cobra prints usage after an error to the output writer, stdout here, burying the error and landing in a pipe someone is reading; the renderer shows the error alone. Help asked for, `--help`, still goes to stdout.
 - **A group command without `RunE` prints its help and exits 0,** run alone or given a subcommand it doesn't have (`shop invoice bogus`). Only the root reports an unknown command.
 - **A secret never arrives as a flag value.** It shows in `ps` and the shell's history, and cobra quotes a bad flag value in its error. Read it from `cmd.InOrStdin()`, or from the environment in `run`.
