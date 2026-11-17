@@ -13,7 +13,7 @@ A condition callers act on, with nothing more to tell them: not found, already e
 var ErrNotFound = errors.New("not found")
 ```
 
-- Exported, with a comment saying when it's returned. It's API from the moment a caller matches it. A sentinel that is one of the package's documented failures is exported for its callers and its external tests alike: a `package order_test` test is a caller too.
+- Exported, with a comment saying when it's returned. It's API from the moment a caller matches it. A sentinel for a failure callers branch on is matched by its external tests too: a `package order_test` test is a caller, but not a reason on its own to export one.
 - Short text: the wrap adds the input. `fmt.Errorf("order %s: %w", id, ErrNotFound)` prints `order o-1: not found`.
 - Returned wrapped, never bare, so every caller has to use `errors.Is`, and adding context later breaks nobody.
 - A failure nobody branches on stays a plain `fmt.Errorf`. A sentinel per failure is a list nobody reads.
@@ -140,17 +140,17 @@ var ErrNotLoggedIn = errors.New("the gateway refused the shop's credentials")
 // AuthError is a call the gateway refused for its credentials, with what the
 // person does about it.
 type AuthError struct {
-    Fix string // the command that logs in again
-    Err error  // the gateway's answer
+	Fix string // the command that logs in again
+	Err error  // the gateway's answer
 }
 
 func (e *AuthError) Error() string {
-    return fmt.Sprintf("%v: %v", ErrNotLoggedIn, e.Err)
+	return fmt.Sprintf("%v: %v", ErrNotLoggedIn, e.Err)
 }
 
 // Unwrap gives the error's identities: its class, its kind, and its cause.
 func (e *AuthError) Unwrap() []error {
-    return []error{ErrNotLoggedIn, failure.ErrBlocked, e.Err}
+	return []error{ErrNotLoggedIn, failure.ErrBlocked, e.Err}
 }
 ```
 

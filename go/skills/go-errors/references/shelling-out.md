@@ -14,25 +14,26 @@ package runner
 
 // Command is one run of a binary.
 type Command struct {
-    Dir   string   // where it runs; "" for the program's own directory
-    Env   []string // added to the program's environment
-    Stdin []byte   // piped afresh on every run, never an io.Reader a retry would find drained
-    Name  string
-    Args  []string
+	Dir   string   // where it runs; "" for the program's own directory
+	Env   []string // added to the program's environment
+	Stdin []byte   // piped afresh on every run, never an io.Reader a retry would find drained
+	Name  string
+	Args  []string
 }
 
 // Result is what a run printed.
 type Result struct {
-    Stdout, Stderr []byte
+	Stdout, Stderr []byte
 }
 
 // Runner runs commands.
 type Runner interface {
-    Run(ctx context.Context, cmd Command) (Result, error)
+	Run(ctx context.Context, cmd Command) (Result, error)
 }
 ```
 
-- **Nothing else imports `os/exec`.** depguard, or a source guard, holds it ([go-quality](../../go-quality/SKILL.md)), so no call slips past the seam.
+- **No other non-test code imports `os/exec`.** The drop-in's depguard bans it only in the domain packages it names; holding it module-wide takes a depguard rule over `$all` that allows the runner's package and `_test.go` files, or a source guard ([go-quality](../../go-quality/SKILL.md)), so no call slips past the seam.
+- **It takes the place of [go-interfaces' seams.md](../../go-interfaces/references/seams.md#processes)'s two-method runner** once a tool runs more than one binary: one `Run` carries each binary's directory, environment and stdin alike.
 - **The real runner** uses `exec.CommandContext`, captures both streams, and returns the exit as an error with `os/exec`'s kept in its chain. `run` builds it once and hands it to every adapter.
 - **A child never gets the terminal.** Its output is captured and its stdin is what the caller pipes, so a binary that prompts can't hang the run waiting on a person.
 
@@ -54,31 +55,31 @@ var ErrNotLoggedIn = errors.New("gh is not logged in")
 
 // Error is a gh call that failed: what gh said, and the run's error.
 type Error struct {
-    Stderr string
-    Err    error
-    class  error // the sentinel the stderr was read as, or nil
+	Stderr string
+	Err    error
+	class  error // the sentinel the stderr was read as, or nil
 }
 
 func (e *Error) Error() string { return strings.TrimSpace(e.Stderr) }
 
 // Unwrap gives the class the stderr was read as, and the run's own error.
 func (e *Error) Unwrap() []error {
-    if e.class == nil {
-        return []error{e.Err}
-    }
-    return []error{e.class, e.Err}
+	if e.class == nil {
+		return []error{e.Err}
+	}
+	return []error{e.class, e.Err}
 }
 
 // failed reads gh's stderr into the class a caller branches on.
 func failed(res runner.Result, err error) *Error {
-    e := &Error{Stderr: string(res.Stderr), Err: err}
-    switch {
-    case bytes.Contains(res.Stderr, []byte("gh auth login")):
-        e.class = ErrNotLoggedIn
-    case bytes.Contains(res.Stderr, []byte("(HTTP 404)")):
-        e.class = ErrNotFound
-    }
-    return e
+	e := &Error{Stderr: string(res.Stderr), Err: err}
+	switch {
+	case bytes.Contains(res.Stderr, []byte("gh auth login")):
+		e.class = ErrNotLoggedIn
+	case bytes.Contains(res.Stderr, []byte("(HTTP 404)")):
+		e.class = ErrNotFound
+	}
+	return e
 }
 ```
 
@@ -93,15 +94,15 @@ For an adapter over a binary, a fake runner stands where `httptest` stands for a
 
 ```go
 func TestPullRequestsNeedsALogin(t *testing.T) {
-    fake := runnertest.New()
-    fake.Seed("gh api repos/acme/shop/pulls", runner.Result{Stderr: testdata(t, "not-logged-in.stderr")}, exitCode(4))
-    c := github.New(fake)
+	fake := runnertest.New()
+	fake.Seed("gh api repos/acme/shop/pulls", runner.Result{Stderr: testdata(t, "not-logged-in.stderr")}, exitCode(4))
+	c := github.New(fake)
 
-    _, err := c.PullRequests(t.Context(), "acme/shop")
+	_, err := c.PullRequests(t.Context(), "acme/shop")
 
-    if !errors.Is(err, github.ErrNotLoggedIn) {
-        t.Errorf("PullRequests(acme/shop) = %v, want ErrNotLoggedIn", err)
-    }
+	if !errors.Is(err, github.ErrNotLoggedIn) {
+		t.Errorf("PullRequests(acme/shop) = %v, want ErrNotLoggedIn", err)
+	}
 }
 ```
 
