@@ -93,7 +93,10 @@ linters:
       # nothing, list that type here by its exact name, one entry each, with
       # its reason: '^reflect\.Kind$'. Never a pattern over paths: a mistake
       # in one switches the check off for the module's own enums unseen, where
-      # a missing entry only reports a switch.
+      # a missing entry only reports a switch. An enum a library re-exports as
+      # an alias (type Button = term.Button) is matched by the alias's name,
+      # the one the switch's code names, never its target's: Go 1.27's
+      # materialized aliases give the switch the alias's type.
       ignore-types: []
 
     interfacebloat:
@@ -174,3 +177,7 @@ linters:
       # a failure with its stack, as a checked one and t.Fatal would give.
       - path: _test\.go$
         linters: [forcetypeassert]
+      # thelper misfires on a subtest body handed to a runner of your own and
+      # on a table row's setup taking t: exclude each by its source, naming the
+      # runner or the field (gates.md). A finding only one build-tag set has
+      # is excluded here by file and text, never nolinted (gates.md).

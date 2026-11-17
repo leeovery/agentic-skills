@@ -2,7 +2,7 @@
 
 **Five commands, in order, each passing clean, before any work is called done.**
 
-Contents: the five · in CI, beside them · a CI script · before reporting done · golangci-lint v2 · what the drop-in's linters expect.
+Contents: the five · build-tag sets · in CI, beside them · a CI script · before reporting done · golangci-lint v2 · what the drop-in's linters expect.
 
 ## The five
 
@@ -16,17 +16,6 @@ go build ./...
 
 The fast checks run first, so a failure costs least. A project with its own test runner (a sandboxed script, a `TestMain` guard) runs that in place of `go test`, with the race detector still on.
 
-A module that ships a build-tag set, code behind `//go:build demo`, runs the gates under each set it ships as well, since the five over the default build never compile a tagged file:
-
-```sh
-go vet -tags demo ./...
-go test -race -tags demo ./...
-golangci-lint run --build-tags demo
-go build -tags demo ./...
-```
-
-A tag for tests alone (`integration`) runs where its suite runs; it ships nothing.
-
 | Gate | Catches | Watch for |
 |---|---|---|
 | `gofmt -l .` | anything not in the one format | it prints file names but exits 0: test that its output is empty |
@@ -34,6 +23,31 @@ A tag for tests alone (`integration`) runs where its suite runs; it ships nothin
 | `go test -race ./...` | broken behaviour, and data races in the code the tests run | the detector sees only what runs: a goroutine no test starts is never checked |
 | `golangci-lint run` | the rules in `.golangci.yml`, formatting included | it's v2: `golangci-lint config verify` checks the file against the schema |
 | `go build ./...` | a package the compiler rejects, under the build's own constraints | it builds and discards: no binaries are written |
+
+## Build-tag sets
+
+A module that ships a build-tag set, code behind `//go:build demo`, runs the gates under each set it ships as well, since the five over the default build never compile a tagged file:
+
+```sh
+go vet -tags demo ./...
+go test -race -tags demo ./cmd/shop/ ./internal/demoshop/
+golangci-lint run --build-tags demo
+go build -tags demo ./...
+```
+
+- **The test gate runs only the packages the tag changes:** those holding a tagged file, and those that import one. Every other package compiles the same under the tag, so its tests would run twice for nothing. List them by name, and add a package to the list when a tagged file lands in it. Vet, lint and build stay over `./...`: they're cheap, and they check every tagged file whether or not the list names its package.
+- **A tag for tests alone** (`integration`) runs where its suite runs; it ships nothing.
+- **A finding only one set has can't take a nolint.** A function only a tagged file calls is unused in the default build; a `//nolint:unused` on it is then reported by nolintlint under `--build-tags demo`, where nothing is unused. Move the code into the tagged file first, so each build sees it whole. Where it can't move, a field of a struct both builds use that only the demo reads, exclude the finding in `.golangci.yml`, by its file and its words, with the reason:
+
+  ```yaml
+  linters:
+    exclusions:
+      rules:
+        # Clock.held is read only by the demo build's files.
+        - path: ^internal/shop/clock\.go$
+          text: "field held is unused"
+          linters: [unused]
+  ```
 
 ## In CI, beside them
 
@@ -92,3 +106,18 @@ go tool govulncheck ./...
 - **containedctx** reports every context kept in a struct. The one exception, a long-lived worker holding its own lifetime, carries a nolint saying so where the field is declared.
 - **forbidigo** reports `os.Exit` in a `TestMain` too. Since Go 1.15 a `TestMain` that returns has its result passed to `os.Exit` for it, so call `m.Run()` and return.
 - **revive's `exported`** wants a doc comment on every exported name in `internal/` as well: the package boundary is still an API to the rest of the module.
+- **thelper** reads every function taking a `*testing.T` as a helper, unless it's handed straight to `t.Run`. Two kinds aren't helpers, and `t.Helper()` in them would move a failure off its own line: a subtest body handed to a runner of your own, which calls `t.Run` for it (`forEachStore(t, func(t *testing.T, s store) {…})`), and a table row's builder option that needs `t` to build its input (`setup: func(t *testing.T) store`, for a `t.TempDir()`). Exclude each by its source, naming the runner or the field, so a real helper is still checked:
+
+  ```yaml
+  linters:
+    exclusions:
+      rules:
+        # forEachStore runs its body as a subtest: the body isn't a helper.
+        - path: _test\.go$
+          source: '\bforEachStore\(t, func\(t \*testing\.T\b'
+          linters: [thelper]
+        # A row's setup builds its input; a failure in it belongs on its line.
+        - path: _test\.go$
+          source: '^\s*setup: func\(t \*testing\.T\b'
+          linters: [thelper]
+  ```
