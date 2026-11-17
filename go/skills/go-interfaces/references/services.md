@@ -27,6 +27,8 @@ type Refunder interface {
 
 No vendor request struct, `*http.Response` or vendor error type appears in it. Once the vendor's names are in the signature, the interface is the SDK by another name, and replacing the vendor rewrites every caller.
 
+The exception is a service whose model is the program's subject, as a code host's commits and pull requests are a release tool's: there its words are the domain's, and the adapter's types may be them ([driver-contracts.md](driver-contracts.md)).
+
 ## The adapter
 
 ```go
@@ -131,6 +133,7 @@ func TestRefundReportsAnUnknownPayment(t *testing.T) {
 
 - **`httptest.NewTestServer`** ([Go 1.27](https://go.dev/doc/go1.27)) serves over an in-memory network, never a port, and closes when the test ends. Inside a `synctest` bubble, a test of the client's timeout or retry waits on the fake clock.
 - The handler runs on the server's goroutine, so it reports with `t.Errorf`. `t.Fatal` there would stop the wrong goroutine.
+- **An adapter over a binary** is tested the same way against a fake runner seeded with the binary's real output ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)).
 
 ## The fake for callers
 

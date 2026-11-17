@@ -9,11 +9,11 @@ An interface belongs to the code that calls it, and it exists to be swapped: in 
 
 ## Core rules
 
-1. **The consumer declares the interface, beside its use, with only the methods it calls.** Implementations return concrete types. *The consumer depends on what it uses and no more, and the implementation can grow without breaking it.* iface's `unusedmethod` reports a method nobody in the package calls, and its `opaque` a constructor that returns an interface over one type.
+1. **The consumer declares the interface, beside its use, with only the methods it calls.** Implementations return concrete types. *The consumer depends on what it uses and no more, and the implementation can grow without breaking it.* iface's `opaque` reports a constructor that returns an interface over one type. Drivers chosen by config also meet a contract a neutral package declares ([driver-contracts.md](references/driver-contracts.md)).
 2. **No interface until a second implementation or a test's fake needs one.** *With one implementation and no fake, it's indirection: a reader jumps through it to find the only code there is.* iface's `unused` reports one nothing in its package uses.
-3. **One to three methods.** Split a larger one by role (read, decide, write), and embed the parts where one caller needs two. *A big interface is hard to fake, so its tests reach for the real thing or a mock generator.* interfacebloat stops one at 5.
+3. **One to three methods.** Split a larger one by role (read, decide, write), and embed the parts where one caller needs two. The exception is an interface whose job is completeness, such as a renderer with a method for each result: the compiler then fails any implementation that misses one, so it may be wide, with a nolint saying so. *A big interface is hard to fake, so its tests reach for the real thing or a mock generator.* interfacebloat stops one at 5.
 4. **An outside service or SDK sits behind your interface.**
-   - A thin adapter package is the real implementation, tested against an `httptest` server.
+   - A thin adapter package is the real implementation, tested against an `httptest` server, or, for a binary it runs, a fake runner ([go-errors' shelling-out.md](../go-errors/references/shelling-out.md)).
    - Callers test against a fake of your interface.
    - `main` picks the implementation with a `switch` on config.
    - Nobody fakes the vendor's own types.
@@ -24,11 +24,11 @@ An interface belongs to the code that calls it, and it exists to be swapped: in 
    - One operation is a function field: `now func() time.Time`, `getenv func(string) string`.
    - Several are an interface, such as a process runner.
    - Files are a directory or an `*os.Root` passed in; HTTP is an `*http.Client` and a base URL.
-   - `now` is injected where a decision depends on the instant. Waits, tickers and timeouts are left to `testing/synctest` ([Go 1.25](https://go.dev/doc/go1.25)).
+   - `now` is injected where a decision depends on the instant. Waits, tickers and timeouts are left to `testing/synctest` ([Go 1.25](https://go.dev/doc/go1.25)), unless the program itself needs a clock it controls ([go-testing's time.md](../go-testing/references/time.md)).
 
    *Code that calls `time.Now` or `os.Getenv` itself can only be tested at the real time, on the real machine.* forbidigo keeps the environment and home directory reads in `cmd/`, and depguard keeps `os/exec` out of domain packages.
 7. **Fakes are written by hand:** a struct that records its calls and returns what the test set, in the test file, or in a `<pkg>test` package when several packages share it. No mock generators. *A fake reads like the domain, and the test checks outcomes instead of pinning the order of calls.* depguard bans gomock, mockery and testify.
-8. **`var _ I = (*T)(nil)` goes only where nothing else proves the fit;** the wiring in `main` already does. An interface stays unexported unless another package must name it. *A check beside every type is noise, and an exported interface draws other packages to reuse it instead of declaring the slice they need.*
+8. **`var _ I = (*T)(nil)` goes only where nothing else proves the fit;** the wiring in `main` already does. An interface stays unexported unless another package must name it, or it types an exported struct field, as `Sources{Orders: store}` does, where godoc then documents the field's contract. *A check beside every type is noise, and an exported interface draws other packages to reuse it instead of declaring the slice they need.*
 
 ## Pattern
 
@@ -87,7 +87,8 @@ The same fake, and the tests that use it, are in [go-testing's fakes-and-builder
 | An outside API or SDK | an adapter package returning a concrete client, tested against `httptest` |
 | Persistence | a store named for its data, with methods in the domain's words |
 | A different implementation per environment | a `switch` on config in `main` |
-| Timers, tickers or timeouts in a test | `synctest`, not a fake clock |
+| Several drivers chosen by config | a contract in a neutral package that each driver implements |
+| Timers, tickers or timeouts in a test | `synctest`, not a fake clock, unless the program needs a clock of its own |
 | A test at a particular instant: month end, an expiry | an injected `now` |
 
 ## Anti-patterns
@@ -99,7 +100,7 @@ The same fake, and the tests that use it, are in [go-testing's fakes-and-builder
 - ❌ `Repository[T]` with `Find`, `Save` and `Delete` for every type → the queries the domain asks, each by name.
 - ❌ An interface over the SDK's client, or a stub `http.RoundTripper`, to fake the vendor → run the adapter against `httptest.NewTestServer`, and fake your own interface above it.
 - ❌ `time.Now()`, `os.Getenv`, `os.UserHomeDir` or `exec.Command` in domain code → a seam, set in `main`.
-- ❌ A fake clock advanced by hand to fire timers → `synctest.Test` and `time.Sleep`.
+- ❌ A fake clock advanced by hand to fire timers in a test → `synctest.Test` and `time.Sleep`; an injected clock is for a program that needs one itself.
 - ❌ gomock, mockery or `testify/mock` → a fake of ten lines.
 
 ## References
@@ -107,6 +108,7 @@ The same fake, and the tests that use it, are in [go-testing's fakes-and-builder
 - **[seams.md](references/seams.md)** — read when a test needs to control time, the environment, a process, files or the network: each seam, what `main` passes, what a test passes, and which defaults are safe.
 - **[services.md](references/services.md)** — read when integrating an API or SDK, or choosing an implementation by config: the adapter, its `httptest` tests, the fake for callers, a memory implementation, and the switch in `main`.
 - **[stores.md](references/stores.md)** — read when adding persistence: naming, each consumer's slice of the store, transactions, a shared memory store, and testing the real one.
+- **[driver-contracts.md](references/driver-contracts.md)** — read when drivers are chosen by config: the neutral contract each driver implements, the consumers' slices of it, and an outside service whose types are the domain's words.
 
 ## Related skills
 
