@@ -172,6 +172,36 @@ func (s *Status) UnmarshalText(b []byte) error {
 
 A missing key never reaches `UnmarshalText`, so the field stays `""`. Whatever needs the status still checks for the unknown.
 
+**A vocabulary an outside system owns** is the exception: a CI's run statuses, a payment provider's states, a code host's review decisions. Refusing a value you don't know breaks the tool the day the vendor adds one, so it decodes as it comes, and each reading decides the unknown in the line after its `switch`, with its fallback stated:
+
+```go
+// RunStatus is a CI run's status, in the CI's own words. It isn't refused when
+// unknown: the CI adds statuses, and each method says how it reads one.
+type RunStatus string
+
+// The statuses the CI documents today.
+const (
+	RunQueued     RunStatus = "queued"
+	RunInProgress RunStatus = "in_progress"
+	RunCompleted  RunStatus = "completed"
+)
+
+// Done reports whether the run has ended. A status it doesn't know reads as not
+// ended, so a caller waits rather than reading a result that isn't there.
+func (s RunStatus) Done() bool {
+	switch s {
+	case RunCompleted:
+		return true
+	case RunQueued, RunInProgress:
+		return false
+	}
+	return false
+}
+```
+
+- **Each reading picks its own fallback,** the one that fails safe for its question: "not ended" for `Done`, "failed" for a reading of whether it passed.
+- **There's no `ParseRunStatus`.** A mapper passes the value on; exhaustive still checks each switch names every documented member.
+
 An `iota` enum that must be written out gets `MarshalText` and `UnmarshalText` writing its name, never its number. Usually that's the sign it should have been a string.
 
 ## Checklist
@@ -181,4 +211,4 @@ An `iota` enum that must be written out gets `MarshalText` and `UnmarshalText` w
 - [ ] Constants prefixed with the type's name.
 - [ ] `ParseX`, a function listing the members, and `String` for an int.
 - [ ] Behaviour as methods whose `switch` names every member.
-- [ ] Values from outside pass through `ParseX`, in the mapper or `UnmarshalText`.
+- [ ] Values from outside pass through `ParseX`, in the mapper or `UnmarshalText`; a vocabulary an outside system owns decodes as it comes, each method's fallback stated.

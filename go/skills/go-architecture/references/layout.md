@@ -41,7 +41,6 @@ package main
 import (
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -59,10 +58,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	log := slog.New(slog.NewTextHandler(stderr, nil))
+	show := cli.ShowFor(args, stdout, stderr)
 	store, err := filestore.Open(getenv("SHOP_DATA_DIR"))
 	if err != nil {
-		log.Error("open store", "err", err)
+		show(err)
 		return 1
 	}
 	payments := &gateway.Client{HTTP: &http.Client{}, BaseURL: getenv("SHOP_GATEWAY_URL"), Timeout: 10 * time.Second}
@@ -71,8 +70,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		Out:       stdout,
 	}
 	root := cli.NewRootCommand(deps) //nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext
+	root.SetOut(stdout)
 	root.SetErr(stderr)
-	return cli.Execute(ctx, root, args)
+	return cli.Execute(ctx, root, args, show)
 }
 ```
 
@@ -106,10 +106,11 @@ func TestRunRefusesAnUnknownCommand(t *testing.T) {
 ```
 
 - **`main` exits with what `run` returns,** and does nothing else, so there is nothing in it to test. `os.Exit` skips deferred calls, so `main` holds none.
-- **`run` owns setup:** signals become cancellation, the logger is built, stores open, implementations are picked by config, and all of it is handed to the edge. A setup failure is printed once, to `stderr`, and returns 1. Either way `run` returns, so its defers run.
-- **The other codes come from the edge.** `cli.Execute` sets 0, 1, 2 for a usage error and 130 for an interrupt, and leaves printing a command's error to cobra, so nothing prints it twice ([go-actions' cli.md](../../go-actions/references/cli.md)).
-- **`run` sets cobra's error writer, never its output writer.** Data goes to the writer in `cli.Deps`; with `root.SetOut(stdout)`, a bad command line would print its usage into the pipe.
+- **`run` owns setup:** signals become cancellation, the logger is built where there is one, stores open, implementations are picked by config, and all of it is handed to the edge. A setup failure is printed once, through the edge's one renderer of errors, and returns 1. Either way `run` returns, so its defers run.
+- **The other codes come from the edge.** `cli.Execute` sets 0, 1, 2 for a usage error, 130 for an interrupt, and any code of the tool's own ([go-actions](../../go-actions/SKILL.md) rule 9), and shows a command's error through the same renderer `run` uses, so nothing prints it twice ([go-actions' cli.md](../../go-actions/references/cli.md)).
+- **`run` points cobra's writers at its streams,** for the help and version a person asks for; the commands' data goes to the writer in `cli.Deps`, and cobra prints no error or usage of its own.
 - **A test calls `run`** with `t.Context()` ([Go 1.24](https://go.dev/doc/go1.24)), a `getenv` closure and buffers, and checks the code it returns, without touching the real environment.
+- **A tool that drives a terminal takes `*os.File` for its streams,** since whether each is a terminal decides how it draws and whether it may ask; `getenv` stays. The detection sits in one file ([go-concurrency's terminals.md](../../go-concurrency/references/terminals.md)).
 
 ## Naming
 
@@ -146,4 +147,5 @@ A cycle means a package reaches the wrong way:
 
 - **No `init()`.** What a package needs is built in its constructor, called from `run`.
 - **A package-level `var` holds only what never changes after start:** sentinel errors, compiled regexps. A table callers might change is a function returning a fresh copy ([go-types](../../go-types/SKILL.md)).
+- **The one mutable allowed guards a process-wide resource an outside tool imposes,** such as a lock around a CLI that rewrites its config file on every call, so its calls must run one at a time in the process. Its comment says so.
 - **The logger is a field or a parameter,** never a package variable or `slog.Default()`.

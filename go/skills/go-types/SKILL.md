@@ -14,8 +14,8 @@ A value's type says what it is: an id, an amount, a status. Wire shapes stop at 
 3. **No bare `bool` parameters.** Use a named type, a constant or a field. *`Ship(o, true)` says nothing at the call.* revive's `flag-parameter` catches a bool that steers an `if`.
 4. **A value with rules is a struct with unexported fields,** made by a validating `NewX` or `ParseX`, with value receivers that return new values. *An invalid value can't be built, and none changes under its holder.*
 5. **Slices and maps are copied as they cross an API** (`slices.Clone`, `maps.Clone`), in and out. A package table is a function that returns a fresh copy, never an exported variable. *Otherwise a caller's `append` or write changes your state.*
-6. **An enum is a defined type with constants prefixed by its name** (`StatusPaid`). Its zero value is the real default or an explicit unknown, never an arbitrary member. It has a `ParseX`, a `String` when it's an int, and its behaviour as methods with a `switch`. *An unset field reads as invalid, and two sets in one package can't collide.* exhaustive checks every switch lists every member.
-7. **What's stored or sent is a typed string** (`type EventKind string`), never an untyped constant or an `iota` int. *A typo won't compile, exhaustive can check it, the bytes are the names, and reordering the constants can't renumber stored data.*
+6. **An enum is a defined type with constants prefixed by its name** (`StatusPaid`). Its zero value is the real default or an explicit unknown, never an arbitrary member. It has a `ParseX`, a `String` when it's an int, and its behaviour as methods with a `switch`. A vocabulary an outside system owns (a CI's run statuses, a payment provider's states) is the exception: an unknown value isn't refused, and each method's line after its `switch` decides that reading, with its fallback stated. *An unset field reads as invalid, and two sets in one package can't collide; and the tool keeps working the day the vendor adds a value.* exhaustive checks every switch lists every member.
+7. **What's stored or sent is a typed string** (`type EventKind string`), never an untyped constant or an `iota` int, a wire struct's field included, since it encodes to the same bytes as a `string`. *A typo won't compile, exhaustive can check it, the bytes are the names, and reordering the constants can't renumber stored data.*
 8. **Wire shapes are tagged structs at the edge, mapped by one named function per source** that does nothing else. *The domain type never bends to a payload, and a format change touches one function.* musttag checks every marshalled struct is tagged.
 9. **A stored or wire format has its own encoder, and a test that pins its bytes.** It never goes through a display formatter. *Otherwise a tweak to how something reads on screen rewrites stored data.*
 10. **A module with no JSON yet uses `encoding/json/v2`**, stable from [Go 1.27](https://go.dev/doc/go1.27) and what the standard library now recommends. A module already on v1 stays on v1 until one deliberate switch of the whole module, never piecemeal. Struct and `time.Time` fields take `omitzero` ([Go 1.24](https://go.dev/doc/go1.24)), as v1's `omitempty` never omits them. *v2's defaults change behaviour: duplicate names and invalid UTF-8 are errors, names match by case, and a `time.Duration` has no default form, so a module half on each reads one payload two ways.* modernize's `omitzero` check flags the old tag.
@@ -99,7 +99,7 @@ func (s Status) Cancellable() bool {
 - ❌ `Ship(o, true)` → `Ship(o, DeliveryExpress)`.
 - ❌ `TimeoutSeconds int` in a domain struct → `Timeout time.Duration`, converted at the edge.
 - ❌ `const StatusPaid = "paid"`, or `StatusPending Status = iota` as the zero → `StatusPaid Status = "paid"`; an int enum starts at its unknown.
-- ❌ Trusting a `Status` that came off the wire → `ParseStatus` in the mapper, or an `UnmarshalText` that calls it.
+- ❌ Trusting a `Status` that came off the wire → `ParseStatus` in the mapper, or an `UnmarshalText` that calls it; a vocabulary an outside system owns decodes as it comes, and its methods decide the unknown.
 - ❌ `var Statuses = []Status{…}`, or `return c.lines` → `func Statuses() []Status`, `slices.Clone(c.lines)`.
 - ❌ `json` tags on the domain `Order`, decoded straight from a request → a wire struct and a mapper.
 - ❌ A stored line built with the display formatter → its own encoder, bytes pinned in a test.
@@ -109,7 +109,7 @@ func (s Status) Cancellable() bool {
 ## References
 
 - **[named-types.md](references/named-types.md)** — read when adding an id, a measure, an input or config struct, a value with rules, or a secret.
-- **[enums.md](references/enums.md)** — read when defining a fixed set, or a status with transitions.
+- **[enums.md](references/enums.md)** — read when defining a fixed set, a status with transitions, or a vocabulary an outside system owns.
 - **[boundaries.md](references/boundaries.md)** — read when encoding or decoding JSON, a file format or a protocol.
 - **[money.go](references/money.go)** — the drop-in money type; read when modelling money.
 

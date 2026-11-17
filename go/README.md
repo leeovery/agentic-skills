@@ -49,7 +49,7 @@ npx skills add leeovery/agentic-skills/go
 
 | Skill | Description |
 |-------|-------------|
-| [**go-actions**](skills/go-actions/) | Domain operations as functions or small structs, called from thin cobra commands, HTTP handlers and workers; exit codes |
+| [**go-actions**](skills/go-actions/) | Domain operations as functions or small structs, called from thin CLI commands, HTTP handlers and workers; exit codes |
 | [**go-types**](skills/go-types/) | Named types, input structs and typed enums, and wire and stored formats mapped at the boundary |
 | [**go-interfaces**](skills/go-interfaces/) | Small interfaces declared by their consumers, accepting interfaces and returning structs, and hand-written fakes |
 | [**go-errors**](skills/go-errors/) | Wrapping with `%w`, sentinels and error types, handling each error once, and the injected `*slog.Logger` |

@@ -59,6 +59,12 @@ The deadline covers reading the body too. `json` is `encoding/json/v2` ([Go 1.27
 
 noctx flags `http.Get`, `http.NewRequest`, `net.Dial`, `exec.Command` and the other calls that take no context. Use `NewRequestWithContext`, a `net.Dialer`'s `DialContext`, and `exec.CommandContext`.
 
+Writes are decided by whether the other side can de-duplicate them:
+
+- **A write that carries an idempotency key keeps its deadline,** anywhere, and may be retried: a second attempt after an unknown outcome lands once. The gateway's refund is one ([go-interfaces' services.md](../../go-interfaces/references/services.md)).
+- **A write the other side can't de-duplicate,** a push or a workflow dispatch, whose outcome a timeout would leave unknown, takes no timeout of its own in a program a person runs and can interrupt: the interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
+- **A server or a worker** has no one to interrupt it, so it makes such a write idempotent, with a key or a check of what's there before it, and keeps the deadline.
+
 ## Work that outlives its caller
 
 Some work must finish even when the caller has gone: an audit record, a rollback, a cleanup after cancellation. Run it on `context.WithoutCancel(ctx)`, which keeps the caller's values and drops its cancellation and deadline, then give it a deadline of its own.
@@ -117,6 +123,7 @@ func serveUntilSignal(ctx context.Context, srv *http.Server, p *Poller) error {
 - Calling `stop` gives the signals back their default, so a second Ctrl-C during a slow shutdown kills the process instead of being ignored.
 - Since [Go 1.26](https://go.dev/doc/go1.26), `context.Cause(ctx)` on the context `NotifyContext` returns names the signal that ended it. Log it as the reason for stopping.
 - `serve` is the shutdown in [goroutines.md](goroutines.md).
+- Code that changes the terminal's mode watches the signals itself while the mode is changed, to put the terminal back before the process ends ([terminals.md](terminals.md)).
 
 ## The one place a context is kept
 

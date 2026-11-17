@@ -10,13 +10,13 @@ Concurrency is the caller's choice, and every goroutine has an owner that stops 
 ## Core rules
 
 1. **Write synchronous functions and let the caller add concurrency.** A blocking `Run(ctx)` is easy to test and to compose; a function that quietly starts a goroutine leaves a lifetime nobody owns.
-2. **Before `go`, answer four questions:** how it exits, what tells it to stop, who waits for it, and who closes its channels. No answers, no goroutine. A type that starts goroutines waits for them in a blocking `Run(ctx)`, or has a `Close` that stops them and waits.
+2. **Before `go`, answer four questions:** how it exits, what tells it to stop, who waits for it, and who closes its channels. No answers, no goroutine. A type that starts goroutines waits for them in a blocking `Run(ctx)`, or has a `Close` that stops them and waits. A read nothing can cancel, as of a terminal, is the one exception ([terminals.md](references/terminals.md)).
 3. **Wait with `wg.Go(f)`** ([Go 1.25](https://go.dev/doc/go1.25)), never `Add`, `go` and `Done` by hand. `golang.org/x/sync/errgroup` comes in only when tasks return errors that should cancel each other, stated as a new dependency. Gate: modernize's `waitgroupgo`.
-4. **`ctx` is the first parameter, passed down and never kept.** No context in a struct, except a long-lived worker's lifetime, noted where it's stored. Never nil. No `context.Background()` below `main` or `run`: use `r.Context()`, `cmd.Context()` or `t.Context()`, as a fresh one drops the caller's deadline, cancellation and values. Gates: containedctx, contextcheck, fatcontext.
-5. **Every `WithCancel` and `WithTimeout` defers its `cancel`.** Work that must finish after its caller has gone runs on `context.WithoutCancel(ctx)` with a timeout of its own. Signals become cancellation once, in `run`, through `signal.NotifyContext`. Gate: vet's `lostcancel`.
-6. **Every blocking `select` has a `case <-ctx.Done()`, and every call that leaves the process has a deadline.** A wait nothing can cancel is how shutdown hangs. Gate: noctx, for calls made without a context.
+4. **`ctx` is the first parameter, passed down and never kept.** No context in a struct, except a long-lived worker's lifetime, noted where it's stored. Never nil. No `context.Background()` below `main` or `run`: use the context the edge hands you (`r.Context()`, a command's) or `t.Context()`, as a fresh one drops the caller's deadline, cancellation and values. Gates: containedctx, contextcheck, fatcontext.
+5. **Every `WithCancel` and `WithTimeout` defers its `cancel`.** Work that must finish after its caller has gone runs on `context.WithoutCancel(ctx)` with a timeout of its own. Signals become cancellation once, in `run`, through `signal.NotifyContext`; code that changes the terminal's mode also watches them itself while it does ([terminals.md](references/terminals.md)). Gate: vet's `lostcancel`.
+6. **Every blocking `select` has a `case <-ctx.Done()`, and every call that leaves the process has a deadline,** except a write the other side can't de-duplicate, whose outcome a timeout would leave unknown, in a program a person runs and can interrupt: the interrupt bounds it instead. A write that carries an idempotency key keeps its deadline anywhere and may be retried, and a server or worker makes every outbound write so ([context.md](references/context.md#deadlines-on-calls-that-leave-the-process)). A wait nothing can cancel is how shutdown hangs. Gate: noctx, for calls made without a context.
 7. **Channels are unbuffered or hold one;** any other size says why in a comment. The one sender closes, and signatures give the direction (`<-chan T`, `chan<- T`). A big buffer hides a slow consumer until it fills.
-8. **A mutex is a named field beside the data it guards,** never embedded, and never held across I/O, a channel operation or a callback: copy under the lock, act after it. Held across I/O, every caller waits on the disk; across a send or a callback, it can deadlock.
+8. **A mutex is a named field beside the data it guards,** never embedded, and never held across I/O, a channel operation or a callback: copy under the lock, act after it. Held across I/O, every caller waits on the disk; across a send or a callback, it can deadlock. A lock whose waiters must give up when `ctx` ends is a channel of one, taken in a `select` beside `ctx.Done()`, since a mutex can't be given up on ([sync.md](references/sync.md)).
 9. **Use typed atomics** (`atomic.Int64`, `atomic.Bool`, `atomic.Pointer[T]`), and `sync.OnceValue` for a value computed on first use, or `OnceValues` when computing it can fail. They can't be read non-atomically by mistake, and the error isn't dropped. Gate: modernize's `atomictypes`.
 10. **Shutdown drains in reverse order of start, within a bounded deadline:** stop taking work, then stop the workers, then flush what they write to. An unbounded drain turns one stuck call into a process that won't exit.
 
@@ -78,6 +78,7 @@ func runAlongside(ctx context.Context, p *Poller, serve func(context.Context) er
 | Tasks where one failure makes the rest pointless | `errgroup.WithContext` |
 | A cap on how many run at once | errgroup's `SetLimit`, or a channel of that size as a semaphore |
 | A few fields several goroutines read and write | `sync.Mutex` |
+| A lock whose waiters give up when their context ends | a channel of one, taken in a `select` with `ctx.Done()` |
 | A counter or a flag | `atomic.Int64`, `atomic.Bool` |
 | A read-mostly value replaced whole | `atomic.Pointer[T]` |
 | A value computed once, on first use | `sync.OnceValue`, `sync.OnceValues` |
@@ -101,7 +102,8 @@ func runAlongside(ctx context.Context, p *Poller, serve func(context.Context) er
 
 - **[goroutines.md](references/goroutines.md)** — read before starting a goroutine or a worker: the four questions, a worker and its owner, fan-out, errgroup, a type with `Close`, and shutdown order.
 - **[context.md](references/context.md)** — read when deciding where a context comes from, or whether work outlives its request: sources, deadlines, `WithoutCancel`, `AfterFunc`, signals and values.
-- **[sync.md](references/sync.md)** — read when goroutines share state: mutex or channel, keeping locks off I/O, atomics and `OnceValues`.
+- **[sync.md](references/sync.md)** — read when goroutines share state: mutex or channel, a lock that gives up with its context, keeping locks off I/O, atomics and `OnceValues`.
+- **[terminals.md](references/terminals.md)** — read when your program drives a terminal: its streams and detection, a read that can't be cancelled, a writer and its record under one lock, and signals while its mode is changed.
 
 ## Related skills
 

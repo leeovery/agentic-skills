@@ -24,6 +24,7 @@ A struct when it needs a store, a client, a clock or another operation. Its fiel
 - `run` builds it with a keyed literal: `order.Canceller{Orders: store, Payments: payments, Now: time.Now}`. Tests build it the same way, with fakes in the fields.
 - Add a constructor (`NewImporter(cfg Config)`) only when a field needs a default or a check. [go-types](../../go-types/SKILL.md) covers `Config`.
 - Two jobs are two structs, even when they hold the same store. A struct with `Create`, `Cancel` and `Refund` is a service under another name: it gathers every job's collaborators, and grows with each job added.
+- The phases of one job, such as its plan and its apply, may share one set of collaborators without becoming a struct each: they're one job, done in steps ([writes.md](writes.md)).
 
 ## Per-call state
 
@@ -160,6 +161,7 @@ type Store interface {
 - Every write in the closure goes through `tx`, never the outer store, which would write outside the transaction.
 - **An outside call can't roll back.** A refund or an email sent inside the closure has happened even when the commit fails. Make it before the writes, keyed so a retry is safe (an idempotency key from the payment, as `Cancel`'s refund is), or record it in the transaction and send it after the commit.
 - An in-memory store's `InTx` can apply the closure's writes to a copy and swap it in on success. Its fakes in tests need nothing more than `return fn(f)`.
+- **Writes to systems that share no transaction** (a git remote, an outside API, several repositories) can't go through one `InTx`. [writes.md](writes.md) has the plan checked first, the leased writes, and saying what landed.
 
 **A file is replaced whole.** Write a temporary file in the same directory, sync it, close it, then rename it over the target: a rename within one filesystem is atomic, so a reader, or the next run after a crash, sees the old file or the new one. This is a job for one small package the whole module uses:
 
@@ -253,7 +255,7 @@ The same shape: decode the message into its wire struct, map it to typed values,
 - [ ] Errors wrapped with the operation alone (`cancel: %w`), as the store's errors already name the record ([go-errors](../../go-errors/SKILL.md)).
 - [ ] Guards first, each a named check, with no `else` after them.
 - [ ] Another operation's steps are reached by holding it, never repeated.
-- [ ] Writes that land together go through one `InTx`; no outside call sits inside it.
+- [ ] Writes that land together go through one `InTx`; no outside call sits inside it. Writes with no shared transaction are planned and checked before the first.
 - [ ] Files are replaced whole.
 - [ ] Each edge parses, calls one operation, and writes or maps the error.
 - [ ] Tested by filling the fields with fakes.

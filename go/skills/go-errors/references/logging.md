@@ -51,29 +51,31 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
+	show := cli.ShowFor(args, stdout, stderr)
 	var level slog.LevelVar
-	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: &level}))
 	if err := level.UnmarshalText([]byte(cmp.Or(getenv("SHOP_LOG_LEVEL"), "INFO"))); err != nil {
-		log.Error("read SHOP_LOG_LEVEL", "err", err)
+		show(fmt.Errorf("can't read SHOP_LOG_LEVEL: %w", err))
 		return 1
 	}
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: &level}))
 	slog.SetDefault(log) // a dependency's stray log.Printf lands in the same place
 
 	store, err := filestore.Open(getenv("SHOP_DATA_DIR"))
 	if err != nil {
-		log.Error("open store", "err", err)
+		show(err)
 		return 1
 	}
 	payments := &gateway.Client{HTTP: &http.Client{}, BaseURL: getenv("SHOP_GATEWAY_URL"), Timeout: 10 * time.Second}
 	settler := billing.NewSettler(billing.Config{Invoices: store, Charger: payments, Logger: log})
 
 	root := cli.NewRootCommand(cli.Deps{Settler: settler, Out: stdout}) //nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext
+	root.SetOut(stdout)
 	root.SetErr(stderr)
-	return cli.Execute(ctx, root, args)
+	return cli.Execute(ctx, root, args, show)
 }
 ```
 
-The logger comes first, so even a bad `SHOP_LOG_LEVEL` has somewhere to be reported: a `LevelVar` takes its level after the handler is built.
+A setup failure, a bad `SHOP_LOG_LEVEL` among them, goes through the CLI's one renderer of errors, as a command's error does ([go-actions' cli.md](../../go-actions/references/cli.md)), so each is printed once and in one form. The logger is for what the work does as it runs.
 
 The store and the gateway's `Client{HTTP, BaseURL, Timeout}` are built as [go-architecture](../../go-architecture/SKILL.md)'s `run` builds them, and the `Settler` takes the logger beside them. The `Client` here has a `Charge` method beside the `Refund` that [go-interfaces' services.md](../../go-interfaces/references/services.md) shows. `Deps` holds a `Settler` for the `settle` command, as [go-actions' cli.md](../../go-actions/references/cli.md) has it hold a `Canceller` for `cancel`.
 
@@ -83,9 +85,10 @@ The store and the gateway's `Client{HTTP, BaseURL, Timeout}` are built as [go-ar
 
 Where an error stops, and nowhere it passes through:
 
-- **An edge:** the HTTP edge's `writeError` ([matching.md](matching.md)), or `run`, for a setup failure, before it returns 1. A cobra command's error is printed by cobra, so nothing logs it as well.
+- **An edge:** the HTTP edge's `writeError` ([matching.md](matching.md)). A CLI's errors, a command's or a setup failure in `run`, are shown by its one renderer, so nothing logs them as well.
 - **A worker that carries on:** a failure it skips and retries later is logged at the point it's skipped.
 - **Not in code that returns the error.** Its caller logs it, or matches it, or returns it in turn.
+- **A CLI command that ends in one result has no logger:** the same rules land as its result's failure and warnings ([errors-as-output.md](errors-as-output.md)). The line is the command's, not the program's: `settle`, working through many invoices, logs as it goes, to stderr.
 
 ```go
 // Settle charges every unpaid invoice. A charge that fails is logged and left

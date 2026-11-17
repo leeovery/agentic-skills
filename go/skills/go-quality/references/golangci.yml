@@ -86,13 +86,24 @@ linters:
       kv-only: true     # "order", id: one style of attribute
       static-msg: true  # the message is a constant; the values are attributes
 
+    exhaustive:
+      # Every enum is checked, the module's own and any other's. When a switch
+      # over an enum from outside the module fires (the standard library's
+      # reflect.Kind, a third party's) and naming its other members would say
+      # nothing, list that type here by its exact name, one entry each, with
+      # its reason: '^reflect\.Kind$'. Never a pattern over paths: a mistake
+      # in one switches the check off for the module's own enums unseen, where
+      # a missing entry only reports a switch.
+      ignore-types: []
+
     interfacebloat:
       max: 5
 
     iface:
-      # unusedmethod: a method its own package never calls, so the
-      # interface asks for more than its consumer uses.
-      enable: [identical, unused, opaque, unusedmethod]
+      # unusedmethod is off: it misfires on a producer-side seam whose
+      # consumers are in other packages, and on an interface whose value is
+      # passed on to another package's narrower one.
+      enable: [identical, unused, opaque]
 
     depguard:
       rules:
@@ -144,7 +155,7 @@ linters:
         - pattern: ^fmt\.Print(f|ln)?$
           msg: "write to an io.Writer you were given"
         - pattern: ^os\.(Stdin|Stdout|Stderr)$
-          msg: "take an io.Reader or io.Writer"
+          msg: "take the stream as a parameter: an io.Reader or io.Writer, or an *os.File where a terminal is asked about"
 
   exclusions:
     rules:
@@ -159,3 +170,7 @@ linters:
       - path: _test\.go$
         text: 'fmt\.Print'
         linters: [forbidigo]
+      # In a test, an unchecked assertion of the wrong type panics the test:
+      # a failure with its stack, as a checked one and t.Fatal would give.
+      - path: _test\.go$
+        linters: [forcetypeassert]
