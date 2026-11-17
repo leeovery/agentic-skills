@@ -14,9 +14,9 @@ Every package has one job and every rule one owner. `main` wires the program and
 3. **Shared rules come first.** When work is split across agents or PRs, list the meanings more than one part needs and build each once, with tests, before the parts start. *Otherwise each part rebuilds the meaning locally, and review is where the rule gets found.*
 4. **One package per job,** under `internal/`, named for what it provides, its job stated in its package doc. Never `util`, `common`, `helpers`, `misc`, `types` or `models`. *A grab-bag name gives code no reason to live anywhere else.* Held by staticcheck's ST1000 and a source guard on names.
 5. **A helper is a small named function in the package that owns its concern,** or a package with one job (`redact`, `atomicfile`). It holds no business logic. *The job gets one home without a grab bag.*
-6. **`main` exits with what `run` returns, and nothing else exits.** `run(ctx, args, getenv, stdout, stderr) int` builds the dependencies and returns the exit code: 1 for a setup failure, which it prints once to `stderr`, else what the edge's one exit-code function returns ([go-actions](../go-actions/SKILL.md)). *Defers run, and a test calling `run` covers the wiring and checks the code.* Held by forbidigo: `os.Exit` and `log.Fatal` outside `cmd/`.
+6. **`main` exits with what `run` returns, and nothing else exits.** `run(ctx, args, getenv, stdout, stderr) int` builds the dependencies and returns the exit code: 1 for a setup failure, which it prints once through the edge's one renderer of errors, else what the edge's one exit-code function returns ([go-actions](../go-actions/SKILL.md)). *Defers run, and a test calling `run` covers the wiring and checks the code.* Held by forbidigo: `os.Exit` and `log.Fatal` outside `cmd/`.
 7. **No mutable package state:** no package loggers, registries, singletons or exported mutable tables, but a guard on a process-wide resource an outside tool imposes ([layout.md](references/layout.md#init-and-package-state)). The environment, arguments, home directory and standard streams are read in `main` and passed in. *Package state is a dependency no signature shows, and it stops tests running in parallel.* Held by gochecknoinits, sloglint (no global logger) and forbidigo (`os.Getenv`, `os.Args`, `os.UserHomeDir`, the standard streams) outside `cmd/`.
-8. **Imports point inward.** Domain packages never import `net/http`, cobra or a terminal UI; the edges import the domain. *The domain is tested without a transport.* Held by depguard, by path.
+8. **Imports point inward.** Domain packages never import `net/http`, cobra or a terminal UI; the edges import the domain. The one exception: an adapter whose outside service is the program's subject may lend the domain its types and sentinels, the adapter importing nothing of the domain, so no cycle forms ([go-interfaces' driver-contracts.md](../go-interfaces/references/driver-contracts.md#an-outside-service-as-the-domains-words)). *The domain is tested without a transport.* Held by depguard, by path.
 9. **A file does one job.** Split by job, not by line count, and split a package when its callers use one part without the other. *A reader finds the job by the file's name.*
 
 ## Pattern
@@ -29,10 +29,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	log := slog.New(slog.NewTextHandler(stderr, nil))
+	show := cli.ShowError(stderr)
 	store, err := filestore.Open(getenv("SHOP_DATA_DIR"))
 	if err != nil {
-		log.Error("open store", "err", err)
+		show(err)
 		return 1
 	}
 	payments := &gateway.Client{HTTP: &http.Client{}, BaseURL: getenv("SHOP_GATEWAY_URL"), Timeout: 10 * time.Second}
@@ -42,7 +42,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	}
 	root := cli.NewRootCommand(deps) //nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext
 	root.SetErr(stderr)
-	return cli.Execute(ctx, root, args)
+	return cli.Execute(ctx, root, args, show)
 }
 ```
 
