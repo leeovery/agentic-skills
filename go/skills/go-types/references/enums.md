@@ -181,21 +181,21 @@ type RunStatus string
 
 // The statuses the CI documents today.
 const (
-    RunQueued     RunStatus = "queued"
-    RunInProgress RunStatus = "in_progress"
-    RunCompleted  RunStatus = "completed"
+	RunQueued     RunStatus = "queued"
+	RunInProgress RunStatus = "in_progress"
+	RunCompleted  RunStatus = "completed"
 )
 
 // Done reports whether the run has ended. A status it doesn't know reads as not
 // ended, so a caller waits rather than reading a result that isn't there.
 func (s RunStatus) Done() bool {
-    switch s {
-    case RunCompleted:
-        return true
-    case RunQueued, RunInProgress:
-        return false
-    }
-    return false
+	switch s {
+	case RunCompleted:
+		return true
+	case RunQueued, RunInProgress:
+		return false
+	}
+	return false
 }
 ```
 
