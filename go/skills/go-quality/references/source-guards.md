@@ -2,7 +2,7 @@
 
 **A source guard is a test that reads the module's own source and fails where a rule breaks.**
 
-Contents: a linter first · the shape of a guard · the helpers · guard 1, packages named for a job · guard 2, values worded by their owner · guard 3, a field read only through its owner · guard 4, table rows run under `t.Run` · guard 5, what each build-tag set links · guard 6, starting the binary runs nothing · the one startup file · keeping the helpers out of the binaries.
+Contents: a linter first · the shape of a guard · the helpers · guard 1, packages named for a job · guard 2, values worded by their owner · guard 3, a field read only through its owner · guard 4, table rows run under `t.Run` · guard 5, what each build-tag set links · guard 6, starting the binary runs nothing · the detection file · keeping the helpers out of the binaries.
 
 ## A linter first
 
@@ -490,40 +490,40 @@ A module that ships a second build behind a tag (`//go:build demo`, a demo with 
 package guard_test
 
 import (
-    "os/exec"
-    "slices"
-    "strings"
-    "testing"
+	"os/exec"
+	"slices"
+	"strings"
+	"testing"
 
-    "example.com/shop/internal/guard"
+	"example.com/shop/internal/guard"
 )
 
 // demoWorld is the demo's made-up shop, which only a -tags demo build links.
 const demoWorld = "example.com/shop/internal/demoworld"
 
 func TestTheShippedBinaryLinksNoDemo(t *testing.T) {
-    if slices.Contains(linked(t, ""), demoWorld) {
-        t.Errorf("cmd/shop links %s: only the -tags demo build may", demoWorld)
-    }
+	if slices.Contains(linked(t, ""), demoWorld) {
+		t.Errorf("cmd/shop links %s: only the -tags demo build may", demoWorld)
+	}
 }
 
 func TestTheDemoBuildLinksItsWorld(t *testing.T) {
-    if !slices.Contains(linked(t, "demo"), demoWorld) {
-        t.Errorf("cmd/shop with -tags demo doesn't link %s, so the guard above proves nothing", demoWorld)
-    }
+	if !slices.Contains(linked(t, "demo"), demoWorld) {
+		t.Errorf("cmd/shop with -tags demo doesn't link %s, so the guard above proves nothing", demoWorld)
+	}
 }
 
 // linked lists every package cmd/shop links when built with tags.
 func linked(t *testing.T, tags string) []string {
-    t.Helper()
-    args := []string{"list", "-deps", "-tags", tags, "./cmd/shop"}
-    cmd := exec.CommandContext(t.Context(), "go", args...)
-    cmd.Dir = guard.ModuleRoot(t)
-    out, err := cmd.Output()
-    if err != nil {
-        t.Fatalf("go %s: %v", strings.Join(args, " "), err)
-    }
-    return strings.Fields(string(out))
+	t.Helper()
+	args := []string{"list", "-deps", "-tags", tags, "./cmd/shop"}
+	cmd := exec.CommandContext(t.Context(), "go", args...)
+	cmd.Dir = guard.ModuleRoot(t)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go %s: %v", strings.Join(args, " "), err)
+	}
+	return strings.Fields(string(out))
 }
 ```
 
@@ -543,63 +543,52 @@ The runner seam keeps every process the program starts in one place ([go-errors'
 package main
 
 import (
-    "os"
-    "os/exec"
-    "path/filepath"
-    "testing"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
 )
 
 // started are the binaries the tool, or a library it links, could start.
 var started = []string{"git", "gh", "tmux", "tput", "stty", "infocmp"}
 
 func TestStartingTheBinaryRunsNothing(t *testing.T) {
-    dir := t.TempDir()
-    bin := filepath.Join(dir, "shop")
-    if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-        t.Fatalf("go build: %v\n%s", err, out)
-    }
-    fakes, ran := filepath.Join(dir, "bin"), filepath.Join(dir, "ran")
-    if err := os.Mkdir(fakes, 0o755); err != nil {
-        t.Fatal(err)
-    }
-    for _, name := range started {
-        script := "#!/bin/sh\necho \"$0 $*\" >> " + ran + "\n"
-        if err := os.WriteFile(filepath.Join(fakes, name), []byte(script), 0o755); err != nil {
-            t.Fatal(err)
-        }
-    }
-    for _, args := range [][]string{{"--version"}, {"help", "cancel"}} {
-        cmd := exec.CommandContext(t.Context(), bin, args...)
-        cmd.Env = append(os.Environ(), "PATH="+fakes+string(os.PathListSeparator)+os.Getenv("PATH"), "TMUX=/tmp/tmux-0/default")
-        if out, err := cmd.CombinedOutput(); err != nil {
-            t.Fatalf("shop %v: %v\n%s", args, err, out)
-        }
-    }
-    if b, err := os.ReadFile(ran); err == nil {
-        t.Errorf("starting shop ran:\n%s", b)
-    }
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "shop")
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	fakes, ran := filepath.Join(dir, "bin"), filepath.Join(dir, "ran")
+	if err := os.Mkdir(fakes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range started {
+		script := "#!/bin/sh\necho \"$0 $*\" >> " + ran + "\n"
+		if err := os.WriteFile(filepath.Join(fakes, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"--version"}, {"help", "cancel"}} {
+		cmd := exec.CommandContext(t.Context(), bin, args...)
+		cmd.Env = append(os.Environ(), "PATH="+fakes+string(os.PathListSeparator)+os.Getenv("PATH"), "TMUX=/tmp/tmux-0/default")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("shop %v: %v\n%s", args, err, out)
+		}
+	}
+	if b, err := os.ReadFile(ran); err == nil {
+		t.Errorf("starting shop ran:\n%s", b)
+	}
 }
 ```
 
 - **Each fake records being started** and does nothing else; a run that started none leaves no record.
-- **The environment invites the start:** `TMUX` set, so a library that asks tmux only inside it is caught. A guard over a terminal tool also runs it at a pseudo-terminal, where most detection happens.
+- **The environment invites the start:** `TMUX` set, so a library that asks tmux only inside it is caught.
+- **It can't see a start made only at a terminal.** `CombinedOutput` gives the binary pipes, and most detection runs only where stdout is a terminal. A guard over a terminal tool also runs it under a pseudo-terminal, from a package such as `github.com/creack/pty`, or with `TERM` set and the tool's own way to force its styled mode; without one, note the gap beside the test.
 - **Run every build-tag set the module ships,** `go build -tags demo` too.
 
-## The one startup file
+## The detection file
 
-A terminal program reads `TERM`, `NO_COLOR`, `CI` and the standard streams to choose how it draws, once, at startup. When that lives in one file of the package that draws, rather than in `cmd/`, forbidigo excludes that file as it excludes `cmd/`, and nothing else:
-
-```yaml
-linters:
-  exclusions:
-    rules:
-      # Startup reads the environment and the streams to choose the output
-      # mode, once; everything after it is handed what it found.
-      - path: ^internal/render/startup\.go$
-        linters: [forbidigo]
-```
-
-A guard test then holds the rest of the rule, that only its one constructor calls those reads, since a path exclusion covers the whole file.
+A terminal program asks once, at startup, whether its streams are terminals and what `TERM`, `NO_COLOR` and `CI` say ([go-concurrency's terminals.md](../../go-concurrency/references/terminals.md)). `run` hands that file the `*os.File` streams and `getenv`, as it hands everything else, so it names nothing forbidigo bans and needs no exclusion. A guard holds what no linter can: that it alone imports `golang.org/x/term` and asks a stream whether it is a terminal.
 
 ## Keeping the helpers out of the binaries
 

@@ -21,7 +21,7 @@ Contents: checking before writing · upgrading · by version · json in 1.27 · 
 
 `go fix` only rewrites what is safe at the file's version. The rows below without an analyser are by hand.
 
-Adopting these skills on an existing module, run `go fix ./...` first, in a commit of its own, then add the drop-in lint config ([golangci.yml](golangci.yml)): the modernizers clear the idioms the linters would otherwise report by the hundred.
+When adopting these skills on an existing module, run `go fix ./...` first, in a commit of its own, then add the drop-in lint config ([golangci.yml](golangci.yml)): the modernizers clear the idioms the linters would otherwise report by the hundred.
 
 ## By version
 

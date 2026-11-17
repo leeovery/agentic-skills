@@ -1,6 +1,5 @@
 # golangci-lint v2. Copy to .golangci.yml at the module's root, then name your
-# domain packages under depguard's domain rule, and your module under
-# exhaustive's only-types.
+# domain packages under depguard's domain rule.
 #
 # Each linter carries its reason. A new one joins with its reason, once its
 # findings are fixed or excluded here with theirs. Never loosen a setting to get
@@ -88,10 +87,12 @@ linters:
       static-msg: true  # the message is a constant; the values are attributes
 
     exhaustive:
-      # Only the module's own enums: a switch on reflect.Kind or another
-      # module's constants would have to name members it doesn't care about.
-      # The pattern matches the enum's full import path.
-      only-types: ['^example\.com/shop/']
+      # The standard library's enums (reflect.Kind, …), whose switches would
+      # have to name members they don't care about: a stdlib import path has
+      # no dot in its first element. The module's own enums stay checked,
+      # whatever its path. Another module's enum fails loudly until its type
+      # is listed here, as '^github\.com/acme/ui\.Key$', with its reason.
+      ignore-types: ['^[^./]+(/[^./]+)*\.[^./]+$']
 
     interfacebloat:
       max: 5
@@ -152,7 +153,7 @@ linters:
         - pattern: ^fmt\.Print(f|ln)?$
           msg: "write to an io.Writer you were given"
         - pattern: ^os\.(Stdin|Stdout|Stderr)$
-          msg: "take an io.Reader or io.Writer"
+          msg: "take the stream as a parameter: an io.Reader or io.Writer, or an *os.File where a terminal is asked about"
 
   exclusions:
     rules:
