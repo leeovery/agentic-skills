@@ -1,6 +1,8 @@
-# Commands
+# Commands with cobra
 
 **A command is an edge: it parses the command line into typed values, calls one operation, and writes the result. The tree is built fresh on every call, so a test runs it exactly as `run` does.**
+
+The rules are the [SKILL.md](../SKILL.md)'s, whatever parses the command line; this is how they land in cobra.
 
 Contents: the root · a command · output · exit codes · testing a command · edge cases.
 
@@ -72,7 +74,7 @@ func newCancelCommand(deps Deps) *cobra.Command {
 ```
 
 - **`RunE`, never `Run`.** The error goes back to `Execute`, which picks the exit code. cobra prints it once, as `Error: …`; the command doesn't print it too.
-- **Parse first.** Arguments and flag values become typed values (`order.ID`, `order.Reason`) before anything else runs. A value that doesn't parse is a usage error.
+- **Parse first.** Arguments and flag values become typed values (`order.ID`, `order.Reason`) before anything else runs. A value that doesn't parse is a usage error. A word whose meaning takes reads (a name that may be a branch, a tag or a build) is passed on as typed, for the operation to resolve.
 - **Flags bind to variables local to the constructor,** so every fresh tree has fresh flags.
 - **The context is `cmd.Context()`.** It carries `run`'s interrupt, so Ctrl-C cancels the work.
 - **Return the write's error.** Output redirected to a full disk is a failure like any other.
@@ -93,9 +95,10 @@ func newCancelCommand(deps Deps) *cobra.Command {
 | 0 | it worked; `--help` and `--version` too |
 | 1 | the command failed |
 | 2 | a usage error: an unknown command or flag, the wrong number of arguments, a value that doesn't parse |
+| 3 and up | the tool's own, for an outcome a script branches on without reading the message, such as refused by a rule or waiting on a person; each one listed here |
 | 130 | the user interrupted it: 128 plus SIGINT's number, as a shell reports it |
 
-One function sets them. `run` returns its code, and `main` exits with that:
+One function sets them, a code of the tool's own as a case of its own. `run` returns its code, and `main` exits with that:
 
 ```go
 // usageError is a command line the program can't act on, found after it parsed.
@@ -159,7 +162,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 - **`usageError` covers what the command checks itself** once the line has parsed: an id or a flag value that doesn't parse.
 - **`errors.AsType`** is the generic form of `errors.As` ([Go 1.26](https://go.dev/doc/go1.26)).
 - **`main` exits with what `run` returns, and nothing else exits:** `os.Exit` and `log.Fatal` appear in `main` alone. `os.Exit` skips deferred calls, so `main` holds none, and `run` defers `stop`.
-- **Each error is printed once.** A setup failure `run` prints itself, to `stderr`, and returns 1. A command's error cobra prints, so `Execute` only picks its code.
+- **Each error is printed once.** A setup failure `run` prints itself, to `stderr`, and returns 1. A command's error cobra prints, so `Execute` only picks its code. A tool with `--json` silences cobra's errors and renders every failure itself, a parse failure included ([json-output.md](json-output.md)).
 - **contextcheck misfires on the `NewRootCommand` line:** `run` has a context and the constructor takes none. The command gets the context from `ExecuteContextC`, so the nolint says so ([go-quality's gates.md](../../go-quality/references/gates.md)).
 
 ## Testing a command
