@@ -2,7 +2,7 @@
 
 **A caller that branches on an error matches what it means, never how it's spelled.**
 
-Contents: sentinels · typed errors · matching · the typed-nil trap · behaviour interfaces · the edge mapper · in tests.
+Contents: sentinels · typed errors · matching · the typed-nil trap · behaviour interfaces · several identities · the edge mapper · in tests.
 
 ## Sentinels
 
@@ -13,7 +13,7 @@ A condition callers act on, with nothing more to tell them: not found, already e
 var ErrNotFound = errors.New("not found")
 ```
 
-- Exported, with a comment saying when it's returned. It's API from the moment a caller matches it.
+- Exported, with a comment saying when it's returned. It's API from the moment a caller matches it. A sentinel that is one of the package's documented failures is exported for its callers and its external tests alike: a `package order_test` test is a caller too.
 - Short text: the wrap adds the input. `fmt.Errorf("order %s: %w", id, ErrNotFound)` prints `order o-1: not found`.
 - Returned wrapped, never bare, so every caller has to use `errors.Is`, and adding context later breaks nobody.
 - A failure nobody branches on stays a plain `fmt.Errorf`. A sentinel per failure is a list nobody reads.
@@ -129,9 +129,40 @@ func (e *StatusError) Retryable() bool {
 
 When one type alone answers the question, match that type instead.
 
+## Several identities
+
+An error can answer several questions at once: which failure it was, what kind of failure, and what caused it. `Unwrap() []error` gives each as an identity of its own, matched with `errors.Is` or `errors.AsType` like any other:
+
+```go
+// ErrNotLoggedIn is returned, wrapped, when the gateway refuses the shop's credentials.
+var ErrNotLoggedIn = errors.New("the gateway refused the shop's credentials")
+
+// AuthError is a call the gateway refused for its credentials, with what the
+// person does about it.
+type AuthError struct {
+    Fix string // the command that logs in again
+    Err error  // the gateway's answer
+}
+
+func (e *AuthError) Error() string {
+    return fmt.Sprintf("%v: %v", ErrNotLoggedIn, e.Err)
+}
+
+// Unwrap gives the error's identities: its class, its kind, and its cause.
+func (e *AuthError) Unwrap() []error {
+    return []error{ErrNotLoggedIn, failure.ErrBlocked, e.Err}
+}
+```
+
+- `failure.ErrBlocked` is one of the kinds a small `failure` package names for every domain package to share (blocked by a rule, waiting on a person); the edge maps each kind to its status or exit code.
+- `errors.Is(err, gateway.ErrNotLoggedIn)` holds for the caller that branches on the class, `errors.Is(err, failure.ErrBlocked)` for the exit-code function that maps the kind, and `errors.AsType[*url.Error](err)` still reaches the cause.
+- It replaces a custom `Is` method: each identity is a plain error in the list, and the match walks into each.
+- **Every element is API.** A caller comes to depend on each, so the list holds only what a caller branches on.
+- A type has one `Unwrap` or the other. `errors.Unwrap` returns nil for an error with the list form, so walk it with `errors.Is` and `errors.AsType` alone. `fmt.Errorf` with several `%w` builds the same list without a type.
+
 ## The edge mapper
 
-Each edge has one function from error to answer. Domain errors carry no status code: the domain doesn't know it's behind HTTP, and the CLI maps the same errors to exit codes in its own function ([go-actions' cli.md](../../go-actions/references/cli.md)).
+Each edge has one function from error to answer. A domain error may name its kind (refused by a rule, waiting on a person) and carry a fix, but no status code or exit number: the domain doesn't know it's behind HTTP, and the CLI maps the same errors to exit codes in its own function ([go-actions' cli.md](../../go-actions/references/cli.md)).
 
 ```go
 // statusFor is the one place an error becomes a status.
@@ -181,4 +212,4 @@ if e.Status != StatusShipped {
 }
 ```
 
-Check a message only for a property it must have, such as naming the bad field, never its whole text. [go-testing](../../go-testing/SKILL.md) covers the rest.
+Check a message only for a property it must have, such as naming the bad field, never its whole text, unless the message is the program's output: then its test pins it exactly, beside the match ([errors-as-output.md](errors-as-output.md)). [go-testing](../../go-testing/SKILL.md) covers the rest.

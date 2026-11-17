@@ -86,6 +86,7 @@ Where an error stops, and nowhere it passes through:
 - **An edge:** the HTTP edge's `writeError` ([matching.md](matching.md)), or `run`, for a setup failure, before it returns 1. A cobra command's error is printed by cobra, so nothing logs it as well.
 - **A worker that carries on:** a failure it skips and retries later is logged at the point it's skipped.
 - **Not in code that returns the error.** Its caller logs it, or matches it, or returns it in turn.
+- **A CLI whose output is its report has no logger:** the same rules land as its result's failure and warnings ([errors-as-output.md](errors-as-output.md)).
 
 ```go
 // Settle charges every unpaid invoice. A charge that fails is logged and left
