@@ -21,7 +21,7 @@ type orderJSON struct {
 
 - **Unexported, in the edge's package.** The domain never imports it.
 - **Every field tagged.** The tag is the contract, so renaming a Go field can't rename the wire. musttag checks every struct handed to an encoder is tagged.
-- **Plain types, as they arrive.** Strings and numbers; the mapper turns them into ids, enums and money. A wire field may instead be a domain type that validates itself in `UnmarshalText` ([enums.md](enums.md)).
+- **Plain types, as they arrive.** Strings and numbers; the mapper turns them into ids, enums and money. A wire field may instead be a domain type that validates itself in `UnmarshalText` ([enums.md](enums.md)). A typed string, such as an outbound `Kind EventKind`, is fine too: it encodes to the same bytes as a `string`, and exhaustive checks every switch on it.
 - **The domain struct carries no `json` tags.** Once it has them, every rename is a wire change, and the payload's quirks (`total_cents`, a nullable field) bend the domain's shape.
 
 ## The mapper
@@ -160,7 +160,7 @@ type pollJSON struct {
 
 - [ ] Each payload has its own tagged, unexported wire struct at the edge.
 - [ ] One mapper per source, which only maps, and whose errors name the record and field.
-- [ ] Enums and ids parsed in the mapper, or by `UnmarshalText`.
+- [ ] Enums and ids parsed in the mapper, or by `UnmarshalText`, but a vocabulary an outside system owns, which decodes as it comes ([enums.md](enums.md#decoding)).
 - [ ] Stored formats have their own encoder, with bytes pinned in a test.
 - [ ] `omitzero` on structs and times; durations as strings on the wire.
 - [ ] New JSON on `encoding/json/v2`; a v1 module stays on v1 until the whole module switches at once.
