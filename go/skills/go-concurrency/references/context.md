@@ -59,6 +59,8 @@ The deadline covers reading the body too. `json` is `encoding/json/v2` ([Go 1.27
 
 noctx flags `http.Get`, `http.NewRequest`, `net.Dial`, `exec.Command` and the other calls that take no context. Use `NewRequestWithContext`, a `net.Dialer`'s `DialContext`, and `exec.CommandContext`.
 
+A write whose outcome a timeout would make unknown, a push or a dispatch that may land after the deadline, takes no timeout of its own: the person's interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
+
 ## Work that outlives its caller
 
 Some work must finish even when the caller has gone: an audit record, a rollback, a cleanup after cancellation. Run it on `context.WithoutCancel(ctx)`, which keeps the caller's values and drops its cancellation and deadline, then give it a deadline of its own.
@@ -117,6 +119,7 @@ func serveUntilSignal(ctx context.Context, srv *http.Server, p *Poller) error {
 - Calling `stop` gives the signals back their default, so a second Ctrl-C during a slow shutdown kills the process instead of being ignored.
 - Since [Go 1.26](https://go.dev/doc/go1.26), `context.Cause(ctx)` on the context `NotifyContext` returns names the signal that ended it. Log it as the reason for stopping.
 - `serve` is the shutdown in [goroutines.md](goroutines.md).
+- Code that changes the terminal's mode watches the signals itself while the mode is changed, to put the terminal back before the process ends ([terminals.md](terminals.md)).
 
 ## The one place a context is kept
 

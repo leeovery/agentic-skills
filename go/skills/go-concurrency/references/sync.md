@@ -2,7 +2,7 @@
 
 **Share as little as you can. What is shared sits behind one named mutex or one atomic, and no lock is held while waiting on anything else.**
 
-Contents: mutex, atomic or channel · the mutex · keeping locks off I/O · atomics · values computed once · copies and the race detector.
+Contents: mutex, atomic or channel · the mutex · a lock that gives up with its context · keeping locks off I/O · atomics · values computed once · copies and the race detector.
 
 ## Mutex, atomic or channel
 
@@ -13,8 +13,9 @@ Contents: mutex, atomic or channel · the mutex · keeping locks off I/O · atom
 | read a value that's replaced whole now and then | `atomic.Pointer[T]` |
 | hand work, or ownership of a value, from one to another | a channel |
 | need to know when a set of them has finished | a `WaitGroup`, not a channel per goroutine |
+| take turns at something, but give up waiting when their context ends | a channel of one, taken in a `select` (below) |
 
-A channel used as a lock is a mutex with more ways to go wrong. A mutex used to pass work between goroutines is a channel built by hand. Pick by what moves: data that stays put wants a lock, work that moves wants a channel.
+A channel used as a lock is a mutex with more ways to go wrong, but for the one thing a mutex can't do: let a waiter give up. A mutex used to pass work between goroutines is a channel built by hand. Pick by what moves: data that stays put wants a lock, work that moves wants a channel.
 
 ## The mutex
 
@@ -38,6 +39,38 @@ func (b *Balances) Charge(id CustomerID, amount Cents) {
 - Never embedded: embedding puts `Lock` and `Unlock` in the type's method set, so any caller can take the lock.
 - Methods that touch it have pointer receivers. A value receiver locks a copy.
 - `defer Unlock` right after `Lock`, unless the work after the critical section is long, as below.
+
+## A lock that gives up with its context
+
+`Lock` waits until it gets the lock, whatever happens to the caller. Where the waiters must give up when their context ends (a Ctrl-C while ten calls queue for one turn), the lock is a channel of one, and taking it is a `select`:
+
+```go
+// Ledger appends entries to one file, a write at a time.
+type Ledger struct {
+    turn chan struct{} // holds a value while a write has its turn
+    path string
+}
+
+// NewLedger returns a Ledger for the file at path.
+func NewLedger(path string) *Ledger {
+    return &Ledger{turn: make(chan struct{}, 1), path: path}
+}
+
+// Append writes e once its turn comes, or gives up when ctx ends.
+func (l *Ledger) Append(ctx context.Context, e Entry) error {
+    select {
+    case l.turn <- struct{}{}:
+    case <-ctx.Done():
+        return ctx.Err()
+    }
+    defer func() { <-l.turn }()
+    return appendEntry(ctx, l.path, e)
+}
+```
+
+- The buffer of one is the lock: a send takes it, a receive gives it back.
+- Here the lock is held across I/O on purpose: keeping the writes to one file apart is its whole job, the exception the next section allows.
+- Anywhere a waiter needn't give up, a `sync.Mutex` says it more plainly.
 
 ## Keeping locks off I/O
 
@@ -70,7 +103,7 @@ The same goes for:
 - **A callback under a lock.** It may call back into the type, and Go's mutex isn't reentrant, so it deadlocks; or it may block on something you can't see.
 - **Logging under a lock.** A handler that writes to a slow sink is I/O.
 
-The one exception is a lock whose whole job is to keep writes to one file or connection from interleaving. It guards that file, and nothing else goes under it.
+The one exception is a lock whose whole job is to keep writes to one file or connection from interleaving. It guards that file and, where a redraw depends on it, the writer's record of what it has written (the rows a terminal shows, the cursor's place), since the bytes and the record must change together; nothing else goes under it. Its cost: a writer that blocks, a terminal paused with Ctrl-S, holds up every caller.
 
 ## Atomics
 
