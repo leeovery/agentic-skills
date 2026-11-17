@@ -8,7 +8,7 @@ Contents: when a table fits · row shape · errors · names · comparing without
 
 | Fits a table | Wants its own test |
 |---|---|
-| The same call, the same checks, different values, a builder option's among them | A different kind of arrangement: another fake, another collaborator |
+| The same call, the same checks, different values, a builder option's among them: a fake set to answer an error is a row's data | A different kind of arrangement: another fake, another collaborator; an `edit` that swaps a collaborator is a test of its own |
 | Rows a reader can scan as data | A row that needs a `check` func or a `wantCall bool` |
 | Adding a case means adding a line | Adding a case means adding an `if` in the loop |
 
@@ -45,7 +45,7 @@ func TestParseStatus(t *testing.T) {
 - Name the fields in each row (`{name: …, in: …}`) once a row is long, or when two fields share a type and could be swapped unseen.
 - The failure message prints the input, even though the subtest name is in the output too: the name says which case, the message says what happened.
 - Never identify a row by its index.
-- A row may carry a builder option that shapes its input, `edit func(*world)`, applied to a fresh world the row builds: it's data in the shape of a function. A function that asserts, or a flag that picks which check runs, is a test of its own.
+- A row may carry a builder option that shapes its input, `edit func(*world)`, applied to a fresh world the row builds: it's data in the shape of a function, and a fake set to answer an error is such data too. An `edit` that swaps a collaborator for another, a function that asserts, or a flag that picks which check runs, is a test of its own.
 
 ## Errors get their own table
 
