@@ -3,7 +3,9 @@
 #
 # Each linter carries its reason. A new one joins with its reason, once its
 # findings are fixed or excluded here with theirs. Never loosen a setting to get
-# a run green: fix the code, or nolint the one line and say why.
+# a run green: fix the code, or nolint the one line and say why. The only
+# exclusions to add are those gates.md prescribes: a finding only one
+# build-tag set has, and thelper's two misfires, each narrow, with its reason.
 version: "2"
 
 run:
@@ -93,7 +95,13 @@ linters:
       # nothing, list that type here by its exact name, one entry each, with
       # its reason: '^reflect\.Kind$'. Never a pattern over paths: a mistake
       # in one switches the check off for the module's own enums unseen, where
-      # a missing entry only reports a switch.
+      # a missing entry only reports a switch. An enum a library re-exports as
+      # an alias (type Button = term.Button) is matched by the declared type of
+      # the value switched on: the alias's name where the value is declared
+      # with the alias, the target's where it's declared with the target. Code
+      # switching under both lists both, each by its full import path:
+      # '^example\.com/shop/internal/ui\.Button$'. Aliases are materialized
+      # since Go 1.23; Go 1.27 removed the opt-out.
       ignore-types: []
 
     interfacebloat:
@@ -174,3 +182,8 @@ linters:
       # a failure with its stack, as a checked one and t.Fatal would give.
       - path: _test\.go$
         linters: [forcetypeassert]
+      # thelper misfires on a subtest body handed to a runner of your own and
+      # on a table row's setup taking t: exclude each by its source, naming the
+      # runner or the field (gates.md). A finding only one build-tag set has
+      # moves into the tagged file first; where it can't move, it's excluded
+      # here by file and text, never nolinted (gates.md).

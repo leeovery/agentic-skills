@@ -19,7 +19,7 @@ type orderJSON struct {
 }
 ```
 
-- **Unexported, in the edge's package.** The domain never imports it.
+- **Unexported, in the edge's package.** The domain never imports it. A CLI's `--json` output models are the exception: exported, in the renderer's package, one per result, since every output mode reads them and their tags are the program's API ([go-actions' json-output.md](../../go-actions/references/json-output.md#the-models-are-the-contract)).
 - **Every field tagged.** The tag is the contract, so renaming a Go field can't rename the wire. musttag checks every struct handed to an encoder is tagged.
 - **Plain types, as they arrive.** Strings and numbers; the mapper turns them into ids, enums and money. A wire field may instead be a domain type that validates itself in `UnmarshalText` ([enums.md](enums.md)). A typed string, such as an outbound `Kind EventKind`, is fine too: it encodes to the same bytes as a `string`, and exhaustive checks every switch on it.
 - **The domain struct carries no `json` tags.** Once it has them, every rename is a wire change, and the payload's quirks (`total_cents`, a nullable field) bend the domain's shape.
@@ -73,8 +73,8 @@ type EventKind string
 
 // The events the order log records.
 const (
-	EventPlaced    EventKind = "order.placed"
-	EventCancelled EventKind = "order.cancelled"
+	EventKindPlaced    EventKind = "order.placed"
+	EventKindCancelled EventKind = "order.cancelled"
 )
 
 // event is one line of the order log, a file other tools read.
@@ -98,7 +98,7 @@ func encodeEvent(e event) ([]byte, error) {
 ```go
 func TestEncodeEventPinsTheLineFormat(t *testing.T) {
 	at := time.Date(2026, 3, 1, 10, 0, 0, 0, time.FixedZone("CET", 3600))
-	got, err := encodeEvent(event{At: at, Kind: EventCancelled, Order: "ord-1"})
+	got, err := encodeEvent(event{At: at, Kind: EventKindCancelled, Order: "ord-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ type pollJSON struct {
 
 ## Checklist
 
-- [ ] Each payload has its own tagged, unexported wire struct at the edge.
+- [ ] Each payload has its own tagged, unexported wire struct at the edge; a CLI's output models are exported in its renderer's package.
 - [ ] One mapper per source, which only maps, and whose errors name the record and field.
 - [ ] Enums and ids parsed in the mapper, or by `UnmarshalText`, but a vocabulary an outside system owns, which decodes as it comes ([enums.md](enums.md#decoding)).
 - [ ] Stored formats have their own encoder, with bytes pinned in a test.
