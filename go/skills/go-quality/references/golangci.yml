@@ -87,12 +87,14 @@ linters:
       static-msg: true  # the message is a constant; the values are attributes
 
     exhaustive:
-      # The standard library's enums (reflect.Kind, …), whose switches would
-      # have to name members they don't care about: a stdlib import path has
-      # no dot in its first element. The module's own enums stay checked,
-      # whatever its path. Another module's enum fails loudly until its type
-      # is listed here, as '^github\.com/acme/ui\.Key$', with its reason.
-      ignore-types: ['^[^./]+(/[^./]+)*\.[^./]+$']
+      # Every enum is checked, the module's own and any other's. When a switch
+      # over an enum from outside the module fires (the standard library's
+      # reflect.Kind, a third party's) and naming its other members would say
+      # nothing, list that type here by its exact name, one entry each, with
+      # its reason: '^reflect\.Kind$'. Never a pattern over paths: a mistake
+      # in one switches the check off for the module's own enums unseen, where
+      # a missing entry only reports a switch.
+      ignore-types: []
 
     interfacebloat:
       max: 5
