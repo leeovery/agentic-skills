@@ -30,12 +30,52 @@ A module that ships a build-tag set, code behind `//go:build demo`, runs the gat
 
 ```sh
 go vet -tags demo ./...
-go test -race -tags demo ./cmd/shop/ ./internal/demoshop/
+go test -race -tags demo ./...
 golangci-lint run --build-tags demo
 go build -tags demo ./...
 ```
 
-- **The test gate runs only the packages the tag changes:** those holding a tagged file, and those that import one. Every other package compiles the same under the tag, so its tests would run twice for nothing. List them by name, and add a package to the list when a tagged file lands in it. Vet, lint and build stay over `./...`: they're cheap, and they check every tagged file whether or not the list names its package.
+- **The test gate runs `./...` under the tag too.** It's the one form that can't leave tagged code untested.
+- **A project may narrow it, only by a list it derives on every run, never one kept by hand.** The list is each package whose files differ with the tag (a `//go:build !demo` file counts), and each package whose code or tests import one, directly or through another. A hand-kept list misses the package that starts importing one, and nothing says so. `internal/demoworld`, which only tagged files import, compiles the same either way and isn't on it. This script derives the list from `go list`, with and without the tag:
+
+  ```sh
+  #!/bin/sh
+  # tagged-packages.sh TAG lists the packages a `go test -tags TAG` run must
+  # cover: each package whose files differ with the tag, and each package whose
+  # code or tests import one, directly or through another.
+  set -eu
+  tag=$1
+
+  files='{{.ImportPath}} {{.GoFiles}} {{.TestGoFiles}} {{.XTestGoFiles}}'
+  changed=$(
+  	{
+  		go list -e -f "$files" ./...
+  		go list -e -tags "$tag" -f "$files" ./...
+  	} | sort | uniq -u | cut -d' ' -f1 | sort -u
+  )
+  [ -n "$changed" ] || exit 0
+
+  # -test lists each package's tests too, so a package whose tests alone import
+  # a changed one is caught. A test variant reads "p [p.test]", "p_test [p.test]"
+  # or "p.test": each is p.
+  for tags in "" "$tag"; do
+  	go list -e -test -tags "$tags" -f '{{.ImportPath}} {{join .Deps " "}}' ./...
+  done | CHANGED=$changed awk '
+  	BEGIN { n = split(ENVIRON["CHANGED"], c, "\n"); for (i = 1; i <= n; i++) hit[c[i]] = 1 }
+  	{
+  		p = $1
+  		sub(/\.test$/, "", p)
+  		sub(/_test$/, "", p)
+  		for (i = 1; i <= NF; i++) if ($i in hit) { print p; next }
+  	}' | sort -u
+  ```
+
+  ```sh
+  pkgs=$(sh scripts/tagged-packages.sh demo)
+  if [ -n "$pkgs" ]; then go test -race -tags demo $pkgs; fi
+  ```
+
+  An empty list means the tag changes no package, so no test runs again. Vet, lint and build stay over `./...`: they're cheap, and they check every tagged file.
 - **A tag for tests alone** (`integration`) runs where its suite runs; it ships nothing.
 - **A finding only one set has can't take a nolint.** A function only a tagged file calls is unused in the default build; a `//nolint:unused` on it is then reported by nolintlint under `--build-tags demo`, where nothing is unused. Move the code into the tagged file first, so each build sees it whole. Where it can't move, a field of a struct both builds use that only the demo reads, exclude the finding in `.golangci.yml`, by its file and its words, with the reason:
 
@@ -48,6 +88,8 @@ go build -tags demo ./...
           text: "field held is unused"
           linters: [unused]
   ```
+
+  An exclusion by text outlives its reason: if the demo stops reading `held`, the field is unused in both builds and still hidden. Re-check the exclusion whenever its code changes, and remove it with the code that needed it. A project that turns on `exclusions.warn-unused` gets a warning for it under the set that doesn't need it; that warning is expected.
 
 ## In CI, beside them
 
@@ -70,15 +112,22 @@ go vet ./...
 go test -race ./...
 golangci-lint run
 go build ./...
+
+# each build-tag set the module ships, under the same gates
+go vet -tags demo ./...
+go test -race -tags demo ./...
+golangci-lint run --build-tags demo
+go build -tags demo ./...
+
 go mod tidy -diff
 go tool govulncheck ./...
 ```
 
 ## Before reporting done
 
-- [ ] All five pass clean, under each build-tag set the module ships, and the report says which runner ran the tests.
+- [ ] All five pass clean, and again under each build-tag set the module ships, its tests over `./...` or the list the script derives; the report says which runner ran the tests.
 - [ ] A gate failing on code you didn't touch is reported, not skipped or silenced.
-- [ ] No `//nolint` without its linter and reason; no exclusion, limit or allowance entry loosened.
+- [ ] No `//nolint` without its linter and reason; no exclusion, limit or allowance entry loosened, but for the exclusions this file prescribes (a finding only one build-tag set has, thelper's two misfires), each narrow and with its reason.
 - [ ] Each new dependency has its reason in the PR.
 - [ ] Each comment added says why, not what the code does or what changed.
 
@@ -118,6 +167,8 @@ go tool govulncheck ./...
           linters: [thelper]
         # A row's setup builds its input; a failure in it belongs on its line.
         - path: _test\.go$
-          source: '^\s*setup: func\(t \*testing\.T\b'
+          source: '\bsetup: func\(t \*testing\.T\b'
           linters: [thelper]
   ```
+
+  A source rule matches the line thelper reports, where the `func` keyword is, so it misses a call split across lines (`forEachStore(t,` then `func(t *testing.T, …)` on the next): keep each such call on one line.
