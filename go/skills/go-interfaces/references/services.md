@@ -27,7 +27,7 @@ type Refunder interface {
 
 No vendor request struct, `*http.Response` or vendor error type appears in it. Once the vendor's names are in the signature, the interface is the SDK by another name, and replacing the vendor rewrites every caller.
 
-The exception is a service whose model is the program's subject, as a code host's commits and pull requests are a release tool's: there its words are the domain's, and the adapter's types may be them ([driver-contracts.md](driver-contracts.md)).
+The exception is a service whose model is the program's subject, as a code host's commits and pull requests are a release tool's: there its words are the domain's, and the adapter's types may be them, the domain importing the adapter as [go-architecture](../../go-architecture/SKILL.md)'s rule 8 allows ([driver-contracts.md](driver-contracts.md#an-outside-service-as-the-domains-words)).
 
 ## The adapter
 

@@ -17,8 +17,8 @@ package carrier
 
 // Carrier books and tracks parcels with one shipping company.
 type Carrier interface {
-    Book(ctx context.Context, p Parcel) (Booking, error)
-    Track(ctx context.Context, id BookingID) (Status, error)
+	Book(ctx context.Context, p Parcel) (Booking, error)
+	Track(ctx context.Context, id BookingID) (Status, error)
 }
 
 // ErrNoService is returned, wrapped, when the carrier doesn't deliver to the address.
@@ -26,7 +26,7 @@ var ErrNoService = errors.New("no service to that address")
 ```
 
 - **Neutral:** it imports no driver and no consumer. Its types (`Parcel`, `Booking`, `Status`) and sentinels are the contract's words, which every driver translates into.
-- **Exported,** since `main` and every driver name it.
+- **Exported,** since `main` names it, and its assignment of each driver proves the driver fits.
 - **Its doc says what each method promises,** an empty result, an order, a failure's sentinel, since a driver written later reads only this.
 
 ## A driver
@@ -52,7 +52,7 @@ The contract doesn't replace rule 1. Code that uses a carrier declares the one o
 
 // booker is the one thing Dispatch asks of a carrier.
 type booker interface {
-    Book(ctx context.Context, p carrier.Parcel) (carrier.Booking, error)
+	Book(ctx context.Context, p carrier.Parcel) (carrier.Booking, error)
 }
 ```
 
@@ -65,7 +65,7 @@ Rule 4 keeps a vendor's names out of the domain. Where an outside service's mode
 - **The adapter's types and sentinels may be the domain's vocabulary:** a domain package imports the adapter for `Commit`, `PullRequest` and `ErrUnknownRef`.
 - **The adapter is still yours.** It's your package, its types are your structs, mapped from the wire at its edge, and no wire struct, raw response or vendor error type leaves it.
 - **The domain still reads through interfaces it declares,** so its tests fake those, and only `main` hands it the real client.
-- **The cost:** the domain can't compile without the adapter, and the import runs from the domain to it. Accept it only where the service is the subject, not one supplier among several.
+- **The cost:** the domain can't compile without the adapter, and the import runs from the domain to it, the one exception to [go-architecture](../../go-architecture/SKILL.md)'s rule 8. The adapter imports nothing of the domain, so no cycle forms, and depguard's domain rule lists the adapter's path as allowed. Accept it only where the service is the subject, not one supplier among several.
 
 ## Checklist
 

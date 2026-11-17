@@ -24,7 +24,7 @@ An interface belongs to the code that calls it, and it exists to be swapped: in 
    - One operation is a function field: `now func() time.Time`, `getenv func(string) string`.
    - Several are an interface, such as a process runner.
    - Files are a directory or an `*os.Root` passed in; HTTP is an `*http.Client` and a base URL.
-   - `now` is injected where a decision depends on the instant. Waits, tickers and timeouts are left to `testing/synctest` ([Go 1.25](https://go.dev/doc/go1.25)), unless the program itself needs a clock it controls ([go-testing's time.md](../go-testing/references/time.md)).
+   - `now` is injected where a decision depends on the instant. Waits, tickers and timeouts are left to `testing/synctest` ([Go 1.25](https://go.dev/doc/go1.25)), unless the program itself needs a clock it controls, or the code waits across something a bubble can't drive (a subprocess, the terminal), where its wait is injected ([go-testing's time.md](../go-testing/references/time.md#what-a-bubble-cant-drive)).
 
    *Code that calls `time.Now` or `os.Getenv` itself can only be tested at the real time, on the real machine.* forbidigo keeps the environment and home directory reads in `cmd/`, and depguard keeps `os/exec` out of domain packages.
 7. **Fakes are written by hand:** a struct that records its calls and returns what the test set, in the test file, or in a `<pkg>test` package when several packages share it. No mock generators. *A fake reads like the domain, and the test checks outcomes instead of pinning the order of calls.* depguard bans gomock, mockery and testify.
@@ -88,7 +88,7 @@ The same fake, and the tests that use it, are in [go-testing's fakes-and-builder
 | Persistence | a store named for its data, with methods in the domain's words |
 | A different implementation per environment | a `switch` on config in `main` |
 | Several drivers chosen by config | a contract in a neutral package that each driver implements |
-| Timers, tickers or timeouts in a test | `synctest`, not a fake clock, unless the program needs a clock of its own |
+| Timers, tickers or timeouts in a test | `synctest`, not a fake clock, unless the program needs a clock of its own or waits across what a bubble can't drive |
 | A test at a particular instant: month end, an expiry | an injected `now` |
 
 ## Anti-patterns
@@ -100,7 +100,7 @@ The same fake, and the tests that use it, are in [go-testing's fakes-and-builder
 - ❌ `Repository[T]` with `Find`, `Save` and `Delete` for every type → the queries the domain asks, each by name.
 - ❌ An interface over the SDK's client, or a stub `http.RoundTripper`, to fake the vendor → run the adapter against `httptest.NewTestServer`, and fake your own interface above it.
 - ❌ `time.Now()`, `os.Getenv`, `os.UserHomeDir` or `exec.Command` in domain code → a seam, set in `main`.
-- ❌ A fake clock advanced by hand to fire timers in a test → `synctest.Test` and `time.Sleep`; an injected clock is for a program that needs one itself.
+- ❌ A fake clock advanced by hand to fire timers in a test → `synctest.Test` and `time.Sleep`; an injected clock is for a program that needs one itself, and an injected wait for code waiting across a subprocess or the terminal.
 - ❌ gomock, mockery or `testify/mock` → a fake of ten lines.
 
 ## References

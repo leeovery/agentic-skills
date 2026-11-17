@@ -24,11 +24,12 @@ Contents: the seams · function field or interface · time · the environment ·
 
 ## Time
 
-Three jobs, each with its own tool:
+Four jobs, each with its own tool:
 
 - **Anything that waits runs under `testing/synctest`** ([Go 1.25](https://go.dev/doc/go1.25)). Inside `synctest.Test`, `time.Now`, `time.Sleep`, timers and tickers run on a fake clock that jumps ahead whenever every goroutine in the test is blocked, so an hour of one-minute ticks passes at once. The code calls `time.NewTicker` as usual, with no clock injected. `synctest.Sleep` ([Go 1.27](https://go.dev/doc/go1.27)) sleeps and then waits for the bubble to settle. [go-testing](../../go-testing/SKILL.md) covers these tests.
 - **A decision about a particular instant takes `now`:** a 14-day return window, the last day of February, a token's expiry. The bubble's clock starts at midnight UTC on 1 January 2000 and only moves by sleeping, so a test that needs one second past a deadline sets the instant directly instead.
-- **A program that needs a clock it controls itself,** a demo held at one moment or frames drawn at a given second, injects its timer factory or clock as a product seam, and its tests drive that ([go-testing's time.md](../../go-testing/references/time.md)).
+- **A program that needs a clock it controls itself,** a demo held at one moment or frames drawn at a given second, injects its timer factory or clock as a product seam, and its tests drive that ([go-testing's time.md](../../go-testing/references/time.md#when-the-program-needs-its-own-clock)).
+- **Code that waits across what a bubble can't drive,** a subprocess or the terminal, takes its wait (`wait func(context.Context, time.Duration) error`), its reason beside the field, and a test passes one that returns at once ([go-testing's time.md](../../go-testing/references/time.md#what-a-bubble-cant-drive)).
 
 A pure function takes the instant as an argument. A struct that reads the time takes `now`:
 
@@ -164,7 +165,7 @@ func (f *fakeRunner) Output(_ context.Context, path string, args ...string) ([]b
 }
 ```
 
-`exec.CommandContext` kills the process when the context ends, so a cancelled caller doesn't leave it running. A tool that runs several binaries keeps one runner for all of them, and an adapter per binary ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)).
+`exec.CommandContext` kills the process when the context ends, so a cancelled caller doesn't leave it running. A tool that runs several binaries replaces this one with a single `Run(ctx, Command)`, one runner for all of them, and an adapter per binary ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)).
 
 ## Files
 
