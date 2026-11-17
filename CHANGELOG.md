@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-11-17
+
+✨ Added
+- go-concurrency guidance for adapters that mix reads and unkeyed writes through one function — each call names its kind, so a write never inherits a read's deadline, with a worked example.
+- go-quality script that derives the packages a build-tag test run must cover, as an option instead of running `./...` under the tag.
+- go-quality guidance for thelper misfires, with config exclusions for subtest bodies handed to your own runner and for a table row's `setup` taking `t`.
+- go-types guidance of one type per vocabulary, with a constant-less type for fields that carry several vocabularies and are read back through their reader's own type.
+
+🔧 Changed
+- go-types enum constants now carry their type's full name (`RunStatusQueued`, `EventKindPlaced`), with the stutter accepted, and the examples are renamed to match.
+- go-quality now requires build-tag test runs to cover `./...` or a list derived on every run, never a hand-kept one, and adds those runs to the CI script and the done checklist.
+- go-quality now excludes findings that only one build-tag set has in the config by file and text instead of using `//nolint`, which is now the one sanctioned exception to "never loosen a gate".
+- go-testing helper guidance now says subtest bodies passed to your own runner and a row's `setup` call no `t.Helper()`.
+- go-actions guidance now says `kindOf` reads the interrupt before a refusal, matching the exit code.
+- go-types now makes a CLI's `--json` output models an exception to unexported wire structs: exported, in the renderer's package.
+
 ## [0.2.6] - 2026-11-17
 
 ✨ Added
