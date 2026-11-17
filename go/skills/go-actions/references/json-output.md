@@ -33,10 +33,10 @@ A script reading `shop cancel ord-1 --json` parses stdout. One line printed past
 // CancelResult is what shop cancel shows. Its JSON members are read by scripts:
 // renaming one is a breaking change.
 type CancelResult struct {
-    Order    order.ID     `json:"order"`
-    Status   order.Status `json:"status"`
-    Refunded bool         `json:"refunded"`
-    At       time.Time    `json:"at"`
+	Order    order.ID     `json:"order"`
+	Status   order.Status `json:"status"`
+	Refunded bool         `json:"refunded"`
+	At       time.Time    `json:"at"`
 }
 ```
 
@@ -52,12 +52,12 @@ An error's message shown to a person, or read by an agent from `message`, is the
 
 ```go
 func TestCancelJSONRefusesAShippedOrder(t *testing.T) {
-    code, stdout, stderr := execute(t.Context(), t, "cancel", "ord-2", "--json")
+	code, stdout, stderr := execute(t.Context(), t, "cancel", "ord-2", "--json")
 
-    want := `{"error":{"kind":"failed","message":"order ord-2 is shipped, so it can't be cancelled"}}` + "\n"
-    if code != 1 || stdout != want || stderr != "" {
-        t.Errorf("shop cancel ord-2 --json = %d, stdout %q, stderr %q; want 1, %q and nothing", code, stdout, stderr, want)
-    }
+	want := `{"error":{"kind":"failed","message":"order ord-2 is shipped, so it can't be cancelled"}}` + "\n"
+	if code != 1 || stdout != want || stderr != "" {
+		t.Errorf("shop cancel ord-2 --json = %d, stdout %q, stderr %q; want 1, %q and nothing", code, stdout, stderr, want)
+	}
 }
 ```
 

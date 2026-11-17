@@ -15,58 +15,58 @@ One job, two steps, sharing one set of collaborators:
 ```go
 // Publisher sends a price list to the storefronts that sell the shop's goods.
 type Publisher struct {
-    Stores storefronts
+	Stores storefronts
 }
 
 // storefronts is each storefront's price list, as Publisher reads and writes it.
 type storefronts interface {
-    Prices(ctx context.Context, store StoreID) (list PriceList, version string, err error)
-    CanWrite(ctx context.Context, store StoreID) (bool, error)
-    Replace(ctx context.Context, store StoreID, version string, list PriceList) error
+	Prices(ctx context.Context, store StoreID) (list PriceList, version string, err error)
+	CanWrite(ctx context.Context, store StoreID) (bool, error)
+	Replace(ctx context.Context, store StoreID, version string, list PriceList) error
 }
 
 // Plan is what a publish would change, decided before anything is written.
 type Plan struct {
-    Changes []StoreChange // the storefronts whose list differs, in the order given
+	Changes []StoreChange // the storefronts whose list differs, in the order given
 }
 
 // StoreChange is one storefront's new list, leased on the version read.
 type StoreChange struct {
-    Store   StoreID
-    Version string
-    List    PriceList
+	Store   StoreID
+	Version string
+	List    PriceList
 }
 
 // Plan reads every storefront and decides what Apply would change. It writes nothing.
 func (p Publisher) Plan(ctx context.Context, want PriceList, stores []StoreID) (Plan, error) {
-    var plan Plan
-    for _, s := range stores {
-        current, version, err := p.Stores.Prices(ctx, s)
-        if err != nil {
-            return Plan{}, fmt.Errorf("plan publish: %w", err)
-        }
-        if current.Equal(want) {
-            continue
-        }
-        if err := p.ensureWritable(ctx, s); err != nil {
-            return Plan{}, err
-        }
-        plan.Changes = append(plan.Changes, StoreChange{Store: s, Version: version, List: want})
-    }
-    return plan, nil
+	var plan Plan
+	for _, s := range stores {
+		current, version, err := p.Stores.Prices(ctx, s)
+		if err != nil {
+			return Plan{}, fmt.Errorf("plan publish: %w", err)
+		}
+		if current.Equal(want) {
+			continue
+		}
+		if err := p.ensureWritable(ctx, s); err != nil {
+			return Plan{}, err
+		}
+		plan.Changes = append(plan.Changes, StoreChange{Store: s, Version: version, List: want})
+	}
+	return plan, nil
 }
 
 // Apply makes the plan's changes in order, stopping at the first that fails.
 func (p Publisher) Apply(ctx context.Context, plan Plan) error {
-    for i, c := range plan.Changes {
-        if err := ctx.Err(); err != nil {
-            return &PartialError{Plan: plan, Done: i, Err: err}
-        }
-        if err := p.Stores.Replace(ctx, c.Store, c.Version, c.List); err != nil {
-            return &PartialError{Plan: plan, Done: i, Err: err}
-        }
-    }
-    return nil
+	for i, c := range plan.Changes {
+		if err := ctx.Err(); err != nil {
+			return &PartialError{Plan: plan, Done: i, Err: err, Untried: true}
+		}
+		if err := p.Stores.Replace(ctx, c.Store, c.Version, c.List); err != nil {
+			return &PartialError{Plan: plan, Done: i, Err: err}
+		}
+	}
+	return nil
 }
 ```
 
@@ -94,7 +94,7 @@ A write that timed out, got a 5xx, or lost its connection after the request went
 
 - **The adapter never retries a write.** It retries reads, which are safe.
 - **It tells "never ran" from "may have run":** a request refused before it was sent, or a binary that never started, changed nothing; anything after the request left is unknown. The two are separate sentinels, and the edge words the second as "may have landed: look at <where>".
-- **The person's interrupt bounds the write,** not a timeout of its own, since a timeout would turn a known outcome into an unknown one ([go-concurrency's context.md](../../go-concurrency/references/context.md)).
+- **The person's interrupt bounds the write,** not a timeout of its own, since a timeout would turn a known outcome into an unknown one. That holds for a program a person runs; a server or a worker keeps a deadline and makes the write idempotent instead ([go-concurrency's context.md](../../go-concurrency/references/context.md#deadlines-on-calls-that-leave-the-process)).
 
 ## Saying what landed
 
@@ -103,22 +103,28 @@ A failure partway names what was written, what may have been, and what wasn't tr
 ```go
 // PartialError is a publish that stopped partway.
 type PartialError struct {
-    Plan Plan
-    Done int   // how many of the plan's changes landed
-    Err  error // why the next one failed
+	Plan    Plan
+	Done    int   // how many of the plan's changes landed
+	Err     error // why the next one failed, or why it wasn't tried
+	Untried bool  // the run stopped before the next write was tried: an interrupt
 }
 
 func (e *PartialError) Error() string {
-    var b strings.Builder
-    if e.Done > 0 {
-        fmt.Fprintf(&b, "published to %s; ", storesOf(e.Plan.Changes[:e.Done]))
-    }
-    failed := e.Plan.Changes[e.Done].Store
-    fmt.Fprintf(&b, "%s: %v", failed, e.Err)
-    if rest := e.Plan.Changes[e.Done+1:]; len(rest) > 0 {
-        fmt.Fprintf(&b, "; %s not tried", storesOf(rest))
-    }
-    return b.String()
+	var b strings.Builder
+	if e.Done > 0 {
+		fmt.Fprintf(&b, "published to %s; ", storesOf(e.Plan.Changes[:e.Done]))
+	}
+	rest := e.Plan.Changes[e.Done:]
+	if e.Untried {
+		fmt.Fprintf(&b, "%v", e.Err) // no store failed: the run was stopped
+	} else {
+		fmt.Fprintf(&b, "%s: %v", rest[0].Store, e.Err)
+		rest = rest[1:]
+	}
+	if len(rest) > 0 {
+		fmt.Fprintf(&b, "; %s not tried", storesOf(rest))
+	}
+	return b.String()
 }
 
 func (e *PartialError) Unwrap() error { return e.Err }
@@ -126,6 +132,7 @@ func (e *PartialError) Unwrap() error { return e.Err }
 
 - **The cause stays matchable,** so the edge tells a refused lease (nothing changed there) from a write that may have landed.
 - **The words are exact,** "published to north and south; west: may have landed: …; east not tried", because the person repairs from them. A test pins them.
+- **An interrupt blames no store:** stopped before a write, it reads "published to north; context canceled; south and west not tried", the edge wording the cause as "interrupted".
 - **Running it again is safe:** a fresh plan finds what already landed equal, and leaves it.
 
 ## The edge and `--dry-run`
@@ -133,10 +140,10 @@ func (e *PartialError) Unwrap() error { return e.Err }
 ```go
 plan, err := deps.Publisher.Plan(ctx, list, stores)
 if err != nil {
-    return err
+	return err
 }
 if dryRun {
-    return show(out, plan)
+	return show(out, plan)
 }
 return deps.Publisher.Apply(ctx, plan)
 ```

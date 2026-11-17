@@ -17,7 +17,7 @@ Business logic lives in operations: a function, or a small struct of its collabo
 6. **Compose by holding.** An operation that needs another holds it, or a one-method interface of it, as a field. *It never redoes the other's steps against the store, so that rule keeps one owner, and a test fakes it in a line.*
 7. **A write leaves no half state.** Writes that must land together go through one store call that takes a closure (`Orders.InTx(ctx, func(tx Store) error {…})`). A file is replaced whole: written beside the target, then renamed over it. Writes to systems that share no transaction are planned and checked before the first, as [writes.md](references/writes.md) lays out. *A failure partway leaves the old state or the new, never a mix the next run trips over.*
 8. **The command tree comes from a function, `NewRootCommand(deps)`, and writes where it's told.** No package-level commands or `init`. Data goes to the writer in `Deps`, diagnostics and usage to the error writer, and a command's context is the one `run` passed in. *Each test builds a fresh tree with fakes and reads what it printed, and usage never lands in the data.* forbidigo bans `fmt.Print*`, `os.Stdout` and `os.Exit` in command packages. [cli.md](references/cli.md) builds it with cobra.
-9. **`main` exits with what `run` returns, and nothing else exits.** `run` returns what one function maps the error to: 0 for success, 1 for a failure, 2 for a usage error, 130 for an interrupt. A tool may add codes of its own above 2 for outcomes a script branches on, such as refused by a rule or waiting on a person, each documented in one table and mapped in that function. One renderer prints each error, once. *A script can tell a bad call from a failed one, and Ctrl-C reads as the shell's own.*
+9. **`main` exits with what `run` returns, and nothing else exits.** `run` returns what one function maps the error to: 0 for success, 1 for a failure, 2 for a usage error, 130 for an interrupt. A tool may add codes of its own, 3 to 125, for outcomes a script branches on, such as refused by a rule or waiting on a person, each documented in one table and mapped in that function. One renderer prints each error, once. *A script can tell a bad call from a failed one, and Ctrl-C reads as the shell's own.*
 
 ## Pattern
 
@@ -81,7 +81,7 @@ func ensureCancellable(o Order) error {
 | Writes that land together | one store call taking a closure |
 | Writes to systems that share no transaction | a plan checked before the first write, then leased writes ([writes.md](references/writes.md)) |
 | A command, handler or consumer | an edge: parse, call one operation, write or map the error |
-| How the process exits | one function from error to exit code, whose code `run` returns and `main` exits with; a code of the tool's own above 2 in its one table |
+| How the process exits | one function from error to exit code, whose code `run` returns and `main` exits with; a code of the tool's own, 3 to 125, in its one table |
 
 ## Anti-patterns
 
