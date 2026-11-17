@@ -25,22 +25,20 @@ Never let zero be an arbitrary member, such as `StatusPending = iota`: every ord
 
 ## Naming the members
 
-Each constant starts with the type's name, `StatusPaid`, so a member says its set at the call and two sets in one package can't collide. Where the name's last word only says it's a set (`Status`, `Kind`, `Outcome`), the prefix may be the leading word alone:
+Every constant starts with its type's full name: `StatusPaid`, `PaymentStatusDeclined`, `RunStatusQueued`. Where the member repeats a word of the name, the stutter is accepted:
 
 ```go
-// PaymentStatus is where a payment is, as the gateway reports it.
-type PaymentStatus string
+// PushStatus is how a push of one ref ended.
+type PushStatus string
 
 const (
-	PaymentPending  PaymentStatus = "pending"
-	PaymentPaid     PaymentStatus = "paid"
-	PaymentDeclined PaymentStatus = "declined"
+	PushStatusPushed   PushStatus = "pushed"
+	PushStatusRejected PushStatus = "rejected"
 )
 ```
 
-- **One prefix per type,** every member taking it, and no other type in the package using it: `Payment` is `PaymentStatus`'s, so a `PaymentMethod` set takes its full name, `PaymentMethodCard`.
-- **The full name always passes.** Shorten only where it repeats a word every switch would read past: `PaymentStatusDeclined` says nothing `PaymentDeclined` doesn't.
-- **Never no prefix:** a bare `Paid` reads as a value of anything, and the next set in the package takes the name.
+- **The full name, never a shortened one.** It never collides, since two types can't share a name; it always says its set, even once a sibling set (`RefundOutcome` beside `RefundStatus`) shares its stem; and it asks no judgement of which words to drop.
+- **Never no prefix:** a bare `Pushed` reads as a value of anything, and the next set in the package takes the name.
 
 ## The string shape
 
@@ -200,18 +198,18 @@ type RunStatus string
 
 // The statuses the CI documents today.
 const (
-	RunQueued     RunStatus = "queued"
-	RunInProgress RunStatus = "in_progress"
-	RunCompleted  RunStatus = "completed"
+	RunStatusQueued     RunStatus = "queued"
+	RunStatusInProgress RunStatus = "in_progress"
+	RunStatusCompleted  RunStatus = "completed"
 )
 
 // Done reports whether the run has ended. A status it doesn't know reads as not
 // ended, so a caller waits rather than reading a result that isn't there.
 func (s RunStatus) Done() bool {
 	switch s {
-	case RunCompleted:
+	case RunStatusCompleted:
 		return true
-	case RunQueued, RunInProgress:
+	case RunStatusQueued, RunStatusInProgress:
 		return false
 	}
 	return false
@@ -232,8 +230,8 @@ exhaustive makes every switch on a type name every member. A type that holds two
 type RefundOutcome string
 
 const (
-	RefundIssued   RefundOutcome = "issued"
-	RefundDeclined RefundOutcome = "declined"
+	RefundOutcomeIssued   RefundOutcome = "issued"
+	RefundOutcomeDeclined RefundOutcome = "declined"
 )
 
 // RefundResult is what shop refund shows.
@@ -242,22 +240,28 @@ type RefundResult struct {
 }
 ```
 
-A field that carries several vocabularies, one an open set others add to (an event's `kind`, written by many packages and switched over whole by none), is typed by none of them: a type with no constants of its own, each vocabulary's value converted into it.
+Some fields carry several vocabularies: an event's `kind`, an open set that other packages add to, switched over whole by none. Such a field is typed by none of them. It's a type with no constants of its own, and each package converts its own vocabulary into it:
 
 ```go
 // Kind is what an event records. It has no constants: each package's events
 // are a type of their own, converted in, so no switch names every package's.
 type Kind string
 
-e := Event{Kind: Kind(refund.EventIssued)}
+e := Event{Kind: Kind(refund.EventKindIssued)}
+```
+
+A `Kind` has no `ParseKind`: one listing every package's members is the shared type this section rules out. It decodes as it comes, and its reader converts it back into the vocabulary it expects and parses it there, refusing what isn't its own:
+
+```go
+k, err := refund.ParseEventKind(string(e.Kind))
 ```
 
 ## Checklist
 
 - [ ] String for anything stored or sent; `iota` only for memory.
 - [ ] Zero is the real default or an explicit unknown.
-- [ ] Constants prefixed with the type's name, or its leading word, one prefix per type.
+- [ ] Constants prefixed with the type's full name, the stutter accepted.
 - [ ] One type per vocabulary; a field holding several is a type with no constants.
-- [ ] `ParseX`, a function listing the members, and `String` for an int.
+- [ ] `ParseX`, a function listing the members, and `String` for an int; a type with no constants has none, its readers parsing in their own vocabulary.
 - [ ] Behaviour as methods whose `switch` names every member.
-- [ ] Values from outside pass through `ParseX`, in the mapper or `UnmarshalText`; a vocabulary an outside system owns decodes as it comes, each method's fallback stated.
+- [ ] Values from outside pass through `ParseX`, in the mapper or `UnmarshalText`, a type with no constants converted into its reader's vocabulary first; a vocabulary an outside system owns decodes as it comes, each method's fallback stated.

@@ -73,8 +73,8 @@ type EventKind string
 
 // The events the order log records.
 const (
-	EventPlaced    EventKind = "order.placed"
-	EventCancelled EventKind = "order.cancelled"
+	EventKindPlaced    EventKind = "order.placed"
+	EventKindCancelled EventKind = "order.cancelled"
 )
 
 // event is one line of the order log, a file other tools read.
@@ -98,7 +98,7 @@ func encodeEvent(e event) ([]byte, error) {
 ```go
 func TestEncodeEventPinsTheLineFormat(t *testing.T) {
 	at := time.Date(2026, 3, 1, 10, 0, 0, 0, time.FixedZone("CET", 3600))
-	got, err := encodeEvent(event{At: at, Kind: EventCancelled, Order: "ord-1"})
+	got, err := encodeEvent(event{At: at, Kind: EventKindCancelled, Order: "ord-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
