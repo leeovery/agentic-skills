@@ -51,7 +51,7 @@ func kindOf(err error) string {
 }
 ```
 
-- **`kindOf`'s order is deliberate:** the interrupt is read first, since an error can wrap both a refusal and the Ctrl-C that ended its question, and a run the person stopped reads as `interrupted`, never as the refusal it was asking about. Keep that order in a port.
+- **`kindOf`'s order is deliberate, and the exit code's own:** the interrupt is read first, since an error can wrap both a refusal and the Ctrl-C that ended its question, and a run the person stopped reads as `interrupted`, never as the refusal it was asking about. Any copy of `kindOf` reads them in this order, the same as the exit code, so the two never disagree.
 - **The words are the text mode's,** `messageOf` and `fixOf` shared, so the two modes never word one failure apart.
 
 ## One document per run
