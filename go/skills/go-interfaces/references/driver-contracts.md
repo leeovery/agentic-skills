@@ -65,7 +65,7 @@ Rule 4 keeps a vendor's names out of the domain. Where an outside service's mode
 - **The adapter's types and sentinels may be the domain's vocabulary:** a domain package imports the adapter for `Commit`, `PullRequest` and `ErrUnknownRef`.
 - **The adapter is still yours.** It's your package, its types are your structs, mapped from the wire at its edge, and no wire struct, raw response or vendor error type leaves it.
 - **The domain still reads through interfaces it declares,** so its tests fake those, and only `main` hands it the real client.
-- **The cost:** the domain can't compile without the adapter, and the import runs from the domain to it, the one exception to [go-architecture](../../go-architecture/SKILL.md)'s rule 8. The adapter imports nothing of the domain, so no cycle forms, and depguard's domain rule lists the adapter's path as allowed. Accept it only where the service is the subject, not one supplier among several.
+- **The cost:** the domain can't compile without the adapter, and the import runs from the domain to it, the one exception to [go-architecture](../../go-architecture/SKILL.md)'s rule 8. The adapter imports nothing of the domain, so no cycle forms, and the adapter's path is on none of depguard's deny lists, so the domain rule needs no change. Accept it only where the service is the subject, not one supplier among several.
 
 ## Checklist
 

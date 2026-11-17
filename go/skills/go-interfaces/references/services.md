@@ -81,7 +81,7 @@ func (c *Client) Refund(ctx context.Context, payment order.PaymentID, amount ord
 - **It holds an `*http.Client`, a base URL and a timeout,** each set by `main`, or by a test ([seams.md](seams.md)). `json` is `encoding/json/v2` ([Go 1.27](https://go.dev/doc/go1.27)).
 - **The wire shape stays unexported,** and the mapping to it is the adapter's whole job ([go-types](../../go-types/SKILL.md)).
 - **The vendor's not-found becomes the domain's sentinel;** every other failure is wrapped with the payment it was for ([go-errors' wrapping.md](../../go-errors/references/wrapping.md)). A failure worth retrying can come back as an error that answers `Retryable()` ([go-errors' matching.md](../../go-errors/references/matching.md)).
-- **The refund carries an idempotency key from the payment,** so the gateway refunds once however often it's asked. `Cancel` refunds before its writes, and a retry after a failed write asks again ([go-actions' operations.md](../../go-actions/references/operations.md#writes)).
+- **The refund carries an idempotency key from the payment,** so the gateway refunds once however often it's asked. That is why it keeps its timeout: an unknown outcome is safe to ask again ([go-concurrency's context.md](../../go-concurrency/references/context.md#deadlines-on-calls-that-leave-the-process)). `Cancel` refunds before its writes, and a retry after a failed write asks again ([go-actions' operations.md](../../go-actions/references/operations.md#writes)).
 - **The request carries `ctx`,** so a cancelled caller cancels the request.
 - **No decisions.** Whether an order may be refunded is `order`'s question. The adapter refunds.
 
