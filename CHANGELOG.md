@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-11-17
+
+✨ Added
+- Guide to `--json` output for command-line tools — one renderer for every error, one document per run, and pinned output models and error text.
+- Guide to writes across systems with no shared transaction — plan and check everything first, lease each write, never retry what may have run, and say exactly what landed.
+- Guide to tools that drive a terminal — stream detection in one file, a read that can't be cancelled, redraws under one lock, and restoring the terminal on signals.
+- Guide to tools that run other binaries — one runner, an adapter per binary that reads its stderr into errors, a fake runner and an opt-in integration suite.
+- Guide to error messages shown verbatim in a CLI — prose messages, a separate fix line, warnings in the result, and tests that pin the text.
+- Guide to driver contracts for config-chosen drivers, including an outside service whose types are the domain's own words.
+- Pattern for a lock that waiters can give up on when their context ends.
+- Pattern for enums over a vocabulary an outside system owns — unknown values are not refused, and each method states its fallback.
+- Testing guidance for what a `synctest` bubble can't drive (subprocesses, terminals, real I/O) and for programs that need a clock of their own.
+- Two new source guards — which packages each build-tag set links, and that starting the binary runs nothing.
+- Advice to run `go fix ./...` in its own commit before adopting the lint config on an existing module.
+
+🔧 Changed
+- The cobra CLI guide now routes every error through one renderer and turns off cobra's own error and usage printing.
+- Exit codes 3 to 125 are open to a tool's own outcomes, each documented in one table.
+- The cobra guide is now framed as optional, with the commands rules stated parser-neutrally.
+- Words that need reads, such as a name that may be a branch or a build, are passed to the operation as typed instead of being resolved at the command.
+- Architecture rules allow domain packages to import `format`.
+- Mode-dependent wording, such as time zones, now belongs to the renderer.
+- Architecture rules allow a guarded process-wide resource and an adapter that lends its types to the domain.
+- Quality gates now run under each build-tag set a module ships.
+- The lint config drops `unusedmethod`, adds `exhaustive` ignore-types, skips `forcetypeassert` in tests and widens the stream guidance in the forbidigo message to `*os.File`.
+- Table-test rules now let a row carry builder options that shape its input, and allow `TestSubject_Behaviour` names.
+- Interface rules allow wide completeness interfaces and exported interfaces that type exported struct fields.
+- Deadlines now follow whether a write can be de-duplicated, not whether it leaves the process.
+
 ## [0.2.5] - 2026-10-15
 
 ✨ Added
