@@ -2,7 +2,7 @@
 
 **A fixed set is a defined type and its constants. What the set means lives in methods on that type, so every caller asks it the same way.**
 
-Contents: string or iota · the zero value · the string shape · the int shape · behaviour · transitions · decoding · checklist.
+Contents: string or iota · the zero value · naming the members · the string shape · the int shape · behaviour · transitions · decoding · one type per vocabulary · checklist.
 
 ## String or iota
 
@@ -22,6 +22,25 @@ Zero is whatever an unset field holds, so choose what it means:
 - **For a string enum, the empty string is the unknown.** No constant names it, and `ParseX` refuses it.
 
 Never let zero be an arbitrary member, such as `StatusPending = iota`: every order nobody set reads as pending.
+
+## Naming the members
+
+Each constant starts with the type's name, `StatusPaid`, so a member says its set at the call and two sets in one package can't collide. Where the name's last word only says it's a set (`Status`, `Kind`, `Outcome`), the prefix may be the leading word alone:
+
+```go
+// PaymentStatus is where a payment is, as the gateway reports it.
+type PaymentStatus string
+
+const (
+	PaymentPending  PaymentStatus = "pending"
+	PaymentPaid     PaymentStatus = "paid"
+	PaymentDeclined PaymentStatus = "declined"
+)
+```
+
+- **One prefix per type,** every member taking it, and no other type in the package using it: `Payment` is `PaymentStatus`'s, so a `PaymentMethod` set takes its full name, `PaymentMethodCard`.
+- **The full name always passes.** Shorten only where it repeats a word every switch would read past: `PaymentStatusDeclined` says nothing `PaymentDeclined` doesn't.
+- **Never no prefix:** a bare `Paid` reads as a value of anything, and the next set in the package takes the name.
 
 ## The string shape
 
@@ -204,11 +223,41 @@ func (s RunStatus) Done() bool {
 
 An `iota` enum that must be written out gets `MarshalText` and `UnmarshalText` writing its name, never its number. Usually that's the sign it should have been a string.
 
+## One type per vocabulary
+
+exhaustive makes every switch on a type name every member. A type that holds two vocabularies, one `Outcome` with each command's outcomes as its constants, makes the refund's text say what it does for a shipment's outcome too. So each vocabulary is a type of its own:
+
+```go
+// RefundOutcome is what shop refund did.
+type RefundOutcome string
+
+const (
+	RefundIssued   RefundOutcome = "issued"
+	RefundDeclined RefundOutcome = "declined"
+)
+
+// RefundResult is what shop refund shows.
+type RefundResult struct {
+	Outcome RefundOutcome `json:"outcome"`
+}
+```
+
+A field that carries several vocabularies, one an open set others add to (an event's `kind`, written by many packages and switched over whole by none), is typed by none of them: a type with no constants of its own, each vocabulary's value converted into it.
+
+```go
+// Kind is what an event records. It has no constants: each package's events
+// are a type of their own, converted in, so no switch names every package's.
+type Kind string
+
+e := Event{Kind: Kind(refund.EventIssued)}
+```
+
 ## Checklist
 
 - [ ] String for anything stored or sent; `iota` only for memory.
 - [ ] Zero is the real default or an explicit unknown.
-- [ ] Constants prefixed with the type's name.
+- [ ] Constants prefixed with the type's name, or its leading word, one prefix per type.
+- [ ] One type per vocabulary; a field holding several is a type with no constants.
 - [ ] `ParseX`, a function listing the members, and `String` for an int.
 - [ ] Behaviour as methods whose `switch` names every member.
 - [ ] Values from outside pass through `ParseX`, in the mapper or `UnmarshalText`; a vocabulary an outside system owns decodes as it comes, each method's fallback stated.
