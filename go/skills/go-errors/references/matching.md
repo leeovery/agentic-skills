@@ -13,7 +13,7 @@ A condition callers act on, with nothing more to tell them: not found, already e
 var ErrNotFound = errors.New("not found")
 ```
 
-- Exported, with a comment saying when it's returned. It's API from the moment a caller matches it. A sentinel for a failure callers branch on is matched by its external tests too: a `package order_test` test is a caller, but not a reason on its own to export one.
+- Exported, with a comment saying when it's returned. It's API from the moment a caller matches it. A `package order_test` test is no reason to export one: a sentinel only the package itself branches on stays unexported, and its `export_test.go` gives the external tests an alias, `var ErrStale = errStale`, which no other package sees.
 - Short text: the wrap adds the input. `fmt.Errorf("order %s: %w", id, ErrNotFound)` prints `order o-1: not found`.
 - Returned wrapped, never bare, so every caller has to use `errors.Is`, and adding context later breaks nobody.
 - A failure nobody branches on stays a plain `fmt.Errorf`. A sentinel per failure is a list nobody reads.
@@ -145,7 +145,7 @@ type AuthError struct {
 }
 
 func (e *AuthError) Error() string {
-	return fmt.Sprintf("%v: %v", ErrNotLoggedIn, e.Err)
+	return fmt.Sprintf("%v: %v", e.Err, ErrNotLoggedIn)
 }
 
 // Fix is what the person does about it, which the renderer shows apart from
@@ -217,4 +217,4 @@ if e.Status != StatusShipped {
 }
 ```
 
-Check a message only for a property it must have, such as naming the bad field, never its whole text, unless the message is the program's output: then its test pins it exactly, beside the match ([errors-as-output.md](errors-as-output.md)). [go-testing](../../go-testing/SKILL.md) covers the rest.
+Check a message only for a property it must have, such as naming the bad field, never its whole text, unless the message is the program's output, or the error wraps nothing and has no type, so there is nothing else to match: then its test pins it exactly, beside the match where there is one ([errors-as-output.md](errors-as-output.md)). [go-testing](../../go-testing/SKILL.md) covers the rest.

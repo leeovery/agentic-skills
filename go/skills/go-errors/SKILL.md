@@ -10,10 +10,10 @@ An error is handled once: returned with what its cause lacks, matched by a calle
 ## Core rules
 
 1. **Handle an error once.** Return it wrapped, log it and carry on degraded, or match it and act on it. Never log it and return it. A CLI command that ends in one result has no logger, and carries on degraded with a warning in its result instead; a long-running or streaming command may log ([errors-as-output.md](references/errors-as-output.md)). *Logged and returned, it shows up once per layer, and the caller loses the choice of what it means.* No linter sees this one; review does.
-2. **Wrap with the operation and the input the cause lacks:** `fmt.Errorf("decode order %s: %w", id, err)`. Lower case, `%w` last, no "failed to" or "error", no closing punctuation. *Each layer adds a phrase, so the chain reads as a path: `cancel: refund pay-9: gateway answered 503`.* staticcheck's ST1005 checks the case and punctuation. Messages shown to people verbatim are prose instead, where `%w` may sit mid-message ([errors-as-output.md](references/errors-as-output.md)).
+2. **Wrap with the operation and the input the cause lacks:** `fmt.Errorf("decode order %s: %w", id, err)`. Lower case, what was asked first, then the cause, and a class's sentinel last where the error carries one; no "failed to" or "error", no closing punctuation. *Each layer adds a phrase, so the chain reads as a path: `cancel: refund pay-9: gateway answered 503`.* staticcheck's ST1005 checks the case and punctuation. Messages shown to people verbatim are prose instead, where `%w` may sit mid-message ([errors-as-output.md](references/errors-as-output.md)).
 3. **The call that leaves your code names what it worked on.** A decode, a parse or a request adds the file, the id or the URL; `os` errors already carry the path, `encoding/json`'s don't. Inside a package, a helper returns bare and its caller wraps once. *`invalid character '}'` with no file is useless, and a wrap at every frame reads `load: load: read: …`.*
-4. **Make an error matchable only when a caller branches on it,** by the table below: a plain message, an exported `var ErrX`, or a `type XError struct`. A sentinel for a failure callers branch on may be exported for its external tests to match as well. *Every sentinel and error type is API that callers come to depend on.* errname checks the `ErrX` and `XError` names.
-5. **Match with `errors.Is` and `errors.AsType[*XError]`** ([Go 1.26](https://go.dev/doc/go1.26)), never with `==`, a type assertion or the message's text. *Wrapping breaks `==` and assertions, and the text isn't API.* errorlint and modernize's `errorsastype` catch the old forms.
+4. **Make an error matchable only when a caller branches on it,** by the table below: a plain message, an exported `var ErrX`, or a `type XError struct`. Export it only where a caller outside the package branches on it: one only the package itself branches on stays `errX`, and the package's external tests match it through an alias in its `export_test.go` (`var ErrX = errX`), so nothing is exported for a test. *Every sentinel and error type is API that callers come to depend on.* errname checks the `ErrX` and `XError` names.
+5. **Match with `errors.Is` and `errors.AsType[*XError]`** ([Go 1.26](https://go.dev/doc/go1.26)), never with `==`, a type assertion or the message's text, but in a test that pins a whole message, the program's output or an error with no identity to match ([matching.md](references/matching.md#in-tests)). *Wrapping breaks `==` and assertions, and the text isn't API.* errorlint and modernize's `errorsastype` catch the old forms.
 6. **`%w` inside the module; translate at a boundary you own.** A store, a gateway client or a parser turns `sql.ErrNoRows`, `fs.ErrNotExist` or a 404 into your `ErrNotFound`. *Otherwise every caller imports the dependency to check, and replacing it breaks them all.*
 7. **Exported functions return `error`, and a literal `nil` on success,** never a `*XError`. *A nil `*XError` returned as `error` isn't nil, so `err != nil` holds for a call that succeeded.*
 8. **A question about an error is a behaviour interface,** declared by the code that asks: `interface{ error; Retryable() bool }`, asked with `errors.AsType`. *The asker gets its answer from any error that can give it, without knowing the types.*
@@ -75,7 +75,7 @@ func statusFor(err error) int {
 | The caller | Return |
 |---|---|
 | only reports it | `fmt.Errorf("op %s: %w", in, err)`, or `errors.New` for a new failure |
-| branches on which failure it was | an exported `var ErrX = errors.New("…")`, returned wrapped |
+| branches on which failure it was | an exported `var ErrX = errors.New("…")` where a caller outside the package branches on it, else `errX` with an `export_test.go` alias for its tests (rule 4); returned wrapped |
 | needs data from it | a `type XError struct` with a pointer receiver, matched as `*XError` |
 | asks one question of many error kinds | a behaviour interface it declares: `interface{ error; Retryable() bool }` |
 | gets several independent failures | `errors.Join(errs...)` |
@@ -85,7 +85,7 @@ func statusFor(err error) int {
 
 - ❌ `logger.Error("charge failed", "err", err); return err` → return it wrapped; whoever stops it logs it.
 - ❌ `fmt.Errorf("failed to load config: %v", err)` → `fmt.Errorf("load config: %w", err)`, as `os` already names the path.
-- ❌ `strings.Contains(err.Error(), "not found")` or `err == ErrNotFound` → `errors.Is(err, ErrNotFound)`.
+- ❌ `strings.Contains(err.Error(), "not found")` or `err == ErrNotFound` → `errors.Is(err, ErrNotFound)`; only a test pins a whole message, and only where rule 5 says.
 - ❌ `var e *XError; errors.As(err, &e)` → `e, ok := errors.AsType[*XError](err)`.
 - ❌ `return XError{…}` matched as `*XError`, or the reverse → build and match one form; Go 1.27's vet flags `%w` given a `*E` whose `E` implements `error` ([Go 1.27](https://go.dev/doc/go1.27)).
 - ❌ `func Validate(o Order) *ValidationError` → return `error`.
