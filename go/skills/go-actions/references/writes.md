@@ -85,16 +85,17 @@ Every precondition is checked in `Plan`, before the first write, for every targe
 
 Each write is a compare-and-swap on what `Plan` read: `If-Match` with the version an API gave, `git push --force-with-lease=<ref>:<sha>`, an update `WHERE version = ?`. Something that changed the target since the plan read it makes the write refuse, rather than overwrite a change nobody saw.
 
-- **A refused lease changed nothing,** so it's a sentinel the adapter translates to (`ErrLeaseRefused`), and the next step is plain: read again and plan again.
+- **A lease refused on the write's first attempt changed nothing,** so it's a sentinel the adapter translates to (`ErrLeaseRefused`), and the next step is plain: read again and plan again. A lease refused on a retry may be the write's own first attempt, which landed, so a leased write is never retried blind (below).
 - **A create leases on nothing being there,** so two runs at once can't both make it.
 
 ## Never retry what may have run
 
 A write that timed out, got a 5xx, or lost its connection after the request went may have landed. Retrying it can make it land twice, and a leased retry reads its own first write as someone else's change.
 
-- **The adapter never retries a write the other side can't de-duplicate.** It retries reads, which are safe, and a write that carries an idempotency key.
+- **The adapter never retries a write the other side can't de-duplicate.** It retries reads, which are safe, a write idempotent in itself that takes no lease (closing a pull request), which lands once however often it's sent, and a write that carries an idempotency key.
+- **A leased write whose outcome is unknown is never retried blind,** since its own first write, landed, would refuse the retry's lease. The caller reads what's there, and the write's own value there means it landed. `Replace` is one: `Apply` reports it as "may have landed", and a fresh plan reads the storefront, finds its own list there, and leaves it.
 - **It tells "never ran" from "may have run":** a request refused before it was sent, or a binary that never started, changed nothing; anything after the request left is unknown. The two are separate sentinels, and the edge words the second as "may have landed: look at <where>".
-- **The person's interrupt bounds a write the storefront can't de-duplicate,** not a timeout of its own, since a timeout would turn a known outcome into an unknown one. A write that carries an idempotency key keeps its deadline and may be retried, and a server or worker makes its writes so ([go-concurrency's context.md](../../go-concurrency/references/context.md#deadlines-on-calls-that-leave-the-process)).
+- **The person's interrupt bounds a write the storefront can't de-duplicate,** not a timeout of its own, since a timeout would turn a known outcome into an unknown one. A write that carries an idempotency key, or one idempotent in itself, keeps its deadline and may be retried, the latter where it takes no lease, and a server or worker makes each write one or the other ([go-concurrency's context.md](../../go-concurrency/references/context.md#deadlines-on-calls-that-leave-the-process)).
 
 ## Saying what landed
 
@@ -167,6 +168,6 @@ The split gives `--dry-run` for nothing: it is the plan, shown, with every check
 - [ ] Every read and every check in the plan, before the first write.
 - [ ] The plan is a value the edge can show; apply takes it back.
 - [ ] Each write leased on what the plan read; a refused lease is its own sentinel.
-- [ ] No write retried but one with an idempotency key; "never ran" told from "may have run".
+- [ ] No write retried but one with an idempotency key, or one idempotent in itself that takes no lease; a leased write's unknown outcome read, never retried; "never ran" told from "may have run".
 - [ ] `ctx` checked before each write.
 - [ ] A failure partway names what landed, what may have, and what wasn't tried, pinned by a test.
