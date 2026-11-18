@@ -73,7 +73,7 @@ linters:
 
     revive:
       rules:
-        - name: flag-parameter       # Send(m, true) says nothing at the call
+        - name: flag-parameter       # Send(m, true) says nothing at the call (gates.md: what it misses)
         - name: argument-limit       # past five, take a struct
           arguments: [5]
         - name: exported             # every exported name documented, and none stutters
@@ -183,7 +183,7 @@ linters:
       - path: _test\.go$
         linters: [forcetypeassert]
       # thelper misfires on a subtest body handed to a runner of your own and
-      # on a table row's setup taking t: exclude each by its source, naming the
-      # runner or the field (gates.md). A finding only one build-tag set has
+      # on a table row's field taking t, a builder or the act: exclude each by
+      # its source, naming the runner or the fields (gates.md). A finding only one build-tag set has
       # moves into the tagged file first; where it can't move, it's excluded
       # here by file and text, never nolinted (gates.md).

@@ -6,7 +6,7 @@ Contents: the shape · what the cause already says · where to wrap · wrap or t
 
 ## The shape
 
-`"<operation> <input>: %w"`, lower case, with the cause last. The chain then reads left to right, newest to oldest:
+`"<operation> <input>: %w"`, lower case: what was asked first, then the cause, then a class's sentinel where the error carries one (below). The chain then reads as a path, left to right, newest to oldest, its class last:
 
 ```
 cancel: order o-1: not found
@@ -22,6 +22,8 @@ refund pay-9: Post "https://gateway.example/refunds": context deadline exceeded
 | `"could not decode: %w"` | `"decode order %s: %w"` | The decoder doesn't know which order it was reading. |
 
 Acronyms and names keep their case inside the message: `"decode JSON body: %w"`.
+
+An error that carries a class beside its cause wraps both: `fmt.Errorf("%w: %w", err, ErrPushNotRun)` reads `push origin: exit status 128: push not run`, and `errors.Is` matches the cause and the sentinel alike. A sentinel first, `push not run: <cause>`, reads backwards, the class before the path that led to it.
 
 ## What the cause already says
 

@@ -91,7 +91,7 @@ func NewPoller(cfg Config) *Poller {
 ```
 
 - **`cmp.Or`** returns its first non-zero argument, so each default is one line.
-- **When zero is a real setting** (no retries), it can't also mean "default": invert the field (`NoRetry bool`), or make it a pointer.
+- **When zero is a real setting,** it can't also mean "default". Name a new field so its zero is the default, inverting it (`NoRetry bool`), else make it a pointer. A field that already exists, where 0 meant something before the default came (a retry budget of 0, no retries; a timeout of 0, a call already expired, which gives up at once), would break every caller that passed 0 once 0 means "default"; give below zero what 0 meant before, so the old setting stays reachable with no field more. `Timeout: -1` passes through `cmp.Or` above to `context.WithTimeout` and gives up at once; `Retries: -1` passes through too, and the code reads it as none, `retries := max(cmp.Or(cfg.Retries, 3), 0)`, so a loop of `attempt <= retries` makes one attempt.
 - **Functional options** (`NewPoller(WithInterval(d))`) are for a library many modules import, where most callers set nothing and new settings keep arriving. In an application, a `Config` is less code and its zero value is visible.
 - **A `Config` is read once,** in the constructor. The `Poller` it builds is a copy, so changing the `Config` afterwards changes nothing.
 
@@ -141,9 +141,75 @@ func (e Email) IsZero() bool { return e.addr == "" }
 - **`NewX`** builds from parts that are already typed; **`ParseX`** reads from text. Both validate.
 - **Value receivers, returning new values:** `total, err := a.Add(b)`. Nothing changes under a holder, and a copy is safe to share. [money.go](money.go) is the worked example.
 - **The zero value still exists.** `Email{}` can be declared anywhere, so give the type an `IsZero` and treat zero as "not set". `omitzero` uses the same method.
-- **Keep it comparable:** no slices or maps among its fields, and `==` and map keys work.
+- **A typed id's zero means unknown,** so a malformed id must never become one unseen. A reader of one reference fails on a malformed id; a reader of a list may read one malformed entry as zero only where its callers read zero as unknown, never as a match or a miss.
+- **Keep it comparable:** no slices or maps among its fields, and `==` and map keys work, but for an identity that ignores case (below).
 - **A text form round-trips.** `MarshalText` and `UnmarshalText` (calling `ParseX`) make it decode and validate in one step, in JSON, config files and flags.
 - **Not for a value with no rules.** A struct around one unconstrained string is ceremony: a named type does the job.
+
+### An identity that ignores case
+
+A value whose identity ignores case but which is shown and sent as written, as a hosting service's repo name is, can't be comparable: no `==` compares case aside and keeps the case written. So its type refuses `==` and map keys at compile time, and every comparison and key goes through its methods:
+
+```go
+// Repo names a repository as "owner/name". The hosting service reads it case
+// aside but shows it as written, so Repo refuses ==: compare with SameAs, and
+// key a map by Key.
+type Repo struct {
+	_    [0]func() // refuses == and map keys; first, so it costs no space
+	name string
+}
+
+// ParseRepo reads "owner/name", each part ASCII letters, digits, '.', '_' or '-'.
+func ParseRepo(s string) (Repo, error) {
+	owner, name, ok := strings.Cut(s, "/")
+	if !ok || !repoPart(owner) || !repoPart(name) {
+		return Repo{}, fmt.Errorf("parse repo %q: want owner/name", s)
+	}
+	return Repo{name: s}, nil
+}
+
+func repoPart(s string) bool {
+	return s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") == ""
+}
+
+// String is the repo as written.
+func (r Repo) String() string { return r.name }
+
+// IsZero reports whether r is unknown.
+func (r Repo) IsZero() bool { return r.name == "" }
+
+// SameAs reports whether r and o name one repo, case aside. A zero is
+// unknown, so it is the same as no repo, itself included.
+func (r Repo) SameAs(o Repo) bool {
+	return !r.IsZero() && !o.IsZero() && strings.EqualFold(r.name, o.name)
+}
+
+// Key is r's map key, the same for every spelling SameAs takes as r. A
+// zero's key is "", which every zero shares: check IsZero first.
+func (r Repo) Key() string { return strings.ToLower(r.name) }
+
+// MarshalText writes the repo as written, a zero as "".
+func (r Repo) MarshalText() ([]byte, error) { return []byte(r.name), nil }
+
+// UnmarshalText reads a repo through ParseRepo, and "" as the zero.
+func (r *Repo) UnmarshalText(b []byte) error {
+	if len(b) == 0 {
+		*r = Repo{}
+		return nil
+	}
+	p, err := ParseRepo(string(b))
+	if err != nil {
+		return err
+	}
+	*r = p
+	return nil
+}
+```
+
+- **`a == b` and `map[Repo]int` don't compile:** "struct containing [0]func() cannot be compared", "invalid map key type". The zero-length array goes first, where it adds no bytes, so a `Repo` is a string's size; last, a zero-size field is padded, and the struct grows from 16 bytes to 24.
+- **`SameAs` and `Key` agree on every parsed repo** because `ParseRepo` admits ASCII alone, where `strings.EqualFold` and `strings.ToLower` fold alike.
+- **Its zero is unknown, never a repo:** `SameAs` holds of no repo, another zero included, so a caller checks `IsZero` before reading a false `SameAs` as another repo, as it does before keying a map, since every zero shares one key.
+- **It crosses JSON and config** by its text form, as written, its zero as `""`, which reads back as the zero.
 
 ## Aliasing
 
