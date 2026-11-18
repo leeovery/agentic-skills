@@ -8,7 +8,7 @@ Contents: when a table fits · row shape · errors · names · comparing without
 
 | Fits a table | Wants its own test |
 |---|---|
-| The same call, the same checks, different values, a builder option's among them: a fake set to answer an error is a row's data | A different kind of arrangement: another fake, another collaborator; an `edit` that swaps a collaborator is a test of its own |
+| The same check on different values (a builder option's among them, as a fake set to answer an error), or on several acts a row names (`run`) | A different kind of arrangement: another fake, another collaborator; an `edit` that swaps a collaborator is a test of its own |
 | Rows a reader can scan as data | A row that needs a `check` func or a `wantCall bool` |
 | Adding a case means adding a line | Adding a case means adding an `if` in the loop |
 
@@ -45,7 +45,8 @@ func TestParseStatus(t *testing.T) {
 - Name the fields in each row (`{name: …, in: …}`) once a row is long, or when two fields share a type and could be swapped unseen.
 - The failure message prints the input, even though the subtest name is in the output too: the name says which case, the message says what happened.
 - Never identify a row by its index.
-- A row may carry a builder option that shapes its input, `edit func(*world)`, applied to a fresh world the row builds: it's data in the shape of a function, and a fake set to answer an error is such data too. An `edit` that swaps a collaborator for another, a function that asserts, or a flag that picks which check runs, is a test of its own. An option that needs `t` to build its input (`setup func(t *testing.T) store`, for a `t.TempDir()`) takes it and calls no `t.Helper()`, so a failure in it stays on its own line; thelper reads it as a helper, and is excluded for it by its source ([go-quality's gates.md](../../go-quality/references/gates.md#what-the-drop-ins-linters-expect)).
+- **A row's function fields are of three kinds and no other:** the act under test, named for it (`run`, `read`, `show`, `ask`, `write`), where rows put several acts to one check, as each write refusing the same way; a builder option that shapes its input (`edit func(*world)`); and a builder that makes its fake, fixture or want from its `t` (`make func(t *testing.T) store`, `want func(t *testing.T) string` for a path under `t.TempDir()`). A field that asserts, picks which check runs, or swaps a collaborator may not: a branch on it is a check in disguise, and such a row is a test of its own.
+- An `edit` is applied to a fresh world the row builds: it's data in the shape of a function, and a fake set to answer an error is such data too. A builder that needs `t` (`make`, for a `t.TempDir()`) takes it and calls no `t.Helper()`, so a failure in it stays on its own line; thelper reads it as a helper, and is excluded for it by its source ([go-quality's gates.md](../../go-quality/references/gates.md#what-the-drop-ins-linters-expect)).
 
 ## Errors get their own table
 
@@ -73,13 +74,14 @@ func TestParseStatusRejects(t *testing.T) {
 }
 ```
 
-Match the error by identity or type, never its text. To check that a message names the bad input, check for the input, not the whole sentence. Where the message is the program's output, shown to people as it stands, its test pins the whole text beside the match ([go-errors' errors-as-output.md](../../go-errors/references/errors-as-output.md)).
+Match the error by identity or type, never its text. To check that a message names the bad input, check for the input, not the whole sentence. Where the message is the program's output, shown to people as it stands, its test pins the whole text beside the match ([go-errors' errors-as-output.md](../../go-errors/references/errors-as-output.md)), and, where it is a command's failure, its class too, the kind or exit code the edge maps it to. An error that wraps nothing and has no type has no identity to match, so the test pins its whole message exactly: the one other case where the text is the match.
 
 ## Names
 
 - **Tests:** `Test` + subject + behaviour, as one sentence: `TestCancelRefundsAPaidOrder`, `TestLoadDefaultsWithoutAFile`. Not `TestCancel2`, `TestCancel_Error` or `TestCancelHappyPath`.
 - **An underscore may mark the subject:** `TestCancel_RefusesAShippedOrder` states its behaviour as fully, and `go test -run 'TestCancel_'` runs exactly the subject's tests. `TestCancel_Error` fails for its suffix, which states no behaviour, as `_JSON` or `_Fails` would, not for its underscore.
 - **Rows:** lower-case phrases that finish the sentence: `TestParseStatusRejects` / `"a trailing space"`.
+- **Tables:** a test's own table is `tests`, or `cases` beside another, so the row guard reads them all. A set of variants several tests share, at the package's level (`eras`, `modes`), keeps a name of its own. A row runs under `t.Run` itself, or through a runner of the package's own that calls `t.Run` on its own `t`, as `forEachEra(t, tt.name, func(t *testing.T, e era) {…})` runs the row as a subtest named for it, with each era a subtest inside, so the row runs alone with `-run` and no name holds a `/`.
 - `t.Run` turns spaces into underscores, so one row runs alone with `go test -run 'TestParseStatusRejects/a_trailing_space'`. Keep `/` out of names: it separates subtest levels.
 - **Files:** `order_test.go` tests `order.go`. Use `package order` to test internals and `package order_test` to test only the exported API, or to break an import cycle.
 
@@ -93,7 +95,7 @@ Match the error by identity or type, never its text. To check that a message nam
 | `time.Time` | `got.Equal(want)` | `==` also compares the location and the monotonic reading |
 | Floats | `math.Abs(got-want) < tolerance` | Money is integer cents, so it never needs this |
 | Nested data with slices or maps | `reflect.DeepEqual`, printing both with `%+v` | It compares unexported fields, and nil and empty slices differ |
-| Errors | `errors.Is`, `errors.AsType` | Never `err.Error()`, but to pin a message that is the program's output |
+| Errors | `errors.Is`, `errors.AsType` | Never `err.Error()`, but to pin a message that is the program's output, or the whole message of an error that wraps nothing and has no type |
 
 When a struct holds one slice, compare the comparable fields with `==` and the slice with `slices.Equal`: the message then says which part differs.
 

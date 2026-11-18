@@ -2,7 +2,7 @@
 
 **Code that waits is tested inside a `synctest` bubble, where the clock is fake and moves only when every goroutine in the bubble is blocked.**
 
-Contents: the bubble · a worker on a ticker · a timeout · stopping · HTTP in a bubble · what blocks durably · what a bubble can't drive · rules inside a bubble · when to inject `now` instead · when the program needs its own clock.
+Contents: the bubble · a worker on a ticker · a timeout · stopping · HTTP in a bubble · what blocks durably · what a bubble can't drive · rules inside a bubble · counting a bubble's goroutines · when to inject `now` instead · when the program needs its own clock.
 
 ## The bubble
 
@@ -95,6 +95,8 @@ func TestPollerGivesUpOnASlowSettlement(t *testing.T) {
 
 The test blocks on `gaveUp`, the poller on its ticker and then its fake, so time jumps to the first tick and on to the timeout.
 
+A call that gives up at once, as one under a timeout below zero does, asserts that no time passed once it started. For the Poller built through `NewPoller(Config{Payments: payments, Timeout: -1})`, the settlement starts at the first tick and gives up there, so `time.Since(start) == time.Minute`: a regression to the default timeout then fails on the exact duration, `1m10s`, where a check of the error alone would pass after it. Only that path shows it, since the default is `NewPoller`'s to fill ([go-types' named-types.md](../../go-types/references/named-types.md#config-structs)); a Poller built as `newPoller` builds it, a struct literal, takes no default, so with its `Timeout` set to -1 it gives up at `1m0s` whatever `NewPoller` does, and can't show the regression.
+
 ## Stopping
 
 ```go
@@ -163,9 +165,12 @@ Some waits are never durable, so a bubble's clock never moves past them:
 
 - **Real I/O:** a file, a socket, a pipe to anything outside the test.
 - **A subprocess:** the wait for a child to exit, and every read of its output.
-- **A terminal:** a read of stdin, a reply to a query, a full-screen program's input and renderer loops.
+- **A terminal:** a read of stdin, a reply to a query, a full-screen program's input loop.
+- **A channel made outside any bubble,** a package-level semaphore among them, or a `sync.Mutex` wherever it was made: a goroutine of the bubble waiting its turn on one is blocked non-durably, so the clock never moves while it waits. Test the ordering by a handshake instead, a context whose `Done` reports once its caller is queued; a claim that a timeout starts only once the turn comes can't be told apart in a bubble, so that test stays on the real clock, with no sleep.
 
-Fake the thing first: a fake runner in place of the subprocess ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)), an `io.Pipe` made in the bubble in place of the terminal, which blocks on the bubble's channels where an `os.Pipe` read is real I/O. Where code must wait across one of these and no in-memory double exists, inject its wait (`wait func(context.Context, time.Duration) error`) and say why beside the field; a test passes one that returns at once.
+Fake the thing first: a fake runner in place of the subprocess ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)), an `io.Pipe` made in the bubble in place of the terminal, which blocks on the bubble's channels where an `os.Pipe` read is real I/O. Where code must wait across one of these and no in-memory double exists, inject its wait (`wait func(context.Context, time.Duration) error`) and say why beside the field; a test passes one that returns at once. Once a wait runs in a bubble, a field that exists only so a test needn't wait (an injected `Wait`, a backoff function, a bound) goes from the API; the product's own clocks stay injected, as below.
+
+A program whose renderer ticks, a TUI framework's frame loop, is none of these: its ticker is made in the bubble and blocks durably, so `synctest.Wait` returns. But it always holds a timer, so while the test function runs the clock keeps moving: a wait for something that never comes runs on to its bound, rather than ending in the deadlock panic. Once the test function returns, the clock stops, and a goroutine left blocked, the ticking program among them, still panics, as the leak check below relies on. So every wait on such a program keeps a bound on the bubble's clock, its polls are `synctest.Sleep`s, never a bare `time.Sleep` racing the program's own timer, and the program is stopped before the test returns.
 
 ## Rules inside a bubble
 
@@ -175,11 +180,15 @@ Fake the thing first: a fake runner in place of the subprocess ([go-errors' shel
 - A goroutine still blocked when the function returns fails the run with "deadlock: main bubble goroutine has exited but blocked goroutines remain". That is the leak check: a worker whose context comes from `t.Context()` stops by itself at the end, while one on a context that is never cancelled, or blocked on a channel nobody will send to, fails it.
 - The failure is a panic, so it ends the whole test binary. Run the one test with `-run` to see the stacks clearly.
 
+## Counting a bubble's goroutines
+
+A leak test that counts goroutines once its program has ended can't use `runtime.NumGoroutine`: it counts the whole process, while `synctest.Wait` settles only the bubble, so another test running beside it changes the count. Count the bubble's own: `runtime.Stack(buf, true)` heads each goroutine of a bubble with `synctest bubble N`, read whole by growing `buf` until `Stack` returns less than its length, so a dump is never cut short. Read the caller's own N from its own header, and count the headers bearing it. Panic where no mark is found, so a runtime that stops marking never has the test compare none with none. Counting its bubble alone, such a test runs in parallel.
+
 ## When to inject `now` instead
 
 The bubble's clock starts on 1 January 2000. A decision that turns on the calendar (an invoice overdue at the end of a month, a renewal on 29 February, the hour a clock change skips) needs a chosen instant: inject `now func() time.Time`, as [go-interfaces](../../go-interfaces/SKILL.md) describes, and pass the instant the case is about. Waits, timers, tickers and timeouts stay with synctest.
 
-Inside a bubble, build instants from `time.Now()` (`time.Now().Add(-48 * time.Hour)`) rather than from fixed dates, so the case means the same whatever the bubble's epoch.
+Inside a bubble, build instants from `time.Now()` (`time.Now().Add(-48 * time.Hour)`) rather than from fixed dates, so the case means the same whatever the bubble's epoch. A fixture dated at an absolute moment, which the bubble's 2000 would place decades in its future, moves the bubble's clock to it first: `time.Sleep(time.Until(at))`.
 
 ## When the program needs its own clock
 

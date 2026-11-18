@@ -80,11 +80,19 @@ When `TestMain` returns, the test binary exits with the code `m.Run` returned. T
 // blocked or the real settings file changed, even when every test passed;
 // otherwise the run ends as its tests did.
 func Main(m *testing.M) {
+	machine = os.Environ() // before isolate changes it
 	if err := guard(m); err != nil {
 		fmt.Fprintln(os.Stderr, "testguard:", err)
 		os.Exit(1)
 	}
 }
+
+// machine is the environment the run had before the guard isolated it.
+var machine []string
+
+// Machine is the environment before isolation, for a test that reaches the
+// machine on purpose, as one building the binary with the Go toolchain does.
+func Machine() []string { return slices.Clone(machine) }
 
 func guard(m *testing.M) error {
 	realHome, err := os.UserHomeDir()
@@ -181,6 +189,8 @@ func fingerprint(path string) string {
 - **It sees only `http.DefaultTransport`** and transports cloned from it after `Main` ran. A transport built from scratch dials past it, so code clones the default rather than writing `&http.Transport{…}`.
 - **It turns proxies off,** in the transport and in the environment. With `HTTPS_PROXY` set to a proxy on loopback, as a sandbox or a CI runner behind a proxy has, the transport dials only the proxy, the guard allows that, and the proxy carries the request off the machine. Clearing the variables keeps a program the tests run from following them too.
 - **Programs the code runs** can be guarded the same way: a directory of stubs first on `PATH`, each recording that it ran, and the guard failing the run if any did.
+- **An integration suite behind a build tag** (`//go:build integration`), running the real tools in an environment it sets itself, is built without the guard: the guard's `TestMain` file carries `//go:build !integration`, so the stubs and the cleared variables never stand between the suite and the tools it means to run.
+- **A test that reaches the machine on purpose,** as one building the binary with the Go toolchain and its caches does, reads the environment the guard kept before it isolated the run, through `testguard.Machine()` above, never `os.Environ()`, which is the isolated one.
 - **Hold the guard in place with a source guard:** a test that parses the module and fails if a package with tests lacks this `TestMain`, or if anything outside `testguard` changes the environment. [go-quality](../../go-quality/SKILL.md) covers writing one.
 - **The guard is the one package that reads, changes and exits the process,** so the lint rules that forbid that elsewhere exclude its path, and nothing else's:
 
