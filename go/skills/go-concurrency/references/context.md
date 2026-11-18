@@ -62,10 +62,11 @@ noctx flags `http.Get`, `http.NewRequest`, `net.Dial`, `exec.Command` and the ot
 Writes are decided by whether the other side can de-duplicate them:
 
 - **A write that carries an idempotency key keeps its deadline,** anywhere, and may be retried: a second attempt after an unknown outcome lands once. The gateway's refund is one ([go-interfaces' services.md](../../go-interfaces/references/services.md)).
-- **A write the other side can't de-duplicate,** a push or a workflow dispatch, whose outcome a timeout would leave unknown, takes no timeout of its own in a program a person runs and can interrupt: the interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
-- **A server or a worker** has no one to interrupt it, so it makes such a write idempotent, with a key or a check of what's there before it, and keeps the deadline.
+- **A write idempotent in itself keeps its deadline,** and may be retried, as a read does. Closing a pull request is one: whether a close that timed out landed, a later read of the pull request tells.
+- **A write the other side can't de-duplicate,** a push, a workflow dispatch or a comment posted, whose outcome a timeout would leave unknown, takes no timeout of its own in a program a person runs and can interrupt: the interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
+- **A server or a worker** has no one to interrupt it, so it makes each such write keyed or idempotent in itself, and keeps the deadline.
 
-An adapter whose calls include a write the other side can't de-duplicate, all through one function ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md#an-adapter-per-binary)), keeps both rules by taking each call's kind as a parameter, never fixing one bound inside it: a read gets its deadline, and the write gets none, so the interrupt bounds it. The kind is an enum whose zero is refused, never a duration whose zero means "no deadline", so a call that forgets its kind fails at once rather than running unbounded. An adapter that only reads keeps one deadline for every call, as the `Client` above does.
+An adapter whose calls include a write the other side can't de-duplicate, all through one function ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md#an-adapter-per-binary)), keeps both rules by taking each call's kind as a parameter, never fixing one bound inside it: a read, a keyed write or a write idempotent in itself gets its deadline, and the write the other side can't de-duplicate gets none, so the interrupt bounds it. The kind is an enum whose zero is refused, never a duration whose zero means "no deadline", so a call that forgets its kind fails at once rather than running unbounded. An adapter that only reads keeps one deadline for every call, as the `Client` above does.
 
 ```go
 // callKind is how a call to the deploy CLI is bounded. The zero value is
@@ -73,21 +74,21 @@ An adapter whose calls include a write the other side can't de-duplicate, all th
 type callKind int
 
 const (
-	callKindUnknown      callKind = iota
-	callKindRead                  // bounded by readBound
-	callKindUnkeyedWrite          // can't be de-duplicated: bounded by the interrupt alone
+	callKindUnknown   callKind = iota
+	callKindBounded            // a read, a keyed write, or a write idempotent in itself: bounded by callBound
+	callKindUnbounded          // a write that can't be de-duplicated: bounded by the interrupt alone
 )
 
-const readBound = 30 * time.Second
+const callBound = 30 * time.Second
 
 // call is the one runner of the deploy CLI.
 func (c *Client) call(ctx context.Context, kind callKind, args ...string) ([]byte, error) {
 	switch kind {
-	case callKindRead:
+	case callKindBounded:
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, readBound)
+		ctx, cancel = context.WithTimeout(ctx, callBound)
 		defer cancel()
-	case callKindUnkeyedWrite:
+	case callKindUnbounded:
 		// No deadline of its own: a timeout would leave unknown whether it
 		// started. ctx ends on the person's interrupt.
 	case callKindUnknown:
@@ -102,15 +103,15 @@ func (c *Client) call(ctx context.Context, kind callKind, args ...string) ([]byt
 	return res.Stdout, nil
 }
 
-// Releases lists an app's releases: a read, so it gives up after readBound.
+// Releases lists an app's releases: a read, so it gives up after callBound.
 func (c *Client) Releases(ctx context.Context, app string) ([]byte, error) {
-	return c.call(ctx, callKindRead, "release", "list", app)
+	return c.call(ctx, callKindBounded, "release", "list", app)
 }
 
 // StartRelease dispatches the release workflow, which takes no idempotency
 // key: a second dispatch starts a second release.
 func (c *Client) StartRelease(ctx context.Context, app, version string) ([]byte, error) {
-	return c.call(ctx, callKindUnkeyedWrite, "release", "start", app, version)
+	return c.call(ctx, callKindUnbounded, "release", "start", app, version)
 }
 ```
 
