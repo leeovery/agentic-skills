@@ -154,8 +154,9 @@ go tool govulncheck ./...
 - **contextcheck** misfires where a function that has a `ctx` calls a constructor that takes none: `run`, or a test helper, calling a cobra `NewRootCommand(deps)`. Nolint that one line with the reason: `//nolint:contextcheck // NewRootCommand takes no context; the command gets ctx from ExecuteContext`.
 - **containedctx** reports every context kept in a struct. The one exception, a long-lived worker holding its own lifetime, carries a nolint saying so where the field is declared.
 - **forbidigo** reports `os.Exit` in a `TestMain` too. Since Go 1.15 a `TestMain` that returns has its result passed to `os.Exit` for it, so call `m.Run()` and return.
+- **revive's `flag-parameter`** reports a bool parameter that steers an `if`, and misses any other use of one: passed on to another function (`func Send(m Message, urgent bool) { deliver(m, urgent) }`), steering a `switch`, or read in an expression. A review checks those by hand.
 - **revive's `exported`** wants a doc comment on every exported name in `internal/` as well: the package boundary is still an API to the rest of the module.
-- **thelper** reads every function taking a `*testing.T` as a helper, unless it's handed straight to `t.Run`. Two kinds aren't helpers, and `t.Helper()` in them would move a failure off its own line: a subtest body handed to a runner of your own, which calls `t.Run` for it (`forEachStore(t, func(t *testing.T, s store) {…})`), and a table row's builder option that needs `t` to build its input (`setup: func(t *testing.T) store`, for a `t.TempDir()`). Exclude each by its source, naming the runner or the field, so a real helper is still checked:
+- **thelper** reads every function taking a `*testing.T` as a helper, unless it's handed straight to `t.Run`. Two kinds aren't helpers, and `t.Helper()` in them would move a failure off its own line: a subtest body handed to a runner of your own, which calls `t.Run` for it under the row's name (`forEachStore(t, tt.name, func(t *testing.T, s store) {…})`), and a table row's field that takes `t`, a builder making its fake, fixture or want (`make: func(t *testing.T) store`, for a `t.TempDir()`) or the act under test where it needs one (`run`). Exclude each by its source, naming the runner or the fields, so a real helper is still checked. The fields are named in the rule's comment. A `want` takes `t` alone and returns its want, so a `want` check is never let through; the other keys, `run`, `set`, `seed`, `make` and `replies`, are held to their names by review, since the pattern lets a `(t, got)` signature through under them:
 
   ```yaml
   linters:
@@ -163,12 +164,16 @@ go tool govulncheck ./...
       rules:
         # forEachStore runs its body as a subtest: the body isn't a helper.
         - path: _test\.go$
-          source: '\bforEachStore\(t, func\(t \*testing\.T\b'
+          source: '\bforEachStore\(t, .+, func\(t \*testing\.T\b'
           linters: [thelper]
-        # A row's setup builds its input; a failure in it belongs on its line.
+        # A row's fields that take t: the act under test (run) and the
+        # builders of its fakes, fixtures and want (replies, seed, make, set, want).
+        # The act's other names (read, show, ask, write) take no t; one that
+        # does joins by its key. want takes t alone and returns its want, so
+        # want: func(t, got) and a want with no result, both checks, never pass.
         - path: _test\.go$
-          source: '\bsetup: func\(t \*testing\.T\b'
+          source: '\b(replies|seed|run|make|set):\s+func\(t \*testing\.T\b|\bwant:\s+func\(t \*testing\.T\) [^{ ]'
           linters: [thelper]
   ```
 
-  A source rule matches the line thelper reports, where the `func` keyword is, so it misses a call split across lines (`forEachStore(t,` then `func(t *testing.T, …)` on the next): keep each such call on one line.
+  `:\s+func` lets a field gofmt aligns beside its neighbours through, and `.+` a row's name holding a comma (`fmt.Sprintf("%s-%d", tt.name, tt.n)`). A source rule matches the line thelper reports, where the `func` keyword is, so it misses a call split across lines (`forEachStore(t, tt.name,` then `func(t *testing.T, …)` on the next): keep each such call on one line.
