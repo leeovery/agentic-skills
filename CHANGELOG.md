@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-11-20
+
+✨ Added
+- Guidance for ids that ignore case but are shown as written, such as repo names — use a struct that refuses `==` and compare and key it through methods.
+- Guidance on writes that are idempotent in themselves, such as closing a pull request — they keep their deadline and may be retried like a read.
+- Guidance that a leased write with an unknown outcome is never retried blind — read what's there, and the write's own value means it landed.
+- Guidance on counting a test bubble's own goroutines in leak tests, so parallel tests don't skew the count.
+- Guidance on `synctest` limits — channels made outside a bubble, a renderer's ticking, and fixtures dated far from the bubble's clock.
+- `testguard.Machine()` gives tests that reach the machine on purpose the pre-isolation environment, and integration suites behind a build tag are built without the guard.
+- Guidance for adding a default to a config field where 0 already meant something — give values below zero the old meaning, such as `Timeout: -1`.
+- Guidance for changing a type across consumer interfaces, such as a `string` id becoming a typed id, in one change or step by step.
+- Guidance that a typed id's zero means unknown, and a malformed id must never silently become one.
+- The `flag-parameter` lint rule's blind spots are documented, such as a bool passed on to another function, so review knows to check them.
+
+🔧 Changed
+- The table-row source guard now accepts rows run through a package's own `t.Run` runner, and flags rows that run a binary, a CLI entry or a fake inline.
+- Table rows may carry function fields only for the act under test, input builders, and builders of fakes, fixtures or wants, and the `thelper` exclusion rules are updated to match.
+- Error wrapping now puts what was asked first and a class's sentinel last, such as `push origin: exit status 128: push not run`.
+- Sentinel errors are exported only where a caller outside the package branches on them — others stay unexported, with an `export_test.go` alias for external tests.
+- Tests may pin the whole message of an error that wraps nothing and has no type, since there is no identity to match.
+- Adapter guidance renames its call kinds to bounded and unbounded, with keyed and self-idempotent writes counted as bounded.
+
 ## [0.2.7] - 2026-11-17
 
 ✨ Added
